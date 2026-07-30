@@ -1,0 +1,306 @@
+/* InitHistoryModal — full history of brain init runs */
+
+/* Summary card — live database knowledge stats */
+.summaryCard {
+    margin: 0 16px 12px;
+    padding: 12px 14px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+}
+
+.summaryTitle {
+    font-size: 11px;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 10px;
+}
+
+.summaryGrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.summaryItem {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: #fff;
+    border-radius: 6px;
+    border: 1px solid #f3f4f6;
+}
+
+.summaryIcon {
+    color: #9ca3af;
+    flex-shrink: 0;
+}
+
+.summaryItemContent {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.summaryValue {
+    font-size: 15px;
+    font-weight: 600;
+    color: #111827;
+    line-height: 1.2;
+}
+
+.summaryLabel {
+    font-size: 10px;
+    color: #9ca3af;
+    font-weight: 500;
+}
+
+.summaryFooter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid #f3f4f6;
+}
+
+.summaryTag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 999px;
+    font-size: 10px;
+    color: #6b7280;
+    font-weight: 500;
+}
+
+/* Run list */
+.runList {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+.runRow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 12px 16px;
+    border: none;
+    border-bottom: 1px solid #f3f4f6;
+    background: #fff;
+    cursor: pointer;
+    font-size: 13px;
+    color: #374151;
+    text-align: left;
+    transition: background 0.15s ease;
+}
+
+.runRow:hover {
+    background: #f9fafb;
+}
+
+.runRowActive {
+    composes: runRow;
+    background: #f9fafb;
+}
+
+.statusDot {
+    flex-shrink: 0;
+}
+
+.runDate {
+    flex: 1;
+    font-weight: 500;
+}
+
+.runDuration {
+    color: #9ca3af;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.chevron {
+    color: #9ca3af;
+    flex-shrink: 0;
+}
+
+/* Expanded detail section */
+.runDetail {
+    padding: 12px 16px 16px 42px;
+    background: #f9fafb;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.detailHeader {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.statusBadge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.statusCompleted {
+    composes: statusBadge;
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.statusFailed {
+    composes: statusBadge;
+    background: #fef2f2;
+    color: #dc2626;
+}
+
+.stageRow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.stageName {
+    flex: 1;
+}
+
+.stageNameActive {
+    composes: stageName;
+    color: #374151;
+}
+
+.stageNameMuted {
+    composes: stageName;
+    color: #9ca3af;
+}
+
+.stageTiming {
+    color: #9ca3af;
+    font-size: 11px;
+}
+
+.stageDescription {
+    margin-left: 22px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: #9ca3af;
+    margin-bottom: 2px;
+}
+
+.stageDetailsBox {
+    margin-left: 22px;
+    margin-top: 2px;
+    margin-bottom: 4px;
+    padding: 6px 10px;
+    background: #fff;
+    border-radius: 6px;
+    border: 1px solid #f3f4f6;
+}
+
+.detailRow {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    padding: 2px 0;
+    font-size: 11px;
+}
+
+.detailLabel {
+    color: #6b7280;
+    font-weight: 500;
+}
+
+.detailValue {
+    color: #374151;
+    text-align: right;
+    word-break: break-word;
+    max-width: 65%;
+    font-variant-numeric: tabular-nums;
+}
+
+.methodRow {
+    padding: 3px 0 1px;
+    font-size: 10px;
+    color: #9ca3af;
+    line-height: 1.4;
+    font-style: italic;
+    border-top: 1px solid #f3f4f6;
+    margin-top: 2px;
+}
+
+.errorBox {
+    margin-top: 4px;
+    padding: 8px 10px;
+    background: #fef2f2;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #dc2626;
+    line-height: 1.5;
+}
+
+.progressBar {
+    margin-top: 4px;
+    height: 4px;
+    background: #e5e7eb;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.progressFill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+.progressFillSuccess {
+    composes: progressFill;
+    background: #16a34a;
+}
+
+.progressFillError {
+    composes: progressFill;
+    background: #dc2626;
+}
+
+/* Empty state */
+.emptyState {
+    padding: 48px 24px;
+    text-align: center;
+    color: #9ca3af;
+    font-size: 14px;
+}
+
+.emptyIcon {
+    color: #d1d5db;
+    margin-bottom: 12px;
+}
+
+.loadingState {
+    padding: 48px 24px;
+    text-align: center;
+    color: #9ca3af;
+    font-size: 13px;
+}

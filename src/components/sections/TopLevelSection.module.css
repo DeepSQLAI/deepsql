@@ -1,0 +1,42 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  height: 100%;
+  padding: 24px;
+  overflow-y: auto;
+  background:
+    radial-gradient(circle at top right, rgba(229, 231, 235, 0.45), transparent 25%),
+    linear-gradient(180deg, #ffffff 0%, #fafafa 100%);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6b7280;
+}
+
+.title {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.06;
+  letter-spacing: -0.04em;
+  color: #111827;
+}
+
+.subtitle {
+  margin: 0;
+  max-width: 760px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: #6b7280;
+}

@@ -1,0 +1,160 @@
+.normalFormsPanel {
+    border: 1px solid var(--color-light-3);
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.5rem;
+    background: var(--color-light-1);
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.header:hover {
+    background: var(--color-light-2);
+}
+
+.header h4 {
+    margin: 0;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.toggle {
+    color: var(--color-light-6);
+    font-size: 0.75rem;
+}
+
+.content {
+    padding: 1.5rem;
+    background: var(--color-white);
+}
+
+.summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1rem;
+}
+
+.nfCard {
+    padding: 1rem;
+    border: 1px solid var(--color-light-3);
+    border-radius: 8px;
+    background: var(--color-light-1);
+}
+
+.nfHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+}
+
+.nfName {
+    font-weight: 700;
+    font-size: 1.125rem;
+    color: var(--color-text);
+}
+
+.status {
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+}
+
+.statusGreen {
+    background: var(--color-success-soft);
+    color: var(--color-success);
+}
+
+.statusYellow {
+    background: var(--color-warning-soft);
+    color: var(--color-warning);
+}
+
+.statusOrange {
+    background: var(--color-danger-soft);
+    color: var(--color-danger);
+}
+
+.statusGray {
+    background: var(--color-light-2);
+    color: var(--color-light-6);
+}
+
+.score {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.scoreBar {
+    flex: 1;
+    height: 8px;
+    background: var(--color-light-3);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.scoreProgress {
+    height: 100%;
+    background: linear-gradient(90deg, var(--color-primary) 0%, var(--color-primary-dark) 60%, var(--color-light-5) 100%);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.scoreValue {
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: var(--color-light-7);
+    min-width: 2rem;
+    text-align: right;
+}
+
+.issues,
+.suggestions {
+    margin-top: 0.75rem;
+}
+
+.issuesHeader,
+.suggestionsHeader {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-light-6);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.5rem;
+}
+
+.issues ul,
+.suggestions ul {
+    margin: 0;
+    padding-left: 1.25rem;
+    list-style: disc;
+}
+
+.issues li,
+.suggestions li {
+    font-size: 0.8125rem;
+    color: var(--color-light-7);
+    line-height: 1.5;
+    margin-bottom: 0.25rem;
+}
+
+.issues li {
+    color: var(--color-danger);
+}
+
+.suggestions li {
+    color: var(--color-success);
+}

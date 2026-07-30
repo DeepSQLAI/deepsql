@@ -1,0 +1,46 @@
+# DeepSQL Agent — terminal skin (subtle mono grey). Rebrands the TUI/CLI.
+# Ships in the profile distribution under <profile>/skins/, activated via
+# `display.skin: deepsql` in the profile's config.yaml. The DeepSQL wordmark +
+# tagline live in the (vendored) TUI source (banner.ts / branding.tsx); this skin
+# drives colors + branding strings.
+name: deepsql
+description: DeepSQL Agent — subtle mono
+
+colors:
+  # Prominent elements (wordmark, "What I can do" header, category labels, ✨ Try)
+  # use a mid-tone MAROON/garnet — a saturated mid-luminance color contrasts with
+  # BOTH light and dark terminal backgrounds (pure greys vanish on one of them).
+  # Body text is a warm neutral. Wordmark gradient = primary→accent→border.
+  banner_border: "#8E3B4A"   # deep maroon  — wordmark bottom rows + panel border
+  banner_title: "#B14A5C"    # garnet       — wordmark top rows + the section header
+  banner_accent: "#8E3B4A"
+  banner_dim: "#A89BA0"      # warm mid-grey — prompts / metadata (readable on both)
+  banner_text: "#D2C7CB"     # warm light-grey — descriptions
+  ui_accent: "#CC6B7D"       # rose-maroon  — wordmark mid rows + labels + ✨ Try
+  ui_label: "#CC6B7D"
+  ui_ok: "#3FA796"
+  ui_error: "#E5484D"
+  ui_warn: "#E6B15C"
+  prompt: "#DDD4D7"
+  input_rule: "#5A4348"
+  response_border: "#5A4348"
+  status_bar_bg: "#1A1113"
+  status_bar_text: "#D2C7CB"
+  status_bar_strong: "#E8DDE0"
+  status_bar_dim: "#A89BA0"
+  status_bar_good: "#3FA796"
+  status_bar_warn: "#E6B15C"
+  status_bar_bad: "#E5484D"
+  status_bar_critical: "#E5484D"
+  session_label: "#A89BA0"
+  session_border: "#8E3B4A"
+
+branding:
+  agent_name: "DeepSQL Agent"
+  welcome: "DeepSQL Agent — ask about your database, or /help for commands."
+  goodbye: "Bye."
+  response_label: " DeepSQL "
+  prompt_symbol: "❯"
+  help_header: "Commands"
+
+tool_prefix: "│"

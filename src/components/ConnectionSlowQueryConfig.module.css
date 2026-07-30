@@ -1,0 +1,49 @@
+/* Status badge button */
+.toggleButton {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--color-light-3);
+    border-radius: var(--radius-sm);
+    background: var(--color-white);
+    cursor: pointer;
+    font-size: var(--font-size-xs);
+    transition: all 0.2s;
+    color: var(--color-grey);
+    white-space: nowrap;
+}
+
+.toggleButton:hover {
+    background: var(--color-light-1);
+    border-color: var(--color-grey);
+    color: var(--color-black);
+}
+
+.statusDot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.statusDotOn {
+    background: #22c55e;
+}
+
+.statusDotOff {
+    background: var(--color-light-5);
+}
+
+.label {
+    font-size: var(--font-size-xs);
+    color: inherit;
+}
+
+.spinner {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}

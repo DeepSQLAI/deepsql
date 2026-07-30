@@ -1,0 +1,234 @@
+/* ── Overlay ─────────────────────────────────────────────────────────────── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 560px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #111;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.closeBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.closeBtn:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+/* ── Body ────────────────────────────────────────────────────────────────── */
+.body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  letter-spacing: 0.01em;
+}
+
+.required {
+  color: #ef4444;
+  margin-left: 2px;
+}
+
+.hint {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.input {
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  font-size: 13px;
+  font-family: var(--font-family-sans);
+  color: #111;
+  background: #fff;
+  outline: none;
+  transition: border-color 0.12s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.input:focus {
+  border-color: #111;
+}
+
+.input::placeholder {
+  color: #d1d5db;
+}
+
+.textarea {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  font-size: 13px;
+  font-family: var(--font-family-sans);
+  color: #111;
+  background: #fff;
+  outline: none;
+  transition: border-color 0.12s;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 100px;
+  line-height: 1.5;
+}
+
+.textarea:focus {
+  border-color: #111;
+}
+
+.textarea::placeholder {
+  color: #d1d5db;
+}
+
+.select {
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  font-size: 13px;
+  font-family: var(--font-family-sans);
+  color: #111;
+  background: #fff;
+  outline: none;
+  cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.12s;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 32px;
+}
+
+.select:focus {
+  border-color: #111;
+}
+
+.row {
+  display: flex;
+  gap: 14px;
+}
+
+.row .field {
+  flex: 1;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────────── */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 24px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.cancelBtn {
+  padding: 9px 18px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font-family-sans);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.cancelBtn:hover {
+  background: #f9fafb;
+}
+
+.saveBtn {
+  padding: 9px 20px;
+  border-radius: 8px;
+  border: none;
+  background: #000;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-family-sans);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.saveBtn:hover {
+  background: #222;
+}
+
+.saveBtn:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+}
+
+/* ── Schedule time row ────────────────────────────────────────────────────── */
+.scheduleTimeRow {
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height 0.2s ease;
+}
+
+.scheduleTimeRowVisible {
+  max-height: 80px;
+}

@@ -1,0 +1,161 @@
+.progressContainer {
+    padding: 1.25rem;
+    background: var(--color-white);
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+    color: var(--color-dark-grey);
+    border: 1px solid var(--color-light-3);
+}
+
+.progressHeader {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.statusIcon {
+    flex-shrink: 0;
+    padding: 0.45rem;
+    background: var(--color-light-2);
+    border-radius: 8px;
+    color: var(--color-dark-grey);
+}
+
+.statusText {
+    flex: 1;
+}
+
+.statusLabel {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 0.2rem;
+    color: var(--color-black);
+}
+
+.statusDetail {
+    font-size: 0.78rem;
+    color: var(--color-grey);
+}
+
+.progressBar {
+    height: 6px;
+    background: var(--color-light-3);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 0.6rem;
+}
+
+.progressFill {
+    height: 100%;
+    background: var(--color-dark-grey);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.progressStats {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.78rem;
+    margin-bottom: 0.6rem;
+    color: var(--color-grey);
+}
+
+.progressPercent {
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--color-dark-grey);
+}
+
+.progressTables {
+    color: var(--color-grey);
+}
+
+.currentTable {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem;
+    background: var(--color-light-2);
+    border-radius: 6px;
+    font-size: 0.78rem;
+    border: 1px solid var(--color-light-3);
+}
+
+.currentTableLabel {
+    color: var(--color-grey);
+}
+
+.currentTableName {
+    font-weight: 600;
+    font-family: 'SF Mono', Monaco, monospace;
+    color: var(--color-dark-grey);
+}
+
+.queueInfo {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem;
+    background: var(--color-light-2);
+    border-radius: 6px;
+    font-size: 0.78rem;
+    border: 1px solid var(--color-light-3);
+    color: var(--color-grey);
+}
+
+.spinner {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Status Badge Styles */
+.statusBadge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.statusRunning {
+    background: var(--color-primary);
+    color: white;
+}
+
+.statusPending {
+    background: var(--color-warning);
+    color: white;
+}
+
+.statusCompleted {
+    background: var(--color-success);
+    color: white;
+}
+
+.statusFailed {
+    background: var(--color-danger);
+    color: white;
+}
+
+.statusCancelled {
+    background: var(--color-grey);
+    color: white;
+}
+
+.statusRejected {
+    background: var(--color-grey);
+    color: white;
+}
+
+.badgePercent {
+    opacity: 0.9;
+    margin-left: 0.25rem;
+}

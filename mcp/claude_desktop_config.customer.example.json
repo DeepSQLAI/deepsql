@@ -1,0 +1,9 @@
+{
+  "_comment": "Manual Claude Desktop config example. Most users should run `deepsql mcp config --install --for claude-desktop` instead — that handles the OS-specific path, backup, and the DBA-consult skill in one shot. Use this template only if you need a custom layout (per-workspace, embedded token, etc.).",
+  "mcpServers": {
+    "deepsql": {
+      "command": "deepsql",
+      "args": ["mcp"]
+    }
+  }
+}

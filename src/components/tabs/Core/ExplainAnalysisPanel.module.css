@@ -1,0 +1,334 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── optimization-scope banner ─────────────────────────────────── */
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.banner_ok {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+.banner_warn {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+}
+.bannerBody {
+  flex: 1;
+  min-width: 0;
+}
+.bannerTitle {
+  font-weight: 600;
+}
+.bannerStat {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  flex-shrink: 0;
+  padding-left: 12px;
+  border-left: 1px solid currentColor;
+  opacity: 0.95;
+}
+.bannerStatValue {
+  font-size: 16px;
+  font-weight: 700;
+}
+.bannerStatLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.8;
+}
+.bannerList {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.bannerNote {
+  margin-top: 6px;
+  font-size: 11.5px;
+  opacity: 0.85;
+}
+
+/* ── tabs ──────────────────────────────────────────────────────── */
+.tabBar {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 2px;
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: none;
+  background: transparent;
+  border-radius: 7px 7px 0 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #6b7280;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -3px;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.tab:hover {
+  color: #111827;
+}
+.tabActive {
+  color: #111827;
+  font-weight: 600;
+  border-bottom-color: #111827;
+}
+.tabCount {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #6b7280;
+  background: #f3f4f6;
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.tabBody {
+  padding: 2px 0;
+}
+
+/* ── narrative (Summary) ───────────────────────────────────────── */
+.narrative {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #374151;
+}
+.narrative p {
+  margin: 0 0 2px;
+}
+.narrative strong {
+  color: #111827;
+}
+.narrativeGap {
+  height: 8px;
+}
+
+/* ── category cards ────────────────────────────────────────────── */
+.category {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.categoryHint {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 2px;
+}
+.card {
+  border: 1px solid #eceef1;
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: #fafbfc;
+  padding: 10px 12px;
+}
+.card_good {
+  border-left-color: #16a34a;
+}
+.card_warn {
+  border-left-color: #d97706;
+}
+.card_bad {
+  border-left-color: #dc2626;
+}
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.cardTitle {
+  font-family: var(--font-family-mono, ui-monospace, Menlo, monospace);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #111827;
+  word-break: break-word;
+}
+.cardDetail {
+  margin-top: 5px;
+  font-family: var(--font-family-mono, ui-monospace, Menlo, monospace);
+  font-size: 12px;
+  color: #1f2937;
+  background: #f3f4f6;
+  border-radius: 5px;
+  padding: 4px 8px;
+  word-break: break-word;
+}
+.cardMetrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 7px;
+  font-size: 11.5px;
+  color: #6b7280;
+}
+.cardMetrics b {
+  color: #111827;
+  font-weight: 600;
+}
+.cardText {
+  margin-top: 7px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #4b5563;
+}
+
+/* ── verdict chips ─────────────────────────────────────────────── */
+.chip {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 5px;
+  padding: 2px 7px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.chip_good {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+.chip_warn {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+.chip_bad {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+/* ── metrics tab ───────────────────────────────────────────────── */
+.metricsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.metricBox {
+  border: 1px solid #e5e7eb;
+  border-radius: 9px;
+  background: #fff;
+  padding: 11px 13px;
+}
+.metricValue {
+  font-size: 15px;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.2;
+}
+.metricLabel {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── tree extras ───────────────────────────────────────────────── */
+.treeIndex {
+  color: #4338ca;
+  font-size: 12px;
+}
+.treeCond {
+  color: #6b7280;
+  font-size: 11.5px;
+  font-family: var(--font-family-mono, ui-monospace, Menlo, monospace);
+}
+
+.muted {
+  font-size: 12.5px;
+  color: #9ca3af;
+  padding: 8px 0;
+}
+
+/* ── optimize panel: diff + code blocks ────────────────────────── */
+.diffGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .diffGrid {
+    grid-template-columns: 1fr;
+  }
+}
+.ddlBlock {
+  border: 1px solid #e5e7eb;
+  border-radius: 7px;
+  overflow: hidden;
+  background: #fff;
+  min-width: 0;
+}
+.ddlHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #f9fafb;
+  border-bottom: 1px solid #f1f3f5;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+}
+.ddlPre {
+  margin: 0;
+  padding: 11px 12px;
+  font-family: var(--font-family-mono, ui-monospace, Menlo, monospace);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #111827;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+.copyBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 5px;
+  background: #fff;
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.copyBtn:hover {
+  color: #111827;
+  border-color: #d1d5db;
+}
+.optSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.optHeading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+}

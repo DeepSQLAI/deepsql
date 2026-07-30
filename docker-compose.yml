@@ -1,0 +1,116 @@
+# ── DeepSQL Self-Hosted Stack ─────────────────────────────────────────────────
+# Customer quick start:
+#   1. cp .env.example .env
+#   2. fill in required values in .env
+#   3. ./scripts/self-host/install.sh
+#
+# DeepSQL provides the frontend/backend image references in .env.
+#
+# Recommended self-host mode:
+#   - Keep Azure OpenAI pointed at DeepSQL-managed credentials for usage metering
+#   - Use pgvector locally for RAG storage:
+#       VECTOR_STORE_TYPE=pgvector
+#       AZURE_SEARCH_ENABLED=false
+
+services:
+
+  # ── Vault Database (PostgreSQL + pgvector) ──────────────────────────────────
+  # pgvector/pgvector image includes the pgvector extension pre-installed.
+  postgres:
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       dba_agent
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    command: >
+      postgres
+        -c shared_preload_libraries=pg_stat_statements
+        -c pg_stat_statements.track=all
+        -c max_connections=200
+    ports:
+      - "${DEEPSQL_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - dba-agent-postgres:/var/lib/postgresql
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d dba_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Cache (Valkey / Redis-compatible) ────────────────────────────────────────
+  valkey:
+    image: valkey/valkey:9.0.3
+    restart: unless-stopped
+    ports:
+      - "${DEEPSQL_VALKEY_PORT:-6379}:6379"
+    volumes:
+      - dba-agent-valkey:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── Backend (Spring Boot) ─────────────────────────────────────────────────────
+  backend:
+    image: ${DEEPSQL_BACKEND_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    env_file:
+      - ${DEEPSQL_RUNTIME_ENV_FILE:-.env}
+    environment:
+      # Vault DB — points to the postgres service above
+      DB_URL:       jdbc:postgresql://postgres:5432/dba_agent?sslmode=disable
+      DB_USERNAME:  postgres
+      DB_PASSWORD:  ${DB_PASSWORD:-postgres}
+
+      # Cache — points to the valkey service above
+      spring.data.redis.host: valkey
+      spring.data.redis.port: "6379"
+      spring.data.redis.password: ${DEEPSQL_VALKEY_PASSWORD:-}
+
+      # Encryption key(s) for the credential vault — required, no baked-in default.
+      # Set ENCRYPTION_KEYS (and ENCRYPTION_KEY_ID if it holds more than one key) in
+      # .env; see CLAUDE.md's "Environment Variables" section for the format and a
+      # generation command.
+      ENCRYPTION_KEYS: ${ENCRYPTION_KEYS:-}
+      ENCRYPTION_KEY_ID: ${ENCRYPTION_KEY_ID:-}
+
+      # CORS — allow the frontend service (and optional custom domain)
+      cors.allowed.origins: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+
+      # Self-host should default to the hardened production profile
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      # Automatically set by install.sh for pgvector self-host mode
+      SPRING_AUTOCONFIGURE_EXCLUDE: ${SPRING_AUTOCONFIGURE_EXCLUDE:-}
+    ports:
+      - "${DEEPSQL_BACKEND_PORT:-8080}:8080"
+    volumes:
+      - dba-agent-logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8080/api/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── Frontend (React + nginx) ──────────────────────────────────────────────────
+  frontend:
+    image: ${DEEPSQL_FRONTEND_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${DEEPSQL_FRONTEND_PORT:-3000}:80"
+
+volumes:
+  dba-agent-postgres:
+  dba-agent-valkey:
+  dba-agent-logs:

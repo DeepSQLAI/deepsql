@@ -1,0 +1,341 @@
+.inputWrapper {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs, 4px);
+    margin-bottom: var(--spacing-md, 16px);
+}
+
+.inputLabel {
+    font-size: var(--font-size-sm, 14px);
+    font-weight: 500;
+    color: var(--color-dark-grey, #333);
+    margin-bottom: var(--spacing-xs, 4px);
+}
+
+.input {
+    width: 100%;
+    padding: var(--spacing-sm, 8px) var(--spacing-md, 12px);
+    border: 1px solid var(--color-light-3, #ddd);
+    border-radius: var(--radius-md, 6px);
+    font-size: var(--font-size-base, 14px);
+    font-family: inherit;
+    transition: all 0.2s;
+    background-color: var(--color-white, #fff);
+    color: var(--color-black, #000);
+}
+
+.input:focus {
+    outline: none;
+    border-color: var(--color-primary, var(--color-primary));
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12);
+}
+
+.input::placeholder {
+    color: var(--color-grey, #999);
+}
+
+/* Date Picker Styles */
+.datePickerWrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.dateInput {
+    flex: 1;
+}
+
+.dateIcon {
+    position: absolute;
+    right: var(--spacing-md, 12px);
+    color: var(--color-grey, #999);
+    pointer-events: none;
+}
+
+.datePickerWrapper:hover .dateIcon {
+    color: var(--color-primary, var(--color-primary));
+}
+
+/* Date Range Picker Styles */
+.dateRangeWrapper {
+    display: flex;
+    gap: var(--spacing-md, 12px);
+    align-items: flex-end;
+}
+
+.dateRangeInput {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs, 4px);
+}
+
+.dateRangeLabel {
+    font-size: var(--font-size-xs, 12px);
+    font-weight: 500;
+    color: var(--color-dark-grey, #666);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Select/Dropdown Styles */
+.selectWrapper {
+    position: relative;
+    width: 100%;
+}
+
+.selectInput {
+    width: 100%;
+    padding: var(--spacing-sm, 8px) var(--spacing-md, 12px);
+    border: 1px solid var(--color-light-3, #ddd);
+    border-radius: var(--radius-md, 6px);
+    font-size: var(--font-size-base, 14px);
+    background-color: var(--color-white, #fff);
+    color: var(--color-black, #000);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.2s;
+}
+
+.selectInput:hover {
+    border-color: var(--color-primary, var(--color-primary));
+}
+
+.selectValue {
+    flex: 1;
+    color: var(--color-black, #000);
+}
+
+.selectValue:empty::before {
+    content: attr(data-placeholder);
+    color: var(--color-grey, #999);
+}
+
+.selectIcon {
+    color: var(--color-grey, #999);
+    transition: transform 0.2s;
+}
+
+.selectWrapper:has(.selectDropdown) .selectIcon {
+    transform: rotate(180deg);
+}
+
+.selectOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 998;
+}
+
+.selectDropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background-color: var(--color-white, #fff);
+    border: 1px solid var(--color-light-3, #ddd);
+    border-radius: var(--radius-md, 6px);
+    box-shadow: var(--shadow-lg, 0 4px 6px rgba(0, 0, 0, 0.1));
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 999;
+}
+
+.selectOption {
+    padding: var(--spacing-sm, 8px) var(--spacing-md, 12px);
+    cursor: pointer;
+    transition: background-color 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.selectOption:hover {
+    background-color: var(--color-light-2, var(--color-light-2));
+}
+
+.selectOptionSelected {
+    background-color: var(--color-primary-light, var(--color-primary-light));
+    color: var(--color-primary, var(--color-primary));
+    font-weight: 500;
+}
+
+.checkIcon {
+    color: var(--color-primary, var(--color-primary));
+}
+
+/* Checkbox Styles */
+.checkboxLabel {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm, 8px);
+    cursor: pointer;
+    font-size: var(--font-size-base, 14px);
+    color: var(--color-dark-grey, #333);
+}
+
+.checkbox {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--color-primary, var(--color-primary));
+}
+
+/* Radio Styles */
+.radioGroup {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm, 8px);
+}
+
+.radioLabel {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm, 8px);
+    cursor: pointer;
+    font-size: var(--font-size-base, 14px);
+    color: var(--color-dark-grey, #333);
+}
+
+.radio {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--color-primary, var(--color-primary));
+}
+
+/* Button Styles */
+.buttonInput {
+    width: 100%;
+    padding: var(--spacing-sm, 8px) var(--spacing-md, 12px);
+    background-color: var(--color-primary, var(--color-primary));
+    color: white;
+    border: none;
+    border-radius: var(--radius-md, 6px);
+    font-size: var(--font-size-base, 14px);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.buttonInput:hover {
+    background-color: var(--color-primary-dark, #5568d3);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md, 0 2px 4px rgba(0, 0, 0, 0.1));
+}
+
+.buttonInput:active {
+    transform: translateY(0);
+}
+
+/* Textarea Styles */
+.textarea {
+    width: 100%;
+    padding: var(--spacing-sm, 8px) var(--spacing-md, 12px);
+    border: 1px solid var(--color-light-3, #ddd);
+    border-radius: var(--radius-md, 6px);
+    font-size: var(--font-size-base, 14px);
+    font-family: inherit;
+    resize: vertical;
+    min-height: 80px;
+    transition: all 0.2s;
+    background-color: var(--color-white, #fff);
+    color: var(--color-black, #000);
+}
+
+.textarea:focus {
+    outline: none;
+    border-color: var(--color-primary, var(--color-primary));
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12);
+}
+
+.textarea::placeholder {
+    color: var(--color-grey, #999);
+}
+
+/* Switch/Toggle Styles */
+.switchLabel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    font-size: var(--font-size-base, 14px);
+    color: var(--color-dark-grey, #333);
+}
+
+.switchWrapper {
+    position: relative;
+    display: inline-block;
+}
+
+.switch {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.switchSlider {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    background-color: var(--color-light-3, #ccc);
+    border-radius: 24px;
+    transition: background-color 0.3s;
+    cursor: pointer;
+}
+
+.switchSlider::before {
+    content: "";
+    position: absolute;
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    border-radius: 50%;
+    transition: transform 0.3s;
+}
+
+.switch:checked + .switchSlider {
+    background-color: var(--color-primary, var(--color-primary));
+}
+
+.switch:checked + .switchSlider::before {
+    transform: translateX(20px);
+}
+
+/* Input Container for Dashboard Layout */
+.inputsContainer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-md, 16px);
+    margin-bottom: var(--spacing-lg, 24px);
+    padding: var(--spacing-md, 16px);
+    background-color: var(--color-light-1, #fafafa);
+    border-radius: var(--radius-lg, 8px);
+    border: 1px solid var(--color-light-3, #ddd);
+}
+
+.inputsContainer .inputWrapper {
+    flex: 1;
+    min-width: 200px;
+    margin-bottom: 0;
+}
+
+.inputsContainer .inputWrapper.fullWidth {
+    flex: 1 1 100%;
+}
+
+.inputsContainer .inputWrapper.halfWidth {
+    flex: 1 1 calc(50% - var(--spacing-md, 16px));
+}
+
+.inputsContainer .inputWrapper.thirdWidth {
+    flex: 1 1 calc(33.333% - var(--spacing-md, 16px));
+}
+

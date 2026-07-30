@@ -1,0 +1,90 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 16px;
+  padding: 48px;
+  text-align: center;
+}
+
+.iconWrap {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text);
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.subtitle {
+  font-size: 14px;
+  color: var(--color-light-6);
+  max-width: 380px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.primaryBtn {
+  margin-top: 8px;
+  padding: 11px 22px;
+  border-radius: 10px;
+  border: none;
+  background: #000;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font-family-sans);
+  cursor: pointer;
+  transition: background 0.12s, transform 0.1s;
+}
+
+.primaryBtn:hover {
+  background: #222;
+  transform: translateY(-1px);
+}
+
+.secondaryBtn {
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font-family-sans);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.secondaryBtn:hover {
+  background: #f9fafb;
+}
+
+.pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.pill {
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: #f3f4f6;
+  font-size: 12px;
+  color: var(--color-light-6);
+  font-weight: 500;
+}

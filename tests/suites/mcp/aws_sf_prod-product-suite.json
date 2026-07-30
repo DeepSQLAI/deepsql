@@ -1,0 +1,204 @@
+{
+  "suiteName": "aws_sf_prod Product Suite",
+  "description": "Product-building, product-monitoring, and business-intelligence prompts for the aws_sf_prod workload. Assumes a MySQL hospitality/commerce schema centered on HOTEL, USER_BOOKINGS, PAYMENTS, ACCOUNT_LEDGER, GUEST_MAPPING, and reporting aggregates.",
+  "connectionProfile": "aws_sf_prod",
+  "connectionDisplayName": "aws_sf_prod",
+  "resultsOutputPath": "output/test-reports/mcp-comparison-test-results.json",
+  "testCases": [
+    {
+      "id": "PD-1",
+      "dimension": "Product Building",
+      "brain": {
+        "question": "Which tables have implicit relationships not captured by foreign keys?"
+      },
+      "direct": {
+        "label": "Declared FK relationships only",
+        "sql": "SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL ORDER BY TABLE_NAME LIMIT 20"
+      },
+      "expectBrainRicher": true,
+      "reason": "Brain infers join patterns from the aws_sf_prod workload; direct SQL only exposes declared foreign keys."
+    },
+    {
+      "id": "PD-2",
+      "dimension": "Product Building",
+      "brain": {
+        "question": "If I add a new LOYALTY_POINTS table joining on hotel_id and booking_id, what is the performance impact?"
+      },
+      "direct": {
+        "label": "Column stats for hotel_id and booking_id",
+        "sql": "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME IN ('hotel_id', 'booking_id') ORDER BY TABLE_NAME LIMIT 20"
+      },
+      "expectBrainRicher": true,
+      "reason": "Brain can reason about join frequency, cardinality, and index coverage from workload context; direct SQL can only list matching columns."
+    },
+    {
+      "id": "PD-3",
+      "dimension": "Product Building",
+      "brain": {
+        "question": "Which queries will break or slow down if I split USER_BOOKINGS into ACTIVE_BOOKINGS and ARCHIVED_BOOKINGS?"
+      },
+      "direct": {
+        "label": "Queries referencing USER_BOOKINGS in perf_schema",
+        "sql": "SELECT DIGEST_TEXT, COUNT_STAR, AVG_TIMER_WAIT/1000000000 AS avg_ms FROM performance_schema.events_statements_summary_by_digest WHERE DIGEST_TEXT LIKE '%USER_BOOKINGS%' ORDER BY COUNT_STAR DESC LIMIT 10"
+      },
+      "expectBrainRicher": true,
+      "reason": "Brain can connect workload patterns, downstream joins, and growth behavior; performance_schema digests are only a partial raw signal."
+    },
+    {
+      "id": "PD-4",
+      "dimension": "Product Building",
+      "brain": {
+        "question": "What columns are used in WHERE clauses but have no indexes?"
+      },
+      "direct": {
+        "label": "All indexed columns",
+        "sql": "SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() ORDER BY TABLE_NAME, SEQ_IN_INDEX LIMIT 20"
+      },
+      "expectBrainRicher": true,
+      "reason": "Brain can cross-reference slow-query predicates with actual index coverage; direct SQL only shows the indexes that exist."
+    },
+    {
+      "id": "PD-5",
+      "dimension": "Product Building",
+      "brain": {
+        "question": "Suggest the optimal schema for a new reporting feature that needs hotel revenue by channel by day"
+      },
+      "direct": {
+        "label": "Revenue-related tables and columns",
+        "sql": "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND (COLUMN_NAME LIKE '%revenue%' OR COLUMN_NAME LIKE '%amount%' OR COLUMN_NAME LIKE '%channel%' OR COLUMN_NAME LIKE '%payment%') ORDER BY TABLE_NAME LIMIT 20"
+      },
+      "expectBrainRicher": true,
+      "reason": "Brain can synthesize a deployable reporting schema from the domain model and observed joins; direct SQL only returns raw metadata."
+    },
+    {
+      "id": "PM-1",
+      "dimension": "Product Monitoring",
+      "brain": {
+        "question": "Has query performance degraded in the last 7 days? Show me the trend."
+      },
+      "direct": {
+        "label": "Current cumulative perf_schema stats",
+        "sql": "SELECT DIGEST_TEXT, COUNT_STAR, AVG_TIMER_WAIT/1000000000 AS avg_ms, FIRST_SEEN, LAST_SEEN FROM performance_schema.events_statements_summary_by_digest ORDER BY AVG_TIMER_WAIT DESC LIMIT 5"
+      },
+      "expectBrainRicher": true,
+      "reason": "Brain can answer with historical slow-query trends; direct SQL only sees cumulative performance_schema counters."
+    },
+    {
+      "id": "PM-2",
+      "dimension": "Product Monitoring",
+      "brain": {
+        "question": "Which tables grew the most this week and will hit storage limits within 30 days?"
+      },
+      "direct": {
+        "label": "Current table sizes (point-in-time)",
+        "sql": "SELECT TABLE_NAME, TABLE_ROWS, ROUND(DATA_LENGTH/1024/1024, 2) AS data_mb, ROUND(INDEX_LENGTH/1024/1024, 2) AS index_mb FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' ORDER BY DATA_LENGTH DESC LIMIT 10"
+      },
+      "expectBrainRicher": true,
+      "reason": "Brain can project from growth history; direct SQL provides only a single storage snapshot."
+    },
+    {
+      "id": "PM-3",
+      "dimension": "Product Monitoring",
+      "brain": {
+        "question": "Are there any new slow queries that appeared after last Tuesday's deployment?"
+      },
+      "direct": {
+        "label": "Recently seen queries in perf_schema",
+        "sql": "SELECT DIGEST_TEXT, COUNT_STAR, FIRST_SEEN, LAST_SEEN, AVG_TIMER_WAIT/1000000000 AS avg_ms FROM performance_schema.events_statements_summary_by_digest WHERE FIRST_SEEN >= DATE_SUB(NOW(), INTERVAL 7 DAY) ORDER BY AVG_TIMER_WAIT DESC LIMIT 10"
+      },
+      "expectBrainRicher": true,
+      "reason": "Brain can compare post-deployment behavior using ingested history; direct SQL has no deployment context."
+    },
+    {
+      "id": "PM-4",
+      "dimension": "Product Monitoring",
+      "brain": {
+        "question": "Rank all index recommendations by ROI — which 3 indexes will improve the most queries?"
+      },
+      "direct": {
+        "label": "Existing non-primary indexes",
+        "sql": "SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND INDEX_NAME != 'PRIMARY' ORDER BY TABLE_NAME LIMIT 20"
+      },
+      "expectBrainRicher": true,
+      "reason": "Brain can rank by workload impact; direct SQL cannot score indexes against query cost and frequency."
+    },
+    {
+      "id": "PM-5",
+      "dimension": "Product Monitoring",
+      "brain": {
+        "question": "Show me the health score trend for this database — is it getting better or worse?"
+      },
+      "direct": {
+        "label": "Current global status variables",
+        "sql": "SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_connected', 'Threads_running', 'Slow_queries', 'Questions', 'Uptime')"
+      },
+      "expectBrainRicher": true,
+      "reason": "Brain has a time-based health model; direct SQL surfaces only isolated runtime counters."
+    },
+    {
+      "id": "BI-1",
+      "dimension": "Business Intelligence",
+      "brain": {
+        "question": "What are the most important entities in this database and how do they relate?"
+      },
+      "direct": {
+        "label": "Tables with row counts",
+        "sql": "SELECT TABLE_NAME, TABLE_ROWS, TABLE_COMMENT FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_ROWS DESC LIMIT 15"
+      },
+      "expectBrainRicher": true,
+      "reason": "Brain can reconstruct the business entity graph for aws_sf_prod; direct SQL can only list large tables."
+    },
+    {
+      "id": "BI-2",
+      "dimension": "Business Intelligence",
+      "brain": {
+        "question": "A BI analyst needs hotel revenue data — what is the optimal query path from bookings to payments to hotels?"
+      },
+      "direct": {
+        "label": "FK paths between booking/payment/hotel tables",
+        "sql": "SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL AND (TABLE_NAME LIKE '%BOOKING%' OR TABLE_NAME LIKE '%PAYMENT%' OR TABLE_NAME LIKE '%HOTEL%' OR REFERENCED_TABLE_NAME LIKE '%BOOKING%' OR REFERENCED_TABLE_NAME LIKE '%PAYMENT%' OR REFERENCED_TABLE_NAME LIKE '%HOTEL%') ORDER BY TABLE_NAME LIMIT 20"
+      },
+      "expectBrainRicher": true,
+      "reason": "Brain knows the high-confidence join path from workload and can produce workable revenue joins; direct SQL only exposes declared FK rows."
+    },
+    {
+      "id": "BI-3",
+      "dimension": "Business Intelligence",
+      "brain": {
+        "question": "Which tables contain PII or sensitive customer data based on column patterns and query usage?"
+      },
+      "direct": {
+        "label": "Columns matching PII patterns",
+        "sql": "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND (COLUMN_NAME LIKE '%email%' OR COLUMN_NAME LIKE '%phone%' OR COLUMN_NAME LIKE '%password%' OR COLUMN_NAME LIKE '%ssn%' OR COLUMN_NAME LIKE '%credit%' OR COLUMN_NAME LIKE '%address%') ORDER BY TABLE_NAME LIMIT 20"
+      },
+      "expectBrainRicher": true,
+      "reason": "Brain can combine sensitivity classification with usage patterns; direct SQL can only pattern-match column names."
+    },
+    {
+      "id": "BI-4",
+      "dimension": "Business Intelligence",
+      "brain": {
+        "question": "What data is available to build a dashboard showing booking conversion funnel by channel?"
+      },
+      "direct": {
+        "label": "Booking and channel related tables",
+        "sql": "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND (TABLE_NAME LIKE '%BOOKING%' OR TABLE_NAME LIKE '%OTA%' OR TABLE_NAME LIKE '%CHANNEL%' OR TABLE_NAME LIKE '%CONVERSION%') ORDER BY TABLE_NAME, ORDINAL_POSITION LIMIT 30"
+      },
+      "expectBrainRicher": true,
+      "reason": "Brain can map the funnel across entities and recommend the right grain; direct SQL only returns flat column listings."
+    },
+    {
+      "id": "BI-5",
+      "dimension": "Business Intelligence",
+      "brain": {
+        "question": "Which existing reports or queries already calculate hotel occupancy rate that we can reuse?"
+      },
+      "direct": {
+        "label": "Room and occupancy related tables",
+        "sql": "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND (TABLE_NAME LIKE '%ROOM%' OR TABLE_NAME LIKE '%AVAIL%' OR TABLE_NAME LIKE '%OCCUPAN%') ORDER BY TABLE_NAME, ORDINAL_POSITION LIMIT 20"
+      },
+      "expectBrainRicher": true,
+      "reason": "Brain can search reusable occupancy logic from ingested metadata and query inventory; direct SQL has no query-history view."
+    }
+  ]
+}

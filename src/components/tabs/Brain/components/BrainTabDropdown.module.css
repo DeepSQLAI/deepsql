@@ -1,0 +1,145 @@
+/* ChatGPT-style dropdown: white panel, no grey backgrounds, minimal trigger */
+.dropdownContainer {
+    position: relative;
+}
+
+.dropdownButton {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    min-height: auto;
+    background: transparent !important;
+    background-color: transparent !important;
+    color: #374151 !important;
+    border: none !important;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
+    box-shadow: none !important;
+}
+
+.dropdownButton:hover {
+    background: #F3F4F6 !important;
+    background-color: #F3F4F6 !important;
+    color: #111827 !important;
+}
+
+.dropdownButton:focus,
+.dropdownButton:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+    border: none !important;
+}
+
+.dropdownLabel {
+    white-space: nowrap;
+}
+
+.dropdownChevron {
+    transition: transform 0.15s ease;
+    color: #9CA3AF;
+}
+
+.dropdownButton:hover .dropdownChevron {
+    color: #6B7280;
+}
+
+.dropdownContainer.open .dropdownButton {
+    background: #F3F4F6 !important;
+    background-color: #F3F4F6 !important;
+    color: #111827 !important;
+}
+
+.dropdownContainer.open .dropdownChevron {
+    transform: rotate(180deg);
+}
+
+/* Panel: right-aligned with trigger so it doesn't go off right edge of viewport */
+.dropdownMenu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    left: auto;
+    min-width: 160px;
+    max-width: min(220px, calc(100vw - 32px));
+    background: #FFFFFF !important;
+    border: 1px solid #E5E7EB;
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    z-index: 300;
+    overflow-x: hidden;
+    overflow-y: auto;
+    max-height: 60vh;
+    box-sizing: border-box;
+}
+
+/* Items: left-aligned, transparent by default, light grey only on hover */
+.dropdownItem {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    padding: 10px 14px;
+    min-height: auto;
+    background: transparent !important;
+    background-color: transparent !important;
+    border: none !important;
+    color: #111827 !important;
+    font-size: 13px;
+    font-weight: 400;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+    box-shadow: none !important;
+    border-radius: 0;
+    box-sizing: border-box;
+}
+
+.dropdownItem span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dropdownItem:hover {
+    background: #F9FAFB !important;
+    background-color: #F9FAFB !important;
+    color: #111827 !important;
+}
+
+.dropdownItem:focus,
+.dropdownItem:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+.dropdownItemActive {
+    background: transparent !important;
+    background-color: transparent !important;
+    font-weight: 500;
+    color: #111827 !important;
+}
+
+.dropdownItemActive:hover {
+    background: #F3F4F6 !important;
+    background-color: #F3F4F6 !important;
+}
+
+/* Icon color in items - dark so they're visible on white */
+.dropdownItem svg,
+.dropdownItemActive svg {
+    color: #6B7280;
+    flex-shrink: 0;
+}
+
+.dropdownItem:hover svg,
+.dropdownItemActive:hover svg {
+    color: #374151;
+}

@@ -1,0 +1,54 @@
+/* DeepSQL DBA — Agent WebUI skin
+ * Minimal black/white/grey, Inter-first, flat surfaces (no shadows).
+ * Matches the DBA Agent design language. Light + dark variants.
+ * Install: append this file to the webui's static/style.css and register
+ * the skin in static/boot.js `_SKINS` (see hermes/webui/README.md).
+ */
+
+:root[data-skin="dba"]{
+  color-scheme:light;
+  --bg:#FFFFFF;--sidebar:#FAFAFA;--surface:#FFFFFF;--surface-subtle:#F6F6F6;--surface-subtle-hover:#EFEFEF;
+  --border:#E5E5E5;--border2:#D4D4D4;--border-subtle:#ECECEC;--border-muted:#DCDCDC;
+  --text:#1A1A1A;--strong:#000000;--muted:#6B6B6B;--em:#444444;
+  --accent:#111111;--accent-hover:#000000;--accent-bg:rgba(0,0,0,0.06);--accent-bg-strong:rgba(0,0,0,0.12);--accent-text:#111111;
+  --blue:#444444;--gold:#111111;--focus-ring:rgba(0,0,0,0.20);--focus-glow:rgba(0,0,0,0.05);
+  --input-bg:#FFFFFF;--hover-bg:rgba(0,0,0,0.04);--code-bg:#F4F4F4;--code-inline-bg:rgba(0,0,0,0.05);--code-text:#1A1A1A;--pre-text:#1A1A1A;
+  --topbar-bg:rgba(255,255,255,0.95);--main-bg:#FFFFFF;
+  --error:#C8443B;--success:#0F8F70;--warning:#9A6B12;--info:#5A5A5A;
+  --user-bubble-bg:#F2F2F2;--user-bubble-border:#E2E2E2;--user-bubble-text:#1A1A1A;--user-bubble-placeholder:#6B6B6B;
+  --user-selection-bg:rgba(0,0,0,0.14);--user-selection-text:#000000;
+  --font-ui:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --font-mono:ui-monospace,"SFMono-Regular","SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  font-family:var(--font-ui);
+}
+:root.dark[data-skin="dba"]{
+  color-scheme:dark;
+  --bg:#0E0E0E;--sidebar:#161616;--surface:#131313;--surface-subtle:#1A1A1A;--surface-subtle-hover:#222222;
+  --border:#2A2A2A;--border2:#3A3A3A;--border-subtle:#202020;--border-muted:#303030;
+  --text:#ECECEC;--strong:#FFFFFF;--muted:#9A9A9A;--em:#CFCFCF;
+  --accent:#EDEDED;--accent-hover:#FFFFFF;--accent-bg:rgba(255,255,255,0.07);--accent-bg-strong:rgba(255,255,255,0.13);--accent-text:#EDEDED;
+  --blue:#C4C4C4;--gold:#EDEDED;--focus-ring:rgba(255,255,255,0.22);--focus-glow:rgba(255,255,255,0.07);
+  --input-bg:#161616;--hover-bg:rgba(255,255,255,0.05);--code-bg:#0B0B0B;--code-inline-bg:rgba(255,255,255,0.07);--code-text:#F2F2F2;--pre-text:#ECECEC;
+  --topbar-bg:rgba(14,14,14,0.93);--main-bg:#0E0E0E;
+  --error:#FF6B6B;--success:#10A37F;--warning:#E6B15C;--info:#C4C4C4;
+  --user-bubble-bg:#1F1F1F;--user-bubble-border:#333333;--user-bubble-text:#F2F2F2;--user-bubble-placeholder:#9A9A9A;
+  --user-selection-bg:rgba(255,255,255,0.18);--user-selection-text:#FFFFFF;
+}
+
+/* Flat, distraction-free chrome (mirrors the graphite structural pass) */
+:root[data-skin="dba"],
+:root[data-skin="dba"] body{font-family:var(--font-ui)!important;font-weight:430;letter-spacing:0;background:var(--bg);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility;}
+:root[data-skin="dba"] .app-titlebar,
+:root[data-skin="dba"] .rail,
+:root[data-skin="dba"] .sidebar,
+:root[data-skin="dba"] .rightpanel,
+:root[data-skin="dba"] .topbar,
+:root[data-skin="dba"] .composer-wrap{background:var(--sidebar)!important;border-color:var(--border)!important;box-shadow:none!important;}
+:root[data-skin="dba"] .main,
+:root[data-skin="dba"] .chat,
+:root[data-skin="dba"] .panel-view{background:var(--bg)!important;}
+:root[data-skin="dba"] .app-titlebar-title,
+:root[data-skin="dba"] .topbar-title,
+:root[data-skin="dba"] .settings-section-title{letter-spacing:0!important;font-weight:600;}
+:root[data-skin="dba"] .session-item{border-radius:8px;}
+:root[data-skin="dba"] .session-item.active{background:var(--surface-subtle-hover)!important;border:1px solid var(--border)!important;color:var(--text)!important;}

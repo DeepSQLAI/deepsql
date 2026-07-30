@@ -1,0 +1,133 @@
+.bulkActions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    background: var(--color-primary-soft);
+    border: 1px solid var(--color-primary-light);
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.info {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-primary-dark);
+}
+
+.actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.actionButton {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--color-primary);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.actionButton:hover:not(:disabled) {
+    background: var(--color-primary-dark);
+}
+
+.actionButton:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.clearButton {
+    padding: 0.5rem 1rem;
+    background: transparent;
+    color: var(--color-dark-grey);
+    border: 1px solid var(--color-light-4);
+    border-radius: 6px;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.clearButton:hover:not(:disabled) {
+    background: var(--color-light-2);
+    border-color: var(--color-grey);
+}
+
+.spinner {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Quick Actions */
+.quickActions {
+    padding: 1.5rem;
+    background: var(--color-light-2);
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+}
+
+.quickActions h4 {
+    margin: 0 0 1rem 0;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-dark-grey);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.actionGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem;
+}
+
+.quickActionButton {
+    padding: 1rem;
+    background: white;
+    border: 1px solid var(--color-light-3);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.quickActionButton:hover:not(:disabled) {
+    border-color: var(--color-primary);
+    box-shadow: 0 2px 8px rgba(31, 111, 255, 0.12);
+}
+
+.quickActionButton:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.quickActionContent {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1;
+}
+
+.quickActionLabel {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-text);
+}
+
+.quickActionCount {
+    font-size: 0.75rem;
+    color: var(--color-grey);
+}

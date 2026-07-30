@@ -1,0 +1,328 @@
+.overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 3000;
+    padding: var(--spacing-lg);
+}
+
+.modal {
+    background: var(--color-white);
+    border-radius: var(--radius-md);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    position: fixed;
+    inset: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-lg);
+    border-bottom: 1px solid var(--color-light-3);
+    background: var(--color-light-1);
+}
+
+.title {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.title h2 {
+    margin: 0;
+    font-size: var(--font-size-xl);
+    font-weight: 600;
+    color: var(--color-black);
+}
+
+.headerActions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.addButton {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: 8px 16px;
+    background: var(--gradient-cta);
+    color: #ffffff;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-weight: 500;
+    font-size: var(--font-size-sm);
+    transition: all 0.2s;
+}
+
+.addButton:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.closeButton {
+    padding: 8px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--color-dark-grey);
+    transition: all 0.2s;
+}
+
+.closeButton:hover {
+    background: var(--color-light-2);
+    color: var(--color-black);
+}
+
+.content {
+    flex: 1;
+    overflow: auto;
+    padding: var(--spacing-lg);
+}
+
+.loading,
+.empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-2xl);
+    gap: var(--spacing-md);
+    color: var(--color-grey);
+}
+
+.spinner {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.emptyIcon {
+    opacity: 0.3;
+}
+
+.empty h3 {
+    margin: 0;
+    font-size: var(--font-size-lg);
+    color: var(--color-black);
+}
+
+.empty p {
+    margin: 0;
+    font-size: var(--font-size-sm);
+}
+
+.tableWrapper {
+    overflow-x: auto;
+}
+
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--font-size-sm);
+}
+
+.table thead {
+    background: var(--color-light-1);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.table th {
+    padding: var(--spacing-md);
+    text-align: left;
+    font-weight: 600;
+    color: var(--color-black);
+    border-bottom: 2px solid var(--color-light-3);
+    white-space: nowrap;
+}
+
+.table tbody tr {
+    transition: background 0.15s;
+    border-bottom: 1px solid var(--color-light-3);
+}
+
+.table tbody tr:hover {
+    background: var(--color-light-1);
+}
+
+.table td {
+    padding: var(--spacing-md);
+    color: var(--color-dark-grey);
+}
+
+.table code {
+    padding: 2px 6px;
+    background: var(--color-light-2);
+    border-radius: 4px;
+    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    font-size: var(--font-size-xs);
+}
+
+.badge {
+    display: inline-block;
+    padding: 4px 8px;
+    background: transparent;
+    border: 1px solid var(--color-light-3);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--color-light-7);
+    text-transform: uppercase;
+}
+
+.actions {
+    display: flex;
+    gap: var(--spacing-xs);
+    align-items: center;
+}
+
+.editButton,
+.deleteButton,
+.refreshButton,
+.saveButton,
+.cancelButton {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 10px;
+    border: 1px solid var(--color-light-3);
+    border-radius: var(--radius-sm);
+    background: var(--color-white);
+    cursor: pointer;
+    font-size: var(--font-size-xs);
+    transition: all 0.2s;
+}
+
+.refreshButton {
+    color: var(--color-grey);
+    border-color: var(--color-light-3);
+}
+
+.refreshButton:hover:not(:disabled) {
+    background: var(--color-light-1);
+    border-color: var(--color-grey);
+    color: var(--color-black);
+}
+
+.refreshButton:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.refreshButton .spinner {
+    animation: spin 1s linear infinite;
+}
+
+.editButton {
+    color: var(--color-black);
+}
+
+.editButton:hover:not(:disabled) {
+    background: var(--color-light-1);
+    border-color: var(--color-grey);
+}
+
+.deleteButton {
+    color: var(--color-grey);
+    border-color: var(--color-light-3);
+}
+
+.deleteButton:hover:not(:disabled) {
+    background: var(--color-light-2);
+    border-color: var(--color-grey);
+}
+
+.deleteButton.confirm {
+    background: var(--color-grey);
+    color: white;
+    border-color: var(--color-grey);
+}
+
+.saveButton {
+    color: var(--color-dark-grey);
+    border-color: var(--color-light-3);
+}
+
+.saveButton:hover {
+    background: var(--color-light-2);
+    border-color: var(--color-dark-grey);
+}
+
+.cancelButton {
+    color: var(--color-dark-grey);
+}
+
+.cancelButton:hover {
+    background: var(--color-light-1);
+    border-color: var(--color-grey);
+}
+
+.editButton:disabled,
+.deleteButton:disabled,
+.refreshButton:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.input,
+.select {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--color-light-3);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-xs);
+    font-family: inherit;
+}
+
+.inputSmall {
+    width: 80px;
+    padding: 6px 8px;
+    border: 1px solid var(--color-light-3);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-xs);
+    font-family: inherit;
+}
+
+.input:focus,
+.select:focus,
+.inputSmall:focus {
+    outline: none;
+    border-color: var(--color-grey);
+}
+
+/* SSH Badge */
+.sshBadge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 8px;
+    background: linear-gradient(135deg, #4ade80, #22c55e);
+    color: white;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+}
+
+.noSsh {
+    color: var(--color-grey);
+    font-size: var(--font-size-sm);
+}

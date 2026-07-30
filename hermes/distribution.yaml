@@ -1,0 +1,41 @@
+# DeepSQL Agent profile distribution.
+# Enterprises install this per user:  hermes profile install <git-url|dir> --name <profile>
+# `hermes profile update <profile>` refreshes SOUL.md + skills/ WITHOUT touching
+# the user's memory, sessions, .env, or config.yaml (their identity + history).
+name: deepsql-agent
+version: 0.1.0
+description: "DeepSQL DBA agent — grounded, read-only database assistant over the DeepSQL MCP tools (BI queries, schema exploration, index advice, slow-query optimization, workload analysis)."
+hermes_requires: ">=0.12.0"
+author: "DeepSQL"
+license: "proprietary"
+
+# Per-user runtime values. Secrets + identity live in each profile's .env
+# (user-owned, preserved on update); provision-profile.sh writes them.
+env_requires:
+  - name: AZURE_OPENAI_KEY
+    description: "Azure OpenAI API key for the chat model"
+    required: true
+  - name: AZURE_OPENAI_ENDPOINT
+    description: "Azure OpenAI resource endpoint (…cognitiveservices/…openai.azure.com)"
+    required: false
+    default: "https://dba-agent-3-resource.openai.azure.com/"
+  - name: DEEPSQL_API_BASE_URL
+    description: "DeepSQL backend API base URL"
+    required: false
+    default: "http://localhost:8080/api/"
+  - name: DEEPSQL_MCP_SERVER
+    description: "Absolute path to mcp/deepsql-phase1-server.js"
+    required: true
+  - name: DEEPSQL_MCP_USER_ID
+    description: "DeepSQL user id this profile acts as — backend audit + RBAC attribution"
+    required: true
+  - name: DEEPSQL_AUTH_TOKEN
+    description: "DeepSQL bearer token for this user — server-enforced RBAC/connection-scope"
+    required: false
+
+# The agent persona and skills are the distribution's product surface.
+# Runtime config (model, mcp_servers, approvals, toolset scoping) is applied
+# per-user by provision-profile.sh into the profile's preserved config.yaml.
+distribution_owned:
+  - SOUL.md
+  - skills/

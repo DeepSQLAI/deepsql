@@ -1,0 +1,47 @@
+.tabBar {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #f9fafb;
+  width: fit-content;
+}
+
+.tabButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6b7280;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.tabButton:hover {
+  color: #111827;
+}
+
+.tabButtonActive,
+.tabButtonActive:hover {
+  background: #111827;
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.18);
+}
+
+.content {
+  min-width: 0;
+}
+
+.empty {
+  padding: 40px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: #9ca3af;
+}

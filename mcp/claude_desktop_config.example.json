@@ -1,0 +1,16 @@
+{
+  "_comment": "Local development example: run the bundled stdio MCP server directly from the source tree (no npm install needed). Useful for hacking on the MCP server itself. End users / customers should use claude_desktop_config.customer.example.json (or just run `deepsql mcp config --install --for claude-desktop`) instead.",
+  "mcpServers": {
+    "deepsql-dev": {
+      "command": "node",
+      "args": [
+        "/ABSOLUTE/PATH/TO/dbaagent/mcp/deepsql-phase1-server.js"
+      ],
+      "env": {
+        "DEEPSQL_API_BASE_URL": "http://localhost:8080/api/",
+        "DEEPSQL_AUTH_TOKEN": "<bearer-token-or-leave-blank-if-server-uses-dev-bypass>",
+        "DEEPSQL_MCP_USER_ID": "claude-desktop"
+      }
+    }
+  }
+}

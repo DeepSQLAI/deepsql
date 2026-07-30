@@ -1,0 +1,145 @@
+.wrap { position: relative; display: inline-flex; }
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 9px;
+  background: #fff;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.trigger:hover:not(:disabled) { border-color: #cfcaf0; background: #faf9ff; }
+.trigger:disabled { opacity: 0.5; cursor: default; }
+
+.pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: 320px;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #e7e9ee;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(17, 19, 24, 0.12);
+}
+
+.section { display: flex; flex-direction: column; gap: 8px; }
+.divider { height: 1px; background: #f0f1f4; margin: 14px 0; }
+
+.rowHead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #111318;
+}
+.hint { font-size: 12px; color: #8b909b; line-height: 1.4; }
+
+.linkRow { display: flex; gap: 6px; align-items: center; }
+.input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+  color: #374151;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  color: #6b7280;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.copy:hover { color: #111318; border-color: #cfcaf0; }
+
+/* toggle switch */
+.toggle {
+  margin-left: auto;
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border: none;
+  border-radius: 999px;
+  background: #d7dae0;
+  cursor: pointer;
+  transition: background 0.15s;
+  padding: 0;
+}
+.toggle.on { background: #111318; }
+.toggle:disabled { cursor: default; opacity: 0.7; }
+.knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+}
+.toggle.on .knob { transform: translateX(16px); }
+.spin { animation: sharespin 0.9s linear infinite; }
+@keyframes sharespin { to { transform: rotate(360deg); } }
+
+/* password row */
+.pwRow { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.pwIcon { color: #8b909b; flex-shrink: 0; }
+.pwLabel { font-size: 12px; color: #374151; font-weight: 500; }
+.pwInput {
+  flex: 1;
+  min-width: 120px;
+  padding: 6px 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 7px;
+  background: #fff;
+  color: #374151;
+  font-size: 12px;
+}
+.pwSet {
+  padding: 6px 12px;
+  border: 1px solid #111318;
+  border-radius: 7px;
+  background: #111318;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pwSet:disabled { opacity: 0.5; cursor: default; }
+.pwLink {
+  border: none;
+  background: none;
+  color: #6b7280;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  text-decoration: underline;
+}
+.pwLink:hover { color: #111318; }
+.pwLink:disabled { opacity: 0.5; cursor: default; }

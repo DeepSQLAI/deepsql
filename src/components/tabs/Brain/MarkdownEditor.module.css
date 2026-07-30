@@ -1,0 +1,127 @@
+.markdownEditor {
+    border: 1px solid var(--color-light-3);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.tabs {
+    display: flex;
+    border-bottom: 1px solid var(--color-light-3);
+    background: var(--color-light-1);
+}
+
+.tab {
+    padding: 0.75rem 1.5rem;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-light-6);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.tab:hover {
+    color: var(--color-light-8);
+}
+
+.tab.active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+    background: var(--color-white);
+}
+
+.writeTab,
+.previewTab {
+    min-height: 200px;
+}
+
+.textarea {
+    width: 100%;
+    min-height: 200px;
+    padding: 1rem;
+    border: none;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    resize: vertical;
+    outline: none;
+}
+
+.toolbar {
+    padding: 0.5rem 1rem;
+    background: var(--color-light-1);
+    border-top: 1px solid var(--color-light-3);
+}
+
+.hint {
+    font-size: 0.75rem;
+    color: var(--color-light-5);
+}
+
+.preview {
+    padding: 1rem;
+    min-height: 200px;
+    font-size: 0.875rem;
+    line-height: 1.6;
+}
+
+.preview h1,
+.preview h2,
+.preview h3 {
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.preview h1 { font-size: 1.5rem; }
+.preview h2 { font-size: 1.25rem; }
+.preview h3 { font-size: 1.1rem; }
+
+.preview p {
+    margin-bottom: 0.75rem;
+}
+
+.preview code {
+    padding: 0.125rem 0.25rem;
+    background: var(--color-light-2);
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 0.875em;
+}
+
+.preview pre {
+    padding: 0.75rem;
+    background: var(--color-light-1);
+    border-radius: 6px;
+    overflow-x: auto;
+}
+
+.preview pre code {
+    padding: 0;
+    background: transparent;
+}
+
+.preview ul,
+.preview ol {
+    margin-left: 1.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.preview li {
+    margin-bottom: 0.25rem;
+}
+
+.preview a {
+    color: var(--color-primary);
+    text-decoration: none;
+}
+
+.preview a:hover {
+    text-decoration: underline;
+}
+
+.emptyPreview {
+    color: var(--color-light-5);
+    font-style: italic;
+}

@@ -1,0 +1,19 @@
+name: aws-prod-ui-deploy
+
+# DEPRECATED: Frontend is now served by the Docker nginx container in the self-hosted stack.
+# Use backend-prod-deploy.yml to deploy both backend and frontend images together.
+#
+# This workflow is kept for reference and will be removed in a future cleanup.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  notice:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deployment model changed
+        run: |
+          echo "The frontend is now deployed as part of the Docker self-hosted stack."
+          echo "Trigger backend-prod-deploy instead — it builds and deploys both images."
+          exit 1

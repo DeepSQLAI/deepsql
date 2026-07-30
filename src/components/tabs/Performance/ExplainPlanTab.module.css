@@ -1,0 +1,1810 @@
+.container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 20px;
+    background: var(--color-light-1);
+    overflow-y: auto;
+    gap: 20px;
+}
+
+/* Editor Section */
+.editorSection {
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--color-light-3);
+    overflow: hidden;
+    flex-shrink: 0;
+    min-height: 280px;
+}
+
+.editorHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--color-light-3);
+    background: var(--color-light-1);
+}
+
+.editorHeader h3 {
+    margin: 0;
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.editorActions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.toggleSwitch {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: var(--font-size-sm);
+    color: var(--color-grey);
+    cursor: pointer;
+    user-select: none;
+}
+
+.toggleInput {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggleSlider {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 26px;
+    background-color: #ccc;
+    border-radius: 26px;
+    transition: background-color 0.3s ease;
+    flex-shrink: 0;
+}
+
+.toggleSlider::before {
+    content: '';
+    position: absolute;
+    height: 20px;
+    width: 20px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    border-radius: 50%;
+    transition: transform 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.toggleInput:checked + .toggleSlider {
+    background-color: var(--color-dark-grey);
+}
+
+.toggleInput:checked + .toggleSlider::before {
+    transform: translateX(18px);
+}
+
+.toggleInput:focus + .toggleSlider {
+    outline: 2px solid rgba(55, 65, 81, 0.4);
+    outline-offset: 2px;
+}
+
+.toggleLabel {
+    font-size: var(--font-size-sm);
+    color: var(--color-dark-grey);
+    cursor: pointer;
+}
+
+.monacoWrapper {
+    height: 200px;
+    border-top: 1px solid var(--color-light-3);
+}
+
+/* Editor Action Buttons - Matching SQL Editor shallow style */
+.editorActionButton {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    min-height: 36px !important;
+    padding: 0 12px !important;
+    background: transparent !important;
+    color: var(--color-grey) !important;
+    border: 1px solid transparent !important;
+    border-radius: 999px !important;
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.editorActionButton:hover:not(:disabled) {
+    background: var(--color-light-1) !important;
+    color: var(--color-dark-grey) !important;
+    border-color: var(--color-light-3) !important;
+}
+
+.editorActionButton .actionLabel {
+    max-width: 0;
+    opacity: 0;
+    overflow: hidden;
+    margin-left: 0;
+    transition: max-width 0.2s ease, opacity 0.2s ease;
+}
+
+.editorActionButton:hover .actionLabel {
+    max-width: 120px;
+    opacity: 1;
+    margin-left: 8px;
+}
+
+/* Specific styles for secondary actions (History, Clear) */
+.secondaryAction {
+    /* Uses base editorActionButton styles */
+}
+
+.secondaryAction:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Specific styles for the Analyze button (always active) - shallow style */
+.analyzeAction {
+    background: var(--color-light-2) !important;
+    color: var(--color-darker-grey) !important;
+    border-color: var(--color-light-3) !important;
+}
+
+.analyzeAction:hover:not(:disabled) {
+    background: var(--color-light-1) !important;
+    color: var(--color-dark-grey) !important;
+    border-color: var(--color-light-3) !important;
+    transform: none;
+    box-shadow: none;
+}
+
+.analyzeAction .actionLabel {
+    max-width: 120px;
+    opacity: 1;
+    margin-left: 8px;
+}
+
+.analyzeAction.running {
+    background: var(--color-light-2) !important;
+    color: var(--color-darker-grey) !important;
+}
+
+.analyzeAction.running .actionLabel {
+    color: var(--color-darker-grey);
+}
+
+.analyzeAction:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.runSpinner {
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Loading State */
+.loadingState {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--color-light-3);
+    text-align: center;
+}
+
+.spinner {
+    animation: spin 1s linear infinite;
+    color: var(--color-grey);
+    margin-bottom: 20px;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.loadingState h3 {
+    margin: 0 0 8px 0;
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.loadingState p {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    color: var(--color-grey);
+}
+
+/* Error State */
+.errorState {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--color-danger-soft);
+    text-align: center;
+}
+
+.errorState svg {
+    color: var(--color-grey);
+    margin-bottom: 20px;
+}
+
+.errorState h3 {
+    margin: 0 0 8px 0;
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    color: var(--color-grey);
+}
+
+.errorState p {
+    margin: 0 0 20px 0;
+    font-size: var(--font-size-sm);
+    color: var(--color-grey);
+    max-width: 400px;
+}
+
+.retryButton {
+    padding: 8px 16px;
+    background: var(--color-grey);
+    color: var(--color-white);
+    border: none;
+    border-radius: 6px;
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.retryButton:hover {
+    background: var(--color-grey);
+}
+
+/* Empty State */
+.emptyState {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--color-light-3);
+    text-align: center;
+}
+
+.emptyState svg {
+    color: var(--color-grey);
+    margin-bottom: 20px;
+}
+
+.emptyState h3 {
+    margin: 0 0 8px 0;
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.emptyState p {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    color: var(--color-grey);
+    max-width: 500px;
+}
+
+/* Results Section */
+.results {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.resultTabs {
+    display: flex;
+    gap: 8px;
+    border-bottom: 1px solid var(--color-light-3);
+    padding-bottom: 8px;
+}
+
+.resultTabButton {
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--color-grey);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.resultTabButton:hover {
+    background: var(--color-light-2);
+    color: var(--color-text);
+}
+
+.resultTabActive {
+    background: white;
+    border-color: var(--color-light-3);
+    color: var(--color-text);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+/* Score Card */
+.scoreCard {
+    display: flex;
+    gap: 30px;
+    padding: 24px;
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--color-light-3);
+}
+
+.scoreCircle {
+    flex-shrink: 0;
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    border: 4px solid;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.scoreValue {
+    font-size: var(--font-size-5xl);
+    font-weight: 700;
+    line-height: 1;
+}
+
+.scoreLabel {
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+    margin-top: 4px;
+    text-align: center;
+}
+
+.scoreMetrics {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    justify-content: center;
+}
+
+.scoreMetric {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.metricLabel {
+    font-size: var(--font-size-sm);
+    color: var(--color-grey);
+}
+
+.metricValue {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+/* AI Summary */
+.aiSummary {
+    padding: 20px;
+    background: linear-gradient(135deg, rgba(100, 116, 139, 0.08) 0%, rgba(14, 165, 233, 0.08) 100%);
+    border-radius: 8px;
+    border: 1px solid rgba(100, 116, 139, 0.19);
+}
+
+.aiSummary h3 {
+    margin: 0 0 12px 0;
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.summaryContent {
+    font-size: var(--font-size-sm);
+    line-height: 1.6;
+    color: var(--color-dark-grey);
+}
+
+.summaryContent p {
+    margin: 8px 0;
+}
+
+/* Issues Section */
+.issuesSection {
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--color-light-3);
+    padding: 20px;
+}
+
+.issuesSection h3 {
+    margin: 0 0 16px 0;
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.issueCard {
+    padding: 16px;
+    background: var(--color-light-1);
+    border-radius: 6px;
+    border: 1px solid var(--color-light-3);
+    margin-bottom: 12px;
+}
+
+.issueCard:last-child {
+    margin-bottom: 0;
+}
+
+.issueHeader {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.severityBadge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    color: var(--color-white);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.issueType {
+    font-size: var(--font-size-sm);
+    color: var(--color-grey);
+    font-weight: 500;
+}
+
+.issueBody {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.issueMessage {
+    font-size: var(--font-size-sm);
+    color: var(--color-text);
+    line-height: 1.5;
+}
+
+.issueMetric {
+    font-size: var(--font-size-sm);
+    color: var(--color-grey);
+}
+
+.recommendation {
+    padding: 12px;
+    background: var(--color-primary-light);
+    border-left: 3px solid var(--color-primary);
+    border-radius: 4px;
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+}
+
+.recommendation strong {
+    color: var(--color-dark-grey);
+}
+
+.sqlBlock {
+    position: relative;
+    padding: 12px;
+    background: var(--color-light-2);
+    border-radius: 6px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    overflow-x: auto;
+}
+
+.sqlLabel {
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.sqlBlock code {
+    display: block;
+    color: var(--color-dark-grey);
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+}
+
+.copyButton {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: var(--color-dark-grey);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.copyButton:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.indexSection {
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--color-light-3);
+    padding: 20px;
+}
+
+.indexSection h3 {
+    margin: 0 0 16px 0;
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.indexCard {
+    border: 1px solid var(--color-light-3);
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    background: var(--color-light-1);
+}
+
+.indexCard:last-child {
+    margin-bottom: 0;
+}
+
+.indexHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.indexTable {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.indexPriority {
+    font-size: var(--font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: var(--color-warning-soft);
+    color: var(--color-grey);
+}
+
+.indexMeta {
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+    margin-bottom: 6px;
+}
+
+.indexReason {
+    font-size: var(--font-size-xs);
+    color: var(--color-dark-grey);
+    margin-bottom: 8px;
+}
+
+/* Execution Plan */
+.planSection {
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--color-light-3);
+    padding: 20px;
+}
+
+.planSection h3 {
+    margin: 0 0 16px 0;
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.planHeader {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.planTabs {
+    display: flex;
+    gap: 8px;
+}
+
+.planTabButton {
+    border: 1px solid var(--color-light-3);
+    background: white;
+    color: var(--color-grey);
+    border-radius: 6px;
+    font-size: var(--font-size-xs);
+    padding: 6px 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.planHeaderControls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.planViewToggle {
+    display: flex;
+    gap: 6px;
+    background: var(--color-light-2);
+    padding: 4px;
+    border-radius: 8px;
+}
+
+.planViewButton {
+    border: none;
+    background: transparent;
+    color: var(--color-grey);
+    padding: 6px 10px;
+    font-size: var(--font-size-xs);
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.planViewButtonActive {
+    background: white;
+    color: var(--color-text);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1);
+    font-weight: 600;
+}
+
+.metricControls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.diagramControls {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.detailsToggle {
+    border: 1px solid var(--color-light-3);
+    background: white;
+    color: var(--color-grey);
+    font-size: var(--font-size-xs);
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.detailsToggle:hover {
+    border-color: var(--color-grey);
+    color: var(--color-text);
+}
+
+.diagramControlButton {
+    border: 1px solid var(--color-light-3);
+    background: white;
+    color: var(--color-grey);
+    font-size: var(--font-size-xs);
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.diagramControlButton:hover {
+    border-color: var(--color-grey);
+    color: var(--color-text);
+}
+
+.metricButton,
+.bufferButton {
+    border: 1px solid var(--color-light-3);
+    background: white;
+    color: var(--color-grey);
+    font-size: var(--font-size-xs);
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.metricButton:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.metricButtonActive {
+    border-color: var(--color-primary);
+    color: var(--color-text);
+    background: var(--color-primary-light);
+    font-weight: 600;
+}
+
+.bufferControls {
+    display: flex;
+    gap: 6px;
+    padding-left: 6px;
+    border-left: 1px solid var(--color-light-3);
+}
+
+.planWorkspace {
+    display: grid;
+    gap: 16px;
+    align-items: start;
+}
+
+.planWorkspaceWithDetails {
+    grid-template-columns: minmax(0, 1fr) 280px;
+}
+
+.planWorkspaceFull {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.planCanvas {
+    min-width: 0;
+}
+
+.planDetails {
+    background: white;
+    border: 1px solid var(--color-light-3);
+    border-radius: 8px;
+    min-height: 220px;
+    display: flex;
+    flex-direction: column;
+}
+
+.planDetailsHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--color-light-3);
+}
+
+.planDetailsHeader h4 {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+}
+
+.planDetailsClear {
+    border: none;
+    background: transparent;
+    color: var(--color-grey);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.planDetailsBody {
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: auto;
+    max-height: 520px;
+}
+
+.detailSection h5 {
+    margin: 0 0 6px 0;
+    font-size: var(--font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-grey);
+}
+
+.detailRow {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: var(--font-size-xs);
+    color: var(--color-dark-grey);
+    margin-bottom: 6px;
+}
+
+.detailRow span {
+    color: var(--color-grey);
+}
+
+.detailEmpty {
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+}
+
+.planDetailsEmpty {
+    padding: 18px;
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+}
+
+@media (max-width: 1100px) {
+    .planWorkspace {
+        grid-template-columns: 1fr;
+    }
+
+    .planWorkspaceWithDetails {
+        grid-template-columns: 1fr;
+    }
+
+    .planDetails {
+        max-height: none;
+    }
+}
+
+.planGrid {
+    border: 1px solid var(--color-light-3);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.planGridHeader,
+.planGridRow {
+    display: grid;
+    grid-template-columns: minmax(180px, 2fr) minmax(120px, 1fr) minmax(120px, 1fr) minmax(100px, 1fr) minmax(80px, 0.6fr) minmax(160px, 1.2fr);
+    gap: 12px;
+    align-items: center;
+}
+
+.planGridHeader {
+    background: var(--color-light-2);
+    padding: 10px 12px;
+    font-size: var(--font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-grey);
+    font-weight: 600;
+}
+
+.planGridBody {
+    background: white;
+}
+
+.planGridRow {
+    padding: 10px 12px;
+    border-top: 1px solid var(--color-light-2);
+    font-size: var(--font-size-xs);
+    cursor: pointer;
+}
+
+.planGridRow:hover {
+    background: var(--color-light-1);
+}
+
+.planGridRowSelected {
+    background: var(--color-primary-light);
+}
+
+.planGridCell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.planGridNode {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.planGridNodeType {
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.planGridNodeTable {
+    color: var(--color-grey);
+}
+
+.planGridSecondary {
+    color: var(--color-grey);
+    font-size: var(--font-size-xs);
+}
+
+.gridMetricBar {
+    width: 100%;
+    height: 6px;
+    background: var(--color-light-2);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.gridMetricFill {
+    height: 100%;
+    background: var(--color-primary);
+}
+
+.gridMetricValue {
+    color: var(--color-grey);
+    font-size: var(--font-size-xs);
+}
+
+.planRawSection {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.rawTabs {
+    display: flex;
+    gap: 8px;
+}
+
+.rawTabButton {
+    border: 1px solid var(--color-light-3);
+    background: white;
+    color: var(--color-grey);
+    border-radius: 6px;
+    font-size: var(--font-size-xs);
+    padding: 6px 10px;
+    cursor: pointer;
+}
+
+.planQuery {
+    display: grid;
+    gap: 16px;
+}
+
+.planQueryBlock {
+    background: white;
+    border: 1px solid var(--color-light-3);
+    border-radius: 8px;
+    padding: 14px;
+}
+
+.planQueryBlock h4 {
+    margin: 0 0 8px 0;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+}
+
+.planQueryBlock pre {
+    margin: 0;
+    background: var(--color-light-2);
+    border-radius: 6px;
+    padding: 10px;
+    font-size: var(--font-size-xs);
+    white-space: pre-wrap;
+}
+
+.planStats {
+    background: white;
+    border: 1px solid var(--color-light-3);
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.planStatsGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+}
+
+.planStatCard {
+    background: var(--color-light-2);
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+}
+
+.planStatCard strong {
+    font-size: var(--font-size-sm);
+    color: var(--color-text);
+}
+
+.planStatsDetails {
+    margin-top: 16px;
+}
+
+.planStatsDetails h4 {
+    margin: 0 0 8px 0;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+}
+
+.planStatsList {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px;
+}
+
+.planStatsListItem {
+    background: var(--color-light-2);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: var(--font-size-xs);
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.planStatsListItem span {
+    color: var(--color-grey);
+}
+
+.planTabButton:hover:not(:disabled) {
+    background: var(--color-light-2);
+    color: var(--color-text);
+}
+
+.planTabButton:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.planTabActive {
+    border-color: var(--color-primary);
+    color: var(--color-text);
+    background: var(--color-light-1);
+    font-weight: 600;
+}
+
+.planParseError {
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px dashed var(--color-warning);
+    background: var(--color-warning-soft);
+    font-size: var(--font-size-xs);
+    color: var(--color-dark-grey);
+    margin-bottom: 12px;
+}
+
+.planDrift {
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--color-light-3);
+    background: var(--color-light-2);
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+    margin-bottom: 12px;
+}
+
+.planSummary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.planSummaryItem {
+    background: white;
+    border: 1px solid var(--color-light-3);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: var(--font-size-xs);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--color-grey);
+}
+
+.planSummaryItem strong {
+    color: var(--color-text);
+    font-size: var(--font-size-sm);
+}
+
+.planTree {
+    background: var(--color-light-1);
+    border-radius: 6px;
+    padding: 16px;
+    position: relative;
+}
+
+.planDiagram {
+    background: white;
+    border-radius: 6px;
+    border: 1px solid var(--color-light-3);
+    overflow: auto;
+    padding: 16px;
+    cursor: grab;
+    touch-action: none;
+}
+
+.planDiagram:active {
+    cursor: grabbing;
+}
+
+.diagramViewport {
+    position: relative;
+    margin: 0 auto;
+}
+
+.diagramEdges {
+    position: absolute;
+    top: 0;
+    left: 0;
+    stroke: var(--color-light-3);
+    stroke-width: 2;
+    fill: none;
+    pointer-events: none;
+}
+
+.diagramNode {
+    position: absolute;
+    background: white;
+    border: 1px solid var(--color-light-3);
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow: hidden;
+}
+
+.diagramNodeSelected {
+    border-color: rgba(59, 130, 246, 0.6);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.diagramCriticalNode {
+    border-color: rgba(255, 99, 71, 0.8);
+    box-shadow: 0 0 0 2px rgba(255, 99, 71, 0.15);
+}
+
+.diagramNodeHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.diagramNodeTitle {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.diagramToggle {
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    border: 1px solid var(--color-light-3) !important;
+    background: var(--color-light-1) !important;
+    color: var(--color-dark-grey) !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    min-height: 0;
+    min-width: 0;
+    padding: 0 !important;
+}
+
+.diagramToggle:hover {
+    border-color: var(--color-grey) !important;
+    color: var(--color-text) !important;
+}
+
+.diagramToggle svg {
+    stroke: currentColor;
+    stroke-width: 2.25;
+}
+
+.diagramNodeTable {
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.diagramMetrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.diagramMetric {
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+    padding: 2px 6px;
+    background: var(--color-light-2);
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.diagramBadges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: auto;
+}
+
+.diagramBadge {
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+    padding: 2px 6px;
+    background: var(--color-warning-soft);
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.diagramMetricBar {
+    height: 12px;
+    background: var(--color-light-2);
+    border-radius: 999px;
+    position: relative;
+    overflow: hidden;
+}
+
+.diagramMetricFill {
+    height: 100%;
+    background: var(--color-primary);
+}
+
+.diagramMetricLabel {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: var(--font-size-xs);
+    color: var(--color-text);
+}
+
+.planGuide {
+    background: white;
+    border: 1px solid var(--color-light-3);
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.planGuideHeader {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 12px;
+}
+
+.planGuideHeader h4 {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.planGuideHeader p {
+    margin: 0;
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+}
+
+.planGuideSections {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.planGuideSection {
+    background: white;
+    border: 1px solid var(--color-light-3);
+    border-radius: 6px;
+    padding: 12px 16px;
+}
+
+.planGuideSection h4 {
+    margin: 0 0 8px 0;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.planGuideList {
+    margin: 0;
+    padding-left: 18px;
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+    line-height: 1.4;
+}
+
+.planGuideEmpty {
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+}
+
+.planSteps {
+    margin: 0;
+    font-size: var(--font-size-xs);
+    color: var(--color-dark-grey);
+    background: var(--color-light-2);
+    border-radius: 4px;
+    padding: 8px;
+    white-space: pre-wrap;
+}
+
+.planRaw {
+    margin: 0;
+    font-size: var(--font-size-xs);
+    color: var(--color-dark-grey);
+    background: var(--color-light-2);
+    border-radius: 4px;
+    padding: 10px;
+    white-space: pre-wrap;
+    line-height: 1.5;
+}
+
+.aiGlossary {
+    margin-top: 12px;
+    border-top: 1px solid var(--color-light-3);
+    padding-top: 10px;
+}
+
+.aiGlossaryHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--color-text);
+    margin-bottom: 6px;
+}
+
+.aiGlossaryStatus {
+    font-weight: 500;
+    color: var(--color-grey);
+}
+
+.aiGlossaryError {
+    font-size: var(--font-size-xs);
+    color: var(--color-danger);
+    margin-bottom: 6px;
+}
+
+.aiGlossaryList {
+    display: grid;
+    gap: 8px;
+}
+
+.aiGlossaryItem {
+    background: var(--color-light-2);
+    border-radius: 4px;
+    padding: 8px 10px;
+}
+
+.aiGlossaryTerm {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--color-text);
+    margin-bottom: 4px;
+}
+
+.aiGlossaryMeaning,
+.aiGlossaryWhy {
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+    line-height: 1.4;
+}
+
+.aiGlossaryEmpty {
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+}
+
+.planNode {
+    margin-bottom: 8px;
+    position: relative;
+}
+
+.planNodeSelected .nodeContent {
+    border-color: rgba(59, 130, 246, 0.6);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.nodeHeader {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    position: relative;
+}
+
+.nodeHeaderChild::before {
+    content: '';
+    position: absolute;
+    left: -18px;
+    top: 16px;
+    width: 18px;
+    height: 2px;
+    background: var(--color-light-3);
+}
+
+.nodeHeaderChild::after {
+    content: '';
+    position: absolute;
+    left: -23px;
+    top: 12px;
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    border: 2px solid var(--color-light-3);
+    background: var(--color-light-1);
+}
+
+.expandButton {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    padding: 0 !important;
+    background: white !important;
+    border: 1px solid var(--color-light-3) !important;
+    border-radius: 4px;
+    color: var(--color-dark-grey) !important;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    min-width: 0;
+}
+
+.expandButton:hover {
+    color: var(--color-text) !important;
+    border-color: var(--color-grey) !important;
+}
+
+.expandButton svg {
+    stroke: currentColor;
+    stroke-width: 2.25;
+}
+
+.expandPlaceholder {
+    width: 22px;
+    flex-shrink: 0;
+}
+
+.nodeContent {
+    flex: 1;
+    padding: 10px 12px;
+    background: white;
+    border-radius: 6px;
+    border: 1px solid var(--color-light-3);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.nodeTitle {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text);
+    margin-bottom: 6px;
+}
+
+.tableName {
+    color: var(--color-grey);
+    font-weight: 500;
+}
+
+.nodeMetrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 6px;
+}
+
+.metric {
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+    padding: 2px 8px;
+    background: var(--color-light-2);
+    border-radius: 3px;
+}
+
+.metric.warning {
+    background: var(--color-warning-soft);
+    color: var(--color-grey);
+    font-weight: 500;
+}
+
+.misestimateBadge {
+    background: rgba(255, 170, 0, 0.15);
+    color: var(--color-dark-grey);
+    font-weight: 600;
+}
+
+.nodeBadges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.nodeBadge {
+    padding: 2px 6px;
+    border-radius: 999px;
+    font-size: var(--font-size-xs);
+    background: var(--color-light-2);
+    color: var(--color-grey);
+}
+
+.criticalNode .nodeContent {
+    border-color: rgba(255, 99, 71, 0.6);
+    box-shadow: 0 0 0 1px rgba(255, 99, 71, 0.3);
+}
+
+.nodeExtra {
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+    font-style: italic;
+    margin-top: 4px;
+}
+
+.nodeChildren {
+    margin-top: 8px;
+    margin-left: 20px;
+    padding-left: 18px;
+    border-left: 2px solid var(--color-light-3);
+}
+
+.emptyPlan {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    text-align: center;
+}
+
+.emptyPlan svg {
+    color: var(--color-grey);
+    margin-bottom: 12px;
+}
+
+.emptyPlan p {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    color: var(--color-grey);
+}
+
+/* No Issues State */
+.noIssues {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--color-light-3);
+    text-align: center;
+}
+
+.noIssues svg {
+    color: var(--color-grey);
+    margin-bottom: 16px;
+}
+
+.noIssues h3 {
+    margin: 0 0 8px 0;
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    color: var(--color-dark-grey);
+}
+
+.noIssues p {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    color: var(--color-grey);
+}
+
+/* History Panel */
+.historyPanel {
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--color-light-3);
+    overflow: hidden;
+    max-height: 500px;
+    display: flex;
+    flex-direction: column;
+}
+
+.historyHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--color-light-3);
+    background: var(--color-light-1);
+}
+
+.historyTitle {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.historyTitle svg {
+    color: var(--color-grey);
+}
+
+.historyTitle h3 {
+    margin: 0;
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.historyCount {
+    font-size: var(--font-size-sm);
+    color: var(--color-grey);
+    background: var(--color-light-2);
+    padding: 2px 8px;
+    border-radius: 12px;
+}
+
+.closeHistoryButton {
+    background: transparent;
+    border: none;
+    color: var(--color-grey);
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.closeHistoryButton:hover {
+    background: var(--color-light-2);
+    color: var(--color-text);
+}
+
+.historyList {
+    overflow-y: auto;
+    max-height: 420px;
+}
+
+.historyItem {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--color-light-2);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.historyItem:hover {
+    background: var(--color-light-1);
+}
+
+.historyItem:last-child {
+    border-bottom: none;
+}
+
+.historyItemHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.historyItemMeta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.historyItemMeta svg {
+    color: var(--color-grey);
+}
+
+.historyTimestamp {
+    font-size: var(--font-size-sm);
+    color: var(--color-grey);
+}
+
+.driftBadge {
+    font-size: var(--font-size-xs);
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: var(--color-warning-soft);
+    color: var(--color-grey);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.analyzeFlag {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--color-grey);
+    background: var(--color-primary-light);
+    padding: 2px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.historyItemActions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.historyScore {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+}
+
+.deleteHistoryButton {
+    background: transparent;
+    border: none;
+    color: var(--color-grey);
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.deleteHistoryButton:hover {
+    background: var(--color-danger-soft);
+    color: var(--color-grey);
+}
+
+.historyQuery {
+    font-size: var(--font-size-sm);
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    color: var(--color-dark-grey);
+    margin-bottom: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.historyStats {
+    font-size: var(--font-size-xs);
+    color: var(--color-grey);
+}

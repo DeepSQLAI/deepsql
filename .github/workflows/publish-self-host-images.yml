@@ -1,0 +1,212 @@
+name: publish-self-host-images
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Extra image tag to publish in addition to latest and commit SHA.
+        required: false
+        default: latest
+  # Auto-publish on version tag pushes. Tag like `v1.2.0` produces images
+  # tagged `1.2.0` (the leading `v` is stripped to match release-docker.yml's
+  # convention for the SaaS images). The same tag also fires release-docker.yml,
+  # which builds the SaaS image series; the two run independently.
+  push:
+    tags: ['v*']
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/deepsqlai/deepsql-self-host-backend
+  FRONTEND_IMAGE: ghcr.io/deepsqlai/deepsql-self-host-frontend
+  AGENT_IMAGE: ghcr.io/deepsqlai/deepsql-self-host-agent
+  SOURCE_REPO: https://github.com/DeepSQLAI/deepsql-self-host
+  # Agent upstreams the agent image is built from. PINNED for reproducibility
+  # (the webui couples to the agent by direct import, so the two move together).
+  # Bump deliberately and re-validate the build when adopting a new release pair.
+  AGENT_REF: v2026.6.19
+  WEBUI_REF: v0.51.604
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute tags
+        id: tags
+        shell: bash
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          # On workflow_dispatch: use the user-supplied input.
+          # On push:tags (e.g. v1.2.0): strip the leading "v" -> "1.2.0".
+          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF}" == refs/tags/* ]]; then
+            extra_tag="${GITHUB_REF_NAME#v}"
+          else
+            extra_tag="${{ github.event.inputs.tag }}"
+          fi
+          {
+            echo "short_sha=${short_sha}"
+            echo "backend_tags<<EOF"
+            echo "${BACKEND_IMAGE}:latest"
+            echo "${BACKEND_IMAGE}:${short_sha}"
+            if [[ -n "$extra_tag" && "$extra_tag" != "latest" && "$extra_tag" != "$short_sha" ]]; then
+              echo "${BACKEND_IMAGE}:${extra_tag}"
+            fi
+            echo "EOF"
+            echo "frontend_tags<<EOF"
+            echo "${FRONTEND_IMAGE}:latest"
+            echo "${FRONTEND_IMAGE}:${short_sha}"
+            if [[ -n "$extra_tag" && "$extra_tag" != "latest" && "$extra_tag" != "$short_sha" ]]; then
+              echo "${FRONTEND_IMAGE}:${extra_tag}"
+            fi
+            echo "EOF"
+            echo "agent_tags<<EOF"
+            echo "${AGENT_IMAGE}:latest"
+            echo "${AGENT_IMAGE}:${short_sha}"
+            if [[ -n "$extra_tag" && "$extra_tag" != "latest" && "$extra_tag" != "$short_sha" ]]; then
+              echo "${AGENT_IMAGE}:${extra_tag}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Build backend jar
+        working-directory: backend
+        run: mvn clean package -DskipTests -B -q
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Build frontend assets
+        run: |
+          npm ci --prefer-offline
+          VITE_API_URL= npm run build:production
+
+      - name: Create runtime Dockerfiles
+        shell: bash
+        run: |
+          mkdir -p .docker-build
+          cat > .docker-build/backend-runtime.Dockerfile <<'EOF'
+          FROM eclipse-temurin:25-jdk-noble
+
+          WORKDIR /app
+
+          RUN apt-get update \
+              && apt-get install -y --no-install-recommends curl \
+              && rm -rf /var/lib/apt/lists/*
+
+          RUN groupadd --system dbaagent \
+              && useradd --system --gid dbaagent --shell /bin/false dbaagent
+
+          COPY backend/target/dba-agent-backend-*.jar app.jar
+          RUN chown dbaagent:dbaagent app.jar
+
+          USER dbaagent
+
+          EXPOSE 8080
+
+          ENTRYPOINT ["java", \
+              "-XX:+UseZGC", \
+              "-Xmx1g", \
+              "-XX:+ExitOnOutOfMemoryError", \
+              "-Djava.security.egd=file:/dev/./urandom", \
+              "-jar", "app.jar"]
+          EOF
+
+          cat > .docker-build/frontend-runtime.Dockerfile <<'EOF'
+          FROM nginx:1.27-alpine
+
+          COPY dist /usr/share/nginx/html
+          COPY docker/nginx/default.conf /etc/nginx/conf.d/default.conf
+
+          EXPOSE 80
+
+          CMD ["nginx", "-g", "daemon off;"]
+          EOF
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./.docker-build/backend-runtime.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.backend_tags }}
+          labels: |
+            org.opencontainers.image.source=${{ env.SOURCE_REPO }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=DeepSQL Self-Host Backend
+          cache-from: type=gha,scope=self-host-backend
+          cache-to: type=gha,mode=max,scope=self-host-backend
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./.docker-build/frontend-runtime.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.frontend_tags }}
+          labels: |
+            org.opencontainers.image.source=${{ env.SOURCE_REPO }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=DeepSQL Self-Host Frontend
+          cache-from: type=gha,scope=self-host-frontend
+          cache-to: type=gha,mode=max,scope=self-host-frontend
+
+      # DeepSQL Agent. Unlike backend/frontend (whose runtime Dockerfiles are
+      # generated inline above), the agent ships its own Dockerfile at
+      # hermes/deploy/Dockerfile and bundles the mcp/ + hermes/ source from the
+      # repo root (context: .). AGENT_REF/WEBUI_REF are pinned in env for a
+      # reproducible build.
+      - name: Build and push agent
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./hermes/deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            AGENT_REF=${{ env.AGENT_REF }}
+            WEBUI_REF=${{ env.WEBUI_REF }}
+          tags: ${{ steps.tags.outputs.agent_tags }}
+          labels: |
+            org.opencontainers.image.source=${{ env.SOURCE_REPO }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=DeepSQL Self-Host Agent
+          cache-from: type=gha,scope=self-host-agent
+          cache-to: type=gha,mode=max,scope=self-host-agent
+
+      - name: Print package settings
+        shell: bash
+        run: |
+          echo "Backend package:  https://github.com/orgs/DeepSQLAI/packages/container/package/deepsql-self-host-backend"
+          echo "Frontend package: https://github.com/orgs/DeepSQLAI/packages/container/package/deepsql-self-host-frontend"
+          echo "Agent package:    https://github.com/orgs/DeepSQLAI/packages/container/package/deepsql-self-host-agent"
+          echo "Set each package to Public in Package settings > Danger Zone > Change visibility."

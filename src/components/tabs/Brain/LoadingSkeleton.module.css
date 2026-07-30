@@ -1,0 +1,80 @@
+/* Loading skeleton styles */
+@keyframes shimmer {
+    0% {
+        background-position: -1000px 0;
+    }
+    100% {
+        background-position: 1000px 0;
+    }
+}
+
+.skeletonBase {
+    background: linear-gradient(
+        90deg,
+        #f0f0f0 25%,
+        #e0e0e0 50%,
+        #f0f0f0 75%
+    );
+    background-size: 2000px 100%;
+    animation: shimmer 2s infinite;
+    border-radius: 4px;
+}
+
+.skeletonCard {
+    padding: 1rem;
+    border: 1px solid #e5e5e5;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+}
+
+.skeletonTitle {
+    composes: skeletonBase;
+    height: 20px;
+    width: 60%;
+    margin-bottom: 0.5rem;
+}
+
+.skeletonText {
+    composes: skeletonBase;
+    height: 14px;
+    width: 100%;
+    margin-bottom: 0.5rem;
+}
+
+.skeletonRow {
+    display: flex;
+    gap: 1rem;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.skeletonCell {
+    composes: skeletonBase;
+    height: 16px;
+    flex: 1;
+}
+
+.skeletonGrid {
+    display: flex;
+    flex-direction: column;
+}
+
+.skeletonPanel {
+    padding: 1.5rem;
+    border: 1px solid #e5e5e5;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.skeletonHeader {
+    composes: skeletonBase;
+    height: 24px;
+    width: 40%;
+    margin-bottom: 1rem;
+}
+
+.skeletonContent {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}

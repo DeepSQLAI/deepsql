@@ -1,0 +1,13 @@
+# Manual Codex CLI MCP config example. Most users should run
+#   `deepsql mcp config --install --for codex`
+# instead — that handles the file path, backup, and the DBA-consult skill
+# in one shot. Use this template only if you need a custom layout (e.g.
+# embedded token, alternate `DEEPSQL_*` env vars, non-default profile).
+#
+# The form below uses the `deepsql mcp` shim, which reads auth from
+# ~/.config/deepsql/auth.json (written by `deepsql login`) — no token
+# needs to be embedded in the config.
+
+[mcp_servers.deepsql]
+command = "deepsql"
+args = ["mcp"]

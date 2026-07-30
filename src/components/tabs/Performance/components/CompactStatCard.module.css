@@ -1,0 +1,45 @@
+.card {
+    background: white;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    padding: 10px 14px;
+    border-left: 3px solid #E5E7EB;
+    min-width: 0;
+}
+
+.card.success {
+    border-left-color: #9CA3AF;
+    background: #FAFAFA;
+}
+
+.card.warning {
+    border-left-color: #FCD34D;
+    background: #FFFBEB;
+}
+
+.label {
+    font-size: 10px;
+    font-weight: 500;
+    color: #6B7280;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 2px;
+}
+
+.value {
+    font-size: 22px;
+    font-weight: 700;
+    color: #111827;
+    line-height: 1.1;
+    margin-bottom: 2px;
+}
+
+.subtitle {
+    font-size: 9px;
+    color: #9CA3AF;
+}
+
+.subtitleGreen {
+    color: #6B7280;
+    font-weight: 500;
+}

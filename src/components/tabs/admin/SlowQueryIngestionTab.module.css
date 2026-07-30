@@ -1,0 +1,505 @@
+/* Slow Query Ingestion Settings */
+
+.container {
+    max-width: 720px;
+}
+
+.sectionTitle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-darker-grey, #111827);
+    margin: 0 0 4px 0;
+}
+
+.sectionDesc {
+    font-size: 12px;
+    color: var(--color-grey, #6B7280);
+    margin: 0 0 20px 0;
+}
+
+.subTitle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-darker-grey, #111827);
+    margin: 0 0 10px 0;
+}
+
+/* Provider grid */
+.providerGrid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    margin-bottom: 20px;
+}
+
+.providerCard {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--color-white, #fff) !important;
+    border: 1px solid var(--color-light-3, #E5E7EB) !important;
+    border-radius: 8px !important;
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    min-height: auto !important;
+    text-align: left;
+    font-family: inherit;
+}
+
+.providerCard:hover {
+    border-color: var(--color-grey, #9CA3AF) !important;
+    background: var(--color-white, #fff) !important;
+}
+
+.providerCardActive {
+    border-color: var(--color-darker-grey, #374151) !important;
+    box-shadow: 0 0 0 1px var(--color-darker-grey, #374151);
+    background: var(--color-light-1, #F9FAFB) !important;
+}
+
+.providerIcon {
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.providerLabel {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-darker-grey, #111827) !important;
+}
+
+/* Fields */
+.fieldsSection {
+    margin-bottom: 20px;
+}
+
+.fieldGrid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.fieldWide {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    grid-column: 1 / -1;
+}
+
+.fieldLabel {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-grey, #6B7280);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.fieldInput {
+    padding: 8px 10px;
+    font-size: 13px;
+    border: 1px solid var(--color-light-3, #E5E7EB);
+    border-radius: 6px;
+    background: var(--color-white, #fff);
+    color: var(--color-darker-grey, #111827);
+    outline: none;
+    transition: border-color 0.15s;
+    width: 100%;
+    font-family: inherit;
+}
+
+.fieldInput:focus {
+    border-color: var(--color-darker-grey, #374151);
+}
+
+.fieldInput::placeholder {
+    color: var(--color-grey, #9CA3AF);
+}
+
+.secretWrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.secretWrap .fieldInput {
+    padding-right: 32px;
+}
+
+.secretToggle {
+    position: absolute;
+    right: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 4px !important;
+    min-height: auto !important;
+    padding: 0 !important;
+    cursor: pointer;
+    color: var(--color-grey, #9CA3AF) !important;
+}
+
+.secretToggle:hover {
+    color: var(--color-darker-grey, #111827) !important;
+}
+
+/* Schedule */
+.scheduleSection {
+    padding: 14px 16px;
+    background: var(--color-light-1, #F9FAFB);
+    border: 1px solid var(--color-light-3, #E5E7EB);
+    border-radius: 8px;
+    margin-bottom: 16px;
+}
+
+.scheduleRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.checkboxLabel {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--color-darker-grey, #111827);
+    cursor: pointer;
+}
+
+.checkboxLabel input[type="checkbox"] {
+    accent-color: var(--color-darker-grey, #374151);
+}
+
+.freqWrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.freqLabel {
+    font-size: 12px;
+    color: var(--color-grey, #6B7280);
+}
+
+.freqInput {
+    width: 70px;
+    padding: 6px 8px;
+    font-size: 13px;
+    border: 1px solid var(--color-light-3, #E5E7EB);
+    border-radius: 6px;
+    text-align: center;
+    font-family: inherit;
+    color: var(--color-darker-grey, #111827);
+}
+
+.freqInput:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Message */
+.msgSuccess,
+.msgError {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    margin-bottom: 12px;
+}
+
+.msgSuccess {
+    background: #ECFDF5;
+    color: #065F46;
+    border: 1px solid #A7F3D0;
+}
+
+.msgError {
+    background: #FEF2F2;
+    color: #991B1B;
+    border: 1px solid #FECACA;
+}
+
+/* Actions */
+.actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+.saveBtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-white, #fff) !important;
+    background: var(--color-darker-grey, #111827) !important;
+    border: none !important;
+    border-radius: 6px !important;
+    cursor: pointer;
+    min-height: auto !important;
+    font-family: inherit;
+    transition: background 0.15s;
+}
+
+.saveBtn:hover:not(:disabled) {
+    background: #374151 !important;
+}
+
+.saveBtn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.ingestGroup {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.timeRangeSelect {
+    padding: 7px 10px;
+    font-size: 12px;
+    border: 1px solid var(--color-light-3, #E5E7EB);
+    border-radius: 6px;
+    background: var(--color-white, #fff);
+    color: var(--color-darker-grey, #111827);
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.ingestBtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-darker-grey, #111827) !important;
+    background: var(--color-light-2, #F3F4F6) !important;
+    border: 1px solid var(--color-light-3, #E5E7EB) !important;
+    border-radius: 6px !important;
+    cursor: pointer;
+    min-height: auto !important;
+    font-family: inherit;
+    transition: background 0.15s;
+}
+
+.ingestBtn:hover:not(:disabled) {
+    background: var(--color-light-3, #E5E7EB) !important;
+}
+
+.ingestBtn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* History */
+.historySection {
+    border-top: 1px solid var(--color-light-3, #E5E7EB);
+    padding-top: 16px;
+}
+
+.historyToggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-darker-grey, #111827) !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    min-height: auto !important;
+    padding: 0 !important;
+    cursor: pointer;
+    font-family: inherit;
+    margin-bottom: 10px;
+}
+
+.historyList {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.refreshHistoryBtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    align-self: flex-end;
+    font-size: 11px;
+    color: var(--color-grey, #6B7280) !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    min-height: auto !important;
+    padding: 2px 4px !important;
+    cursor: pointer;
+    font-family: inherit;
+    margin-bottom: 6px;
+}
+
+.refreshHistoryBtn:hover {
+    color: var(--color-darker-grey, #111827) !important;
+}
+
+.historyItem {
+    border: 1px solid var(--color-light-3, #E5E7EB);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.historyRowBtn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 12px;
+    font-size: 12px;
+    background: var(--color-white, #fff) !important;
+    border: none !important;
+    border-radius: 0 !important;
+    min-height: auto !important;
+    cursor: pointer;
+    font-family: inherit;
+    text-align: left;
+    color: var(--color-darker-grey, #111827) !important;
+}
+
+.historyRowBtn:hover {
+    background: var(--color-light-1, #F9FAFB) !important;
+}
+
+.historyMeta {
+    flex: 1;
+    color: var(--color-grey, #6B7280);
+}
+
+.historyDate {
+    font-size: 11px;
+    color: var(--color-grey, #9CA3AF);
+    white-space: nowrap;
+}
+
+.historyDetail {
+    padding: 8px 12px;
+    background: var(--color-light-1, #F9FAFB);
+    border-top: 1px solid var(--color-light-3, #E5E7EB);
+    font-size: 11px;
+    color: var(--color-grey, #6B7280);
+}
+
+.historyDetail p {
+    margin: 2px 0;
+}
+
+.historyError {
+    color: #DC2626;
+}
+
+.historyEmpty {
+    font-size: 12px;
+    color: var(--color-grey, #9CA3AF);
+    text-align: center;
+    padding: 12px;
+}
+
+.statusSuccess {
+    font-weight: 600;
+    color: #059669;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.statusError {
+    font-weight: 600;
+    color: #DC2626;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.statusRunning {
+    font-weight: 600;
+    color: var(--color-darker-grey, #374151);
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.statusMuted {
+    font-weight: 600;
+    color: var(--color-grey, #9CA3AF);
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+/* Empty state */
+.emptyState {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 48px 24px;
+    color: var(--color-grey, #9CA3AF);
+    text-align: center;
+}
+
+.emptyState p {
+    font-size: 13px;
+    margin: 0;
+}
+
+.spin {
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+    .providerGrid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .fieldGrid {
+        grid-template-columns: 1fr;
+    }
+
+    .actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .ingestGroup {
+        flex-direction: column;
+    }
+}

@@ -1,0 +1,207 @@
+.layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+}
+
+.hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-light-3);
+  background: var(--color-white);
+}
+
+.heroTitle {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  color: var(--color-black);
+}
+
+.heroSubtitle {
+  margin: 6px 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-grey);
+}
+
+.heroMeta {
+  margin-top: 8px;
+  font-size: 0.7rem;
+  color: var(--color-dark-grey);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.heroActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--spacing-sm);
+}
+
+.statCard {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-light-3);
+  padding: 12px;
+  background: var(--color-white);
+}
+
+.statLabel {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-grey);
+  margin-bottom: 6px;
+}
+
+.statValue {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-black);
+}
+
+.statMeta {
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--color-grey);
+}
+
+.insights {
+  border: 1px dashed var(--color-light-3);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: var(--color-white);
+}
+
+.insightsHeader {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--color-grey);
+  margin-bottom: 10px;
+}
+
+.insightList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.insightButton {
+  border: 1px solid var(--color-light-3) !important;
+  background: var(--color-white) !important;
+  background-color: var(--color-white) !important;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.72rem;
+  color: var(--color-dark-grey) !important;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.insightButton:hover {
+  border-color: var(--color-grey) !important;
+  background: #F9FAFB !important;
+  background-color: #F9FAFB !important;
+}
+
+.section {
+  border: 1px solid var(--color-light-3);
+  border-radius: var(--radius-md);
+  background: var(--color-white);
+  overflow: hidden;
+}
+
+.sectionHeader {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: none !important;
+  background: var(--color-white) !important;
+  background-color: var(--color-white) !important;
+  color: var(--color-black) !important;
+  appearance: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sectionHeader:hover {
+  background: #F9FAFB !important;
+  background-color: #F9FAFB !important;
+}
+
+.sectionHeader:focus-visible,
+.sectionHeader:active {
+  background: #F9FAFB !important;
+  background-color: #F9FAFB !important;
+}
+
+.sectionHeaderLeft {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sectionTitle {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-black);
+}
+
+.sectionDesc {
+  font-size: var(--font-size-xs);
+  color: var(--color-grey);
+}
+
+.sectionHeaderRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sectionChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.chip {
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-light-3);
+  background: var(--color-white);
+  font-size: 0.7rem;
+  color: var(--color-dark-grey);
+  white-space: nowrap;
+}
+
+.sectionContent {
+  border-top: 1px solid var(--color-light-3);
+}
+
+@media (max-width: 720px) {
+  .sectionHeader {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .sectionHeaderRight {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

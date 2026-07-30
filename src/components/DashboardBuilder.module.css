@@ -1,0 +1,397 @@
+/* Empty State */
+.emptyState {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 500px;
+    text-align: center;
+    color: var(--color-grey);
+}
+
+.emptyIcon {
+    margin-bottom: var(--spacing-lg);
+    opacity: 0.5;
+}
+
+.emptyState h3 {
+    font-size: var(--font-size-xl);
+    color: var(--color-black);
+    margin-bottom: var(--spacing-sm);
+}
+
+.emptyState p {
+    margin-bottom: var(--spacing-md);
+}
+
+.hint {
+    font-size: var(--font-size-sm);
+    color: var(--color-dark-grey);
+    font-style: italic;
+    max-width: 600px;
+    margin: 0 auto;
+    line-height: 1.6;
+}
+
+/* Loading State */
+.loadingState {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 500px;
+    color: var(--color-grey);
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid var(--color-light-3);
+    border-top-color: var(--color-darker-grey);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: var(--spacing-md);
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Error State */
+.errorState {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 500px;
+    color: var(--color-dark-grey);
+    text-align: center;
+    gap: var(--spacing-md);
+}
+
+.retryButton {
+    margin-top: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-lg);
+    background: var(--gradient-cta);
+    color: #ffffff;
+    border: none;
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.retryButton:hover {
+    background: var(--gradient-cta-hover);
+    transform: translateY(-1px);
+}
+
+/* Dashboard Renderer */
+.dashboard {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xl);
+    padding: var(--spacing-lg);
+    height: 100%;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.dashboardHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding-bottom: var(--spacing-md);
+    border-bottom: 1px solid var(--color-light-3);
+}
+
+.dashboardHeader h2 {
+    font-size: var(--font-size-2xl);
+    font-weight: 600;
+    color: var(--color-black);
+    margin: 0 0 var(--spacing-xs) 0;
+}
+
+.dashboardDescription {
+    font-size: var(--font-size-sm);
+    color: var(--color-grey);
+    margin: 0;
+}
+
+.dashboardActions {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+.refreshButton,
+.clearButton,
+.editButton,
+.saveButton,
+.cancelButton {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--color-light-3);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.2s;
+    background-color: var(--color-white);
+    color: var(--color-dark-grey);
+}
+
+.refreshButton:hover:not(:disabled),
+.clearButton:hover,
+.editButton:hover {
+    background-color: var(--color-light-1);
+    border-color: var(--color-grey);
+    color: var(--color-darker-grey);
+}
+
+.saveButton:hover {
+    background-color: #10b981;
+    border-color: #10b981;
+    color: white;
+}
+
+.cancelButton:hover {
+    background-color: #ef4444;
+    border-color: #ef4444;
+    color: white;
+}
+
+.refreshButton:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.codeEditorContainer {
+    flex: 1;
+    overflow: hidden;
+    border: 1px solid var(--color-light-3);
+    border-radius: var(--radius-md);
+    margin-top: var(--spacing-md);
+    min-height: 500px;
+    height: calc(100vh - 250px);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+}
+
+.editError {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background-color: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: var(--radius-md);
+    color: #b91c1c;
+    font-size: var(--font-size-sm);
+    margin-top: var(--spacing-md);
+}
+
+.editorLoading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 400px;
+    color: var(--color-grey);
+}
+
+.spinning {
+    animation: spin 1s linear infinite;
+}
+
+/* Inputs Container */
+.inputsContainer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    background-color: var(--color-light-1);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-light-3);
+    margin-bottom: var(--spacing-lg);
+}
+
+.inputFullWidth {
+    flex: 1 1 100%;
+}
+
+.inputHalfWidth {
+    flex: 1 1 calc(50% - var(--spacing-md));
+}
+
+.inputThirdWidth {
+    flex: 1 1 calc(33.333% - var(--spacing-md));
+    min-width: 200px;
+}
+
+/* Metrics Grid */
+.metricsGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: var(--spacing-lg);
+}
+
+.metricCard {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-lg);
+    background-color: var(--color-white);
+    border: 1px solid var(--color-light-3);
+    border-radius: var(--radius-lg);
+    transition: all 0.2s;
+}
+
+.metricCard:hover {
+    border-color: var(--color-grey);
+    box-shadow: var(--shadow-md);
+}
+
+.metricIcon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    background-color: var(--color-light-1);
+    border-radius: var(--radius-md);
+    color: var(--color-darker-grey);
+}
+
+.metricContent {
+    flex: 1;
+}
+
+.metricValue {
+    font-size: var(--font-size-2xl);
+    font-weight: 700;
+    color: var(--color-black);
+    margin-bottom: var(--spacing-xs);
+}
+
+.metricLabel {
+    font-size: var(--font-size-sm);
+    color: var(--color-grey);
+    font-weight: 500;
+}
+
+.errorText {
+    color: var(--color-error);
+}
+
+/* Table Section */
+.tableSection {
+    margin-top: var(--spacing-lg);
+}
+
+.tableTitle {
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    color: var(--color-black);
+    margin-bottom: var(--spacing-md);
+}
+
+.errorBox {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-md);
+    background-color: var(--color-light-1);
+    border: 1px solid var(--color-error);
+    border-radius: var(--radius-md);
+    color: var(--color-error);
+    font-size: var(--font-size-sm);
+}
+
+.tableWrapper {
+    background-color: var(--color-white);
+    border: 1px solid var(--color-light-3);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+
+.dataTable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--font-size-sm);
+}
+
+.dataTable thead {
+    background-color: var(--color-light-1);
+}
+
+.dataTable th {
+    padding: var(--spacing-md) var(--spacing-lg);
+    text-align: left;
+    font-weight: 600;
+    color: var(--color-black);
+    border-bottom: 1px solid var(--color-light-3);
+    font-size: var(--font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.dataTable td {
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-bottom: 1px solid var(--color-light-3);
+    color: var(--color-text);
+}
+
+.dataTable tbody tr:hover {
+    background-color: var(--color-light-1);
+}
+
+.dataTable tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.nullValue {
+    color: var(--color-grey);
+    font-style: italic;
+}
+
+.emptyTable {
+    text-align: center;
+    color: var(--color-grey);
+    padding: var(--spacing-xl) !important;
+}
+
+/* Chart Section */
+.chartSection {
+    margin-top: var(--spacing-lg);
+}
+
+.chartTitle {
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    color: var(--color-black);
+    margin-bottom: var(--spacing-md);
+}
+
+.chartWrapper {
+    background-color: var(--color-white);
+    border: 1px solid var(--color-light-3);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    min-height: 400px;
+}
+
+.emptyChart {
+    text-align: center;
+    color: var(--color-grey);
+    padding: var(--spacing-xl);
+    background-color: var(--color-light-1);
+    border: 1px solid var(--color-light-3);
+    border-radius: var(--radius-lg);
+}

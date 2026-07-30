@@ -1,0 +1,225 @@
+/* Snipper Tool Overlay */
+.snipperOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.3);
+    z-index: 9999;
+    cursor: crosshair;
+}
+
+.selectionBox {
+    position: fixed;
+    border: 2px solid #0ea5e9;
+    background-color: rgba(14, 165, 233, 0.12);
+    pointer-events: none;
+    z-index: 10000;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+}
+
+.selectionInfo {
+    position: absolute;
+    top: -30px;
+    left: 0;
+    background-color: #0ea5e9;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.instructions {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10001;
+    pointer-events: none;
+}
+
+.instructionBox {
+    background-color: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 12px 20px;
+    border-radius: 8px;
+    text-align: center;
+    backdrop-filter: blur(10px);
+}
+
+.instructionBox p {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.instructionHint {
+    margin-top: 4px !important;
+    font-size: 12px !important;
+    opacity: 0.8;
+}
+
+/* Legacy styles for old modal (keeping for backward compatibility) */
+.overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    backdrop-filter: blur(4px);
+}
+
+.modal {
+    background-color: var(--color-white);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-xl);
+    max-width: 600px;
+    width: 90%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    z-index: 10001;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-lg);
+    border-bottom: 1px solid var(--color-light-3);
+}
+
+.header h3 {
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    color: var(--color-black);
+    margin: 0;
+}
+
+.closeButton {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background-color: transparent;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    color: var(--color-grey);
+    transition: all 0.2s;
+}
+
+.closeButton:hover {
+    background-color: var(--color-light-1);
+    color: var(--color-black);
+}
+
+.content {
+    padding: var(--spacing-lg);
+    overflow-y: auto;
+    flex: 1;
+}
+
+.options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
+}
+
+.optionButton {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-xl);
+    border: 2px solid var(--color-light-3);
+    border-radius: var(--radius-lg);
+    background-color: var(--color-white);
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--color-black);
+}
+
+.optionButton:hover {
+    border-color: var(--color-grey);
+    background-color: var(--color-light-1);
+}
+
+.optionButton.active {
+    border-color: var(--gradient-cta);
+    background-color: var(--color-light-1);
+}
+
+.preview {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.imagePreview {
+    max-height: 400px;
+    overflow: auto;
+    border: 1px solid var(--color-light-3);
+    border-radius: var(--radius-md);
+    background-color: var(--color-light-1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.imagePreview img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+}
+
+.confirmActions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--spacing-sm);
+}
+
+.confirmButton {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm) var(--spacing-lg);
+    background: var(--gradient-cta);
+    color: #ffffff;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.confirmButton:hover {
+    background: var(--gradient-cta-hover);
+    transform: translateY(-1px);
+}
+
+.cancelButton {
+    padding: var(--spacing-sm) var(--spacing-lg);
+    background-color: var(--color-light-1);
+    border: 1px solid var(--color-light-3);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.cancelButton:hover {
+    background-color: var(--color-light-2);
+}

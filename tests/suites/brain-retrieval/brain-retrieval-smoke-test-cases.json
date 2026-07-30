@@ -1,0 +1,70 @@
+[
+  {
+    "id": "smoke-bi-rag-bookings-by-month",
+    "probe": "training_context",
+    "category": "BI_RETRIEVAL",
+    "description": "RAG context for a BI question over USER_BOOKINGS should surface the bookings fact table and its temporal column without dragging in unrelated tables.",
+    "question": "How many bookings were made per month over the last 12 months?",
+    "expectedRagTables": ["USER_BOOKINGS"],
+    "forbiddenRagTables": ["ACCOUNT_LEDGER"],
+    "minResultCount": 1,
+    "expectedContextKeywords": ["USER_BOOKINGS"],
+    "forbiddenContextKeywords": []
+  },
+  {
+    "id": "smoke-bi-rag-ledger-by-mode",
+    "probe": "training_context",
+    "category": "BI_RETRIEVAL",
+    "description": "RAG context for a ledger aggregation should surface ACCOUNT_LEDGER and its mode/amount columns.",
+    "question": "What is the total amount for each mode in ACCOUNT_LEDGER?",
+    "expectedRagTables": ["ACCOUNT_LEDGER"],
+    "forbiddenRagTables": ["USER_BOOKINGS"],
+    "minResultCount": 1,
+    "expectedContextKeywords": ["ACCOUNT_LEDGER"]
+  },
+  {
+    "id": "smoke-bi-rag-cross-table-guest-booking",
+    "probe": "training_context",
+    "category": "BI_RETRIEVAL",
+    "description": "Cross-table BI question should retrieve both the guest and booking tables as the join surface.",
+    "question": "Show guest names with their booking amounts.",
+    "expectedRagTables": ["GUEST_MAPPING", "USER_BOOKINGS"],
+    "minResultCount": 1
+  },
+  {
+    "id": "smoke-schema-retrieve-hotel-columns",
+    "probe": "training_retrieve",
+    "category": "SCHEMA_EXPLORATION",
+    "description": "Schema exploration prompt for HOTEL columns should rank the HOTEL table at the top of retrieval.",
+    "question": "What columns are there in the HOTEL table?",
+    "topK": 15,
+    "expectedTablesCovered": ["HOTEL"],
+    "minTotalResults": 1,
+    "expectedSnippetKeywords": ["HOTEL"]
+  },
+  {
+    "id": "smoke-schema-retrieve-join-orders-detail",
+    "probe": "training_retrieve",
+    "category": "SCHEMA_EXPLORATION",
+    "description": "Join exploration for ORDERS/ORDER_DETAIL should retrieve both tables.",
+    "question": "How should ORDERS and ORDER_DETAIL be joined?",
+    "topK": 15,
+    "expectedTablesCovered": ["ORDERS", "ORDER_DETAIL"],
+    "minTotalResults": 1
+  },
+  {
+    "id": "smoke-business-rules-shape",
+    "probe": "business_rules",
+    "category": "BUSINESS_RULES",
+    "description": "Business rules endpoint should return well-shaped active rules array even when none are applicable.",
+    "question": "How many bookings were made last week?",
+    "minActiveRules": 0
+  },
+  {
+    "id": "smoke-inferred-relationships-shape",
+    "probe": "inferred_relationships",
+    "category": "INFERRED_RELATIONSHIPS",
+    "description": "Inferred relationships endpoint should return a JSON array (may be empty for an unanalyzed connection).",
+    "minRelationships": 0
+  }
+]

@@ -1,0 +1,51 @@
+package com.dbaagent.repository;
+
+import com.dbaagent.model.Permission;
+import com.dbaagent.model.Role;
+import com.dbaagent.model.RolePermissionOverride;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+public interface RolePermissionOverrideRepository extends JpaRepository<RolePermissionOverride, Long> {
+
+    /**
+     * Find all overrides for a specific role.
+     */
+    List<RolePermissionOverride> findByRole(Role role);
+
+    /**
+     * Find a specific override by role and permission.
+     */
+    Optional<RolePermissionOverride> findByRoleAndPermissionCode(Role role, Permission permissionCode);
+
+    /**
+     * Find all overrides that grant permissions (used for adding permissions to roles).
+     */
+    List<RolePermissionOverride> findByRoleAndGrantedTrue(Role role);
+
+    /**
+     * Find all overrides that revoke permissions (used for removing permissions from roles).
+     */
+    List<RolePermissionOverride> findByRoleAndGrantedFalse(Role role);
+
+    /**
+     * Delete an override by role and permission.
+     */
+    void deleteByRoleAndPermissionCode(Role role, Permission permissionCode);
+
+    /**
+     * Check if an override exists for a role-permission pair.
+     */
+    boolean existsByRoleAndPermissionCode(Role role, Permission permissionCode);
+
+    /**
+     * Count overrides (for admin dashboard).
+     */
+    @Query("SELECT COUNT(o) FROM RolePermissionOverride o")
+    long countOverrides();
+}

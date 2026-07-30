@@ -1,0 +1,318 @@
+.historyContainer {
+    padding: 1.5rem;
+    background: var(--color-white);
+    border: 1px solid var(--color-light-3);
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+}
+
+.header h3 {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.count {
+    font-size: 0.875rem;
+    color: var(--color-light-6);
+    background: var(--color-light-2);
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+}
+
+.emptyState {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 1rem;
+    color: var(--color-light-5);
+}
+
+.emptyState p {
+    margin: 0.5rem 0 0 0;
+    font-size: 1rem;
+    font-weight: 500;
+}
+
+.emptyState span {
+    margin-top: 0.25rem;
+    font-size: 0.875rem;
+}
+
+.historyList {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.historyItem {
+    border: 1px solid var(--color-light-3);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: all 0.2s;
+}
+
+.historyItem:hover {
+    border-color: var(--color-light-4);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.historyRow {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.historyRow:hover {
+    background: var(--color-light-1);
+}
+
+.expandIcon {
+    flex-shrink: 0;
+    color: var(--color-light-6);
+}
+
+.statusIcon {
+    flex-shrink: 0;
+}
+
+.iconSuccess {
+    color: var(--color-success);
+}
+
+.iconError {
+    color: var(--color-danger);
+}
+
+.iconCancelled {
+    color: var(--color-light-6);
+}
+
+.iconRunning {
+    color: var(--color-primary);
+}
+
+.iconWarning {
+    color: var(--color-warning);
+}
+
+.historyInfo {
+    flex: 1;
+    min-width: 0;
+}
+
+.historyMain {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.25rem;
+}
+
+.status {
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+}
+
+.statusSuccess {
+    color: var(--color-success);
+}
+
+.statusError {
+    color: var(--color-danger);
+}
+
+.statusCancelled {
+    color: var(--color-light-6);
+}
+
+.statusRunning {
+    color: var(--color-primary);
+}
+
+.statusWarning {
+    color: var(--color-warning);
+}
+
+.timestamp {
+    font-size: 0.875rem;
+    color: var(--color-light-6);
+}
+
+.historyMeta {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.8125rem;
+    color: var(--color-light-5);
+}
+
+.errorBadge {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.375rem 0.75rem;
+    background: var(--color-danger-soft);
+    color: var(--color-danger);
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.historyDetails {
+    padding: 1rem 1rem 1.5rem 3.5rem;
+    background: var(--color-light-1);
+    border-top: 1px solid var(--color-light-3);
+}
+
+.detailsGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.detailItem {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.detailLabel {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-light-6);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.detailValue {
+    font-size: 0.875rem;
+    color: var(--color-text);
+}
+
+.detailMessage,
+.detailError {
+    margin-top: 1rem;
+}
+
+.messageBox {
+    margin-top: 0.5rem;
+    padding: 0.75rem;
+    background: var(--color-white);
+    border: 1px solid var(--color-light-3);
+    border-radius: 6px;
+    font-size: 0.875rem;
+    color: var(--color-light-7);
+    line-height: 1.5;
+}
+
+.errorBox {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+    padding: 0.75rem;
+    background: var(--color-danger-soft);
+    border: 1px solid var(--color-danger-border);
+    border-radius: 6px;
+    font-size: 0.875rem;
+    color: var(--color-danger);
+    line-height: 1.5;
+}
+
+.tableTimings {
+    margin-top: 1rem;
+}
+
+.timingsTable {
+    margin-top: 0.5rem;
+    border: 1px solid var(--color-light-3);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.timingsHeader {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--color-light-2);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-light-6);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.timingsRow {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid var(--color-light-3);
+    font-size: 0.875rem;
+    color: var(--color-light-7);
+}
+
+.timingsRow:nth-child(even) {
+    background: var(--color-light-1);
+}
+
+.timingsMore {
+    padding: 0.75rem 1rem;
+    text-align: center;
+    font-size: 0.8125rem;
+    color: var(--color-light-6);
+    font-style: italic;
+    border-top: 1px solid var(--color-light-3);
+}
+
+/* Dark mode support */
+.dark-mode .historyContainer {
+    background: var(--color-dark-1);
+    border-color: var(--color-light-8);
+}
+
+.dark-mode .historyItem {
+    border-color: var(--color-light-8);
+}
+
+.dark-mode .historyRow:hover {
+    background: var(--color-dark-2);
+}
+
+.dark-mode .historyDetails {
+    background: var(--color-dark-2);
+    border-top-color: var(--color-light-8);
+}
+
+.dark-mode .messageBox,
+.dark-mode .timingsTable {
+    background: var(--color-dark-1);
+    border-color: var(--color-light-8);
+}
+
+.dark-mode .timingsHeader {
+    background: var(--color-dark-2);
+}
+
+.dark-mode .timingsRow {
+    border-top-color: var(--color-light-8);
+}
+
+.dark-mode .timingsRow:nth-child(even) {
+    background: var(--color-dark-3);
+}

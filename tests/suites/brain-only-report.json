@@ -1,0 +1,3228 @@
+{
+  "summary": {
+    "suites": {
+      "schema-metadata": {
+        "total": 10,
+        "brainAlonePasses": 4,
+        "needsAgent": 0,
+        "isMultiTurn": 0,
+        "retrievalChecked": 73,
+        "retrievalSatisfied": 59,
+        "retrievalCoverage": 0.8082191780821918,
+        "categories": {
+          "EXACT_TABLE_SCHEMA": {
+            "total": 5,
+            "brainAlone": 3,
+            "needsAgent": 0,
+            "checked": 32,
+            "satisfied": 30,
+            "coverage": 0.9375
+          },
+          "EXACT_TABLE_KEY_COLUMNS": {
+            "total": 1,
+            "brainAlone": 1,
+            "needsAgent": 0,
+            "checked": 8,
+            "satisfied": 8,
+            "coverage": 1.0
+          },
+          "PAIR_SCOPED_RELATIONSHIP": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 0,
+            "checked": 6,
+            "satisfied": 4,
+            "coverage": 0.6666666666666666
+          },
+          "PAIR_SCOPED_RELATIONSHIP_REASONING": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 0,
+            "checked": 11,
+            "satisfied": 5,
+            "coverage": 0.45454545454545453
+          },
+          "PAIR_SCOPED_JOIN_REASONING": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 0,
+            "checked": 9,
+            "satisfied": 6,
+            "coverage": 0.6666666666666666
+          },
+          "PAIR_SCOPED_JOIN_COLUMNS": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 0,
+            "checked": 7,
+            "satisfied": 6,
+            "coverage": 0.8571428571428571
+          }
+        }
+      },
+      "sql-accuracy": {
+        "total": 38,
+        "brainAlonePasses": 0,
+        "needsAgent": 38,
+        "isMultiTurn": 0,
+        "retrievalChecked": 108,
+        "retrievalSatisfied": 97,
+        "retrievalCoverage": 0.8981481481481481,
+        "categories": {
+          "VALUE_AWARE": {
+            "total": 4,
+            "brainAlone": 0,
+            "needsAgent": 4,
+            "checked": 10,
+            "satisfied": 10,
+            "coverage": 1.0
+          },
+          "AGGREGATION": {
+            "total": 4,
+            "brainAlone": 0,
+            "needsAgent": 4,
+            "checked": 10,
+            "satisfied": 10,
+            "coverage": 1.0
+          },
+          "DOMAIN": {
+            "total": 6,
+            "brainAlone": 0,
+            "needsAgent": 6,
+            "checked": 15,
+            "satisfied": 15,
+            "coverage": 1.0
+          },
+          "JOIN": {
+            "total": 4,
+            "brainAlone": 0,
+            "needsAgent": 4,
+            "checked": 15,
+            "satisfied": 15,
+            "coverage": 1.0
+          },
+          "TEMPORAL": {
+            "total": 2,
+            "brainAlone": 0,
+            "needsAgent": 2,
+            "checked": 4,
+            "satisfied": 4,
+            "coverage": 1.0
+          },
+          "COUNT": {
+            "total": 2,
+            "brainAlone": 0,
+            "needsAgent": 2,
+            "checked": 2,
+            "satisfied": 2,
+            "coverage": 1.0
+          },
+          "METADATA_ROUTING": {
+            "total": 4,
+            "brainAlone": 0,
+            "needsAgent": 4,
+            "checked": 16,
+            "satisfied": 13,
+            "coverage": 0.8125
+          },
+          "CLARIFICATION": {
+            "total": 4,
+            "brainAlone": 0,
+            "needsAgent": 4,
+            "checked": 0,
+            "satisfied": 0,
+            "coverage": null
+          },
+          "TABLE_SELECTION": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 4,
+            "satisfied": 4,
+            "coverage": 1.0
+          },
+          "JOIN_PATH": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 4,
+            "satisfied": 4,
+            "coverage": 1.0
+          },
+          "KEY_COLUMN_SELECTION": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 5,
+            "satisfied": 5,
+            "coverage": 1.0
+          },
+          "MULTI_HOP_JOIN": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 5,
+            "satisfied": 5,
+            "coverage": 1.0
+          },
+          "CLAUSE_SHAPE": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 5,
+            "satisfied": 1,
+            "coverage": 0.2
+          },
+          "WRONG_TABLE": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 5,
+            "satisfied": 4,
+            "coverage": 0.8
+          },
+          "READ_ONLY_SAFETY": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 3,
+            "satisfied": 2,
+            "coverage": 0.6666666666666666
+          },
+          "FOLLOW_UP_CONTINUITY": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 5,
+            "satisfied": 3,
+            "coverage": 0.6
+          }
+        }
+      },
+      "chat-resilience": {
+        "total": 11,
+        "brainAlonePasses": 0,
+        "needsAgent": 11,
+        "isMultiTurn": 7,
+        "retrievalChecked": 55,
+        "retrievalSatisfied": 50,
+        "retrievalCoverage": 0.9090909090909091,
+        "categories": {
+          "SIMPLE_BI": {
+            "total": 2,
+            "brainAlone": 0,
+            "needsAgent": 2,
+            "checked": 1,
+            "satisfied": 1,
+            "coverage": 1.0
+          },
+          "SIMPLE_SCHEMA": {
+            "total": 2,
+            "brainAlone": 0,
+            "needsAgent": 2,
+            "checked": 11,
+            "satisfied": 11,
+            "coverage": 1.0
+          },
+          "SAME_TOPIC_CHAIN": {
+            "total": 3,
+            "brainAlone": 0,
+            "needsAgent": 3,
+            "checked": 14,
+            "satisfied": 12,
+            "coverage": 0.8571428571428571
+          },
+          "MIXED_TOPIC_CHAIN": {
+            "total": 4,
+            "brainAlone": 0,
+            "needsAgent": 4,
+            "checked": 29,
+            "satisfied": 26,
+            "coverage": 0.896551724137931
+          }
+        }
+      },
+      "performance-monitoring": {
+        "total": 12,
+        "brainAlonePasses": 0,
+        "needsAgent": 12,
+        "isMultiTurn": 0,
+        "retrievalChecked": 148,
+        "retrievalSatisfied": 110,
+        "retrievalCoverage": 0.7432432432432432,
+        "categories": {
+          "COLUMN_IMPACT": {
+            "total": 2,
+            "brainAlone": 0,
+            "needsAgent": 2,
+            "checked": 28,
+            "satisfied": 20,
+            "coverage": 0.7142857142857143
+          },
+          "PERFORMANCE_SUMMARY": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 14,
+            "satisfied": 9,
+            "coverage": 0.6428571428571429
+          },
+          "PERFORMANCE_ACTIONS": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 13,
+            "satisfied": 10,
+            "coverage": 0.7692307692307693
+          },
+          "ACTIVE_QUERIES": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 12,
+            "satisfied": 8,
+            "coverage": 0.6666666666666666
+          },
+          "PLAN_REGRESSIONS": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 11,
+            "satisfied": 8,
+            "coverage": 0.7272727272727273
+          },
+          "INDEX_RECOMMENDATIONS": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 12,
+            "satisfied": 8,
+            "coverage": 0.6666666666666666
+          },
+          "TABLE_USAGE": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 11,
+            "satisfied": 10,
+            "coverage": 0.9090909090909091
+          },
+          "WORKLOAD": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 11,
+            "satisfied": 8,
+            "coverage": 0.7272727272727273
+          },
+          "TUNING": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 11,
+            "satisfied": 9,
+            "coverage": 0.8181818181818182
+          },
+          "CARDINALITY": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 12,
+            "satisfied": 12,
+            "coverage": 1.0
+          },
+          "GROWTH": {
+            "total": 1,
+            "brainAlone": 0,
+            "needsAgent": 1,
+            "checked": 13,
+            "satisfied": 8,
+            "coverage": 0.6153846153846154
+          }
+        }
+      }
+    },
+    "overall": {
+      "total": 71,
+      "brainAlonePasses": 4,
+      "needsAgent": 61,
+      "isMultiTurn": 7,
+      "retrievalChecked": 384,
+      "retrievalSatisfied": 316,
+      "retrievalCoverage": 0.8229166666666666
+    }
+  },
+  "results": {
+    "schema-metadata": [
+      {
+        "id": "schema-hotel-column-count",
+        "category": "EXACT_TABLE_SCHEMA",
+        "needsAgent": false,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 6,
+        "brainSatisfiedAssertions": 5,
+        "brainCoverage": 0.8333333333333334,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: 50 COLUMNS"
+        ],
+        "turns": [
+          {
+            "prompt": "How many columns we have in HOTEL table?",
+            "checked": 6,
+            "satisfied": 5,
+            "failures": [
+              "keyword: 50 COLUMNS"
+            ],
+            "matchedTables": [
+              "HOTEL"
+            ],
+            "skipReason": "simple_schema_question",
+            "ragResultCount": 0
+          }
+        ],
+        "durationMs": 65
+      },
+      {
+        "id": "schema-hotel-column-list",
+        "category": "EXACT_TABLE_SCHEMA",
+        "needsAgent": false,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 9,
+        "brainSatisfiedAssertions": 9,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": true,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "What columns are there in HOTEL table?",
+            "checked": 9,
+            "satisfied": 9,
+            "failures": [],
+            "matchedTables": [
+              "HOTEL"
+            ],
+            "skipReason": "simple_schema_question",
+            "ragResultCount": 0
+          }
+        ],
+        "durationMs": 74
+      },
+      {
+        "id": "schema-user-bookings-column-list",
+        "category": "EXACT_TABLE_SCHEMA",
+        "needsAgent": false,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 7,
+        "brainSatisfiedAssertions": 7,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": true,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "What columns are there in USER_BOOKINGS table?",
+            "checked": 7,
+            "satisfied": 7,
+            "failures": [],
+            "matchedTables": [
+              "USER",
+              "USER_BOOKINGS"
+            ],
+            "skipReason": "simple_schema_question",
+            "ragResultCount": 0
+          }
+        ],
+        "durationMs": 72
+      },
+      {
+        "id": "schema-room-reservations-key-columns",
+        "category": "EXACT_TABLE_KEY_COLUMNS",
+        "needsAgent": false,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 8,
+        "brainSatisfiedAssertions": 8,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": true,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show me all key columns in ROOM_RESERVATIONS table",
+            "checked": 8,
+            "satisfied": 8,
+            "failures": [],
+            "matchedTables": [
+              "ROOM_RESERVATIONS"
+            ],
+            "skipReason": "simple_schema_question",
+            "ragResultCount": 0
+          }
+        ],
+        "durationMs": 64
+      },
+      {
+        "id": "schema-accounts-row-count",
+        "category": "EXACT_TABLE_SCHEMA",
+        "needsAgent": false,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 5,
+        "brainSatisfiedAssertions": 5,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": true,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "How many rows in ACCOUNTS table?",
+            "checked": 5,
+            "satisfied": 5,
+            "failures": [],
+            "matchedTables": [
+              "ACCOUNTS"
+            ],
+            "skipReason": "simple_schema_question",
+            "ragResultCount": 0
+          }
+        ],
+        "durationMs": 62
+      },
+      {
+        "id": "schema-accounts-indexes",
+        "category": "EXACT_TABLE_SCHEMA",
+        "needsAgent": false,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 5,
+        "brainSatisfiedAssertions": 4,
+        "brainCoverage": 0.8,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: INDEX"
+        ],
+        "turns": [
+          {
+            "prompt": "What indexes are there on ACCOUNTS table?",
+            "checked": 5,
+            "satisfied": 4,
+            "failures": [
+              "keyword: INDEX"
+            ],
+            "matchedTables": [
+              "ACCOUNTS"
+            ],
+            "skipReason": "simple_schema_question",
+            "ragResultCount": 0
+          }
+        ],
+        "durationMs": 84
+      },
+      {
+        "id": "schema-orders-order-detail-relationship",
+        "category": "PAIR_SCOPED_RELATIONSHIP",
+        "needsAgent": false,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 6,
+        "brainSatisfiedAssertions": 4,
+        "brainCoverage": 0.6666666666666666,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: forbidden_keyword: CUSTOM_ORDER_INVOICE_NUMBERS",
+          "turn 0: forbidden_keyword: SHOP_IMAGES"
+        ],
+        "turns": [
+          {
+            "prompt": "How are ORDERS and ORDER_DETAIL related?",
+            "checked": 6,
+            "satisfied": 4,
+            "failures": [
+              "forbidden_keyword: CUSTOM_ORDER_INVOICE_NUMBERS",
+              "forbidden_keyword: SHOP_IMAGES"
+            ],
+            "matchedTables": [
+              "CTA_LOOKUP",
+              "CUSTOMER_CARDINFO",
+              "GUEST_COMPANY_DETAILS",
+              "GUEST_MAPPING",
+              "ORDERS",
+              "ORDER_DETAIL",
+              "hotel_id",
+              "id",
+              "idb_database",
+              "order_id",
+              "order_metadata",
+              "order_table_id",
+              "product_id",
+              "product_qty"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 70
+      },
+      {
+        "id": "schema-orders-order-detail-relationship-explained",
+        "category": "PAIR_SCOPED_RELATIONSHIP_REASONING",
+        "needsAgent": false,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 11,
+        "brainSatisfiedAssertions": 5,
+        "brainCoverage": 0.45454545454545453,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: ORDER_DETAIL.ORDER_ID = ORDERS.ID",
+          "turn 0: keyword: CHILD TABLE",
+          "turn 0: keyword: PARENT TABLE",
+          "turn 0: keyword: JOIN CONDITION",
+          "turn 0: forbidden_keyword: CUSTOM_ORDER_INVOICE_NUMBERS",
+          "turn 0: forbidden_keyword: SHOP_IMAGES"
+        ],
+        "turns": [
+          {
+            "prompt": "How are ORDERS and ORDER_DETAIL related?",
+            "checked": 11,
+            "satisfied": 5,
+            "failures": [
+              "keyword: ORDER_DETAIL.ORDER_ID = ORDERS.ID",
+              "keyword: CHILD TABLE",
+              "keyword: PARENT TABLE",
+              "keyword: JOIN CONDITION",
+              "forbidden_keyword: CUSTOM_ORDER_INVOICE_NUMBERS",
+              "forbidden_keyword: SHOP_IMAGES"
+            ],
+            "matchedTables": [
+              "CTA_LOOKUP",
+              "CUSTOMER_CARDINFO",
+              "GUEST_COMPANY_DETAILS",
+              "GUEST_MAPPING",
+              "ORDERS",
+              "ORDER_DETAIL",
+              "hotel_id",
+              "id",
+              "idb_database",
+              "order_id",
+              "order_metadata",
+              "order_table_id",
+              "product_id",
+              "product_qty"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 65
+      },
+      {
+        "id": "schema-orders-order-detail-join-guidance",
+        "category": "PAIR_SCOPED_JOIN_REASONING",
+        "needsAgent": false,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 9,
+        "brainSatisfiedAssertions": 6,
+        "brainCoverage": 0.6666666666666666,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: ORDER_DETAIL.ORDER_ID = ORDERS.ID",
+          "turn 0: forbidden_keyword: CUSTOM_ORDER_INVOICE_NUMBERS",
+          "turn 0: forbidden_keyword: SHOP_IMAGES"
+        ],
+        "turns": [
+          {
+            "prompt": "How should ORDERS and ORDER_DETAIL be joined?",
+            "checked": 9,
+            "satisfied": 6,
+            "failures": [
+              "keyword: ORDER_DETAIL.ORDER_ID = ORDERS.ID",
+              "forbidden_keyword: CUSTOM_ORDER_INVOICE_NUMBERS",
+              "forbidden_keyword: SHOP_IMAGES"
+            ],
+            "matchedTables": [
+              "AMENDMENT_POLICY",
+              "BOOKING_TAXES",
+              "CTA_LOOKUP",
+              "CUSTOMER_CARDINFO",
+              "ORDERS",
+              "ORDER_DETAIL",
+              "idb_database",
+              "order_id",
+              "order_metadata",
+              "order_table_id",
+              "product_id",
+              "product_qty",
+              "schedule_interval",
+              "supplier_id"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 56
+      },
+      {
+        "id": "schema-user-bookings-price-breakdown-join-columns",
+        "category": "PAIR_SCOPED_JOIN_COLUMNS",
+        "needsAgent": false,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 7,
+        "brainSatisfiedAssertions": 6,
+        "brainCoverage": 0.8571428571428571,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: PRICE_BREAKDOWN"
+        ],
+        "turns": [
+          {
+            "prompt": "what columns are joined commonly between USER BOOKINGS and PRICE BREAKDOWN tables",
+            "checked": 7,
+            "satisfied": 6,
+            "failures": [
+              "keyword: PRICE_BREAKDOWN"
+            ],
+            "matchedTables": [
+              "USER"
+            ],
+            "skipReason": "simple_schema_question",
+            "ragResultCount": 0
+          }
+        ],
+        "durationMs": 47
+      }
+    ],
+    "sql-accuracy": [
+      {
+        "id": "value-aware-01",
+        "category": "VALUE_AWARE",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 3,
+        "brainSatisfiedAssertions": 3,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "What is the total amount for each mode in ACCOUNT_LEDGER?",
+            "checked": 3,
+            "satisfied": 3,
+            "failures": [],
+            "matchedTables": [
+              "ACCOUNT_LEDGER",
+              "ACCOUNT_LEDGER_CREDIT",
+              "BOOKING_TAXES",
+              "GUEST_MAPPING",
+              "amount",
+              "idb_database",
+              "mode",
+              "type"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 435
+      },
+      {
+        "id": "value-aware-02",
+        "category": "VALUE_AWARE",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 2,
+        "brainSatisfiedAssertions": 2,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show booking counts by booking status",
+            "checked": 2,
+            "satisfied": 2,
+            "failures": [],
+            "matchedTables": [
+              "BE_FORMAT",
+              "BOOKING_AI_SUMMARY",
+              "BOOKING_CONVERSATION",
+              "BOOKING_CONVERSATION_MESSAGE",
+              "BOOKING_NOTES",
+              "BOOKING_TAXES",
+              "booking_status",
+              "count",
+              "reservation_status",
+              "self_checkout_status",
+              "self_service_status",
+              "status"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 447
+      },
+      {
+        "id": "value-aware-03",
+        "category": "VALUE_AWARE",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 3,
+        "brainSatisfiedAssertions": 3,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show total payment amounts grouped by payment gateway",
+            "checked": 3,
+            "satisfied": 3,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "CUSTOMER_CARDINFO",
+              "CUSTOM_PAYMENT_GATEWAY_INFO",
+              "GPMS_PENDING_REFUNDS",
+              "PAYMENTS",
+              "active_pg_name",
+              "booking_amount",
+              "external_payment",
+              "idb_database",
+              "invoice_gateway",
+              "payment_amount",
+              "pg_name",
+              "pm_gateway_fee",
+              "pm_gateway_name",
+              "pm_gateway_request",
+              "refund_amount",
+              "sf_commission_amount_excl_pg_fee"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 524
+      },
+      {
+        "id": "value-aware-04",
+        "category": "VALUE_AWARE",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 2,
+        "brainSatisfiedAssertions": 2,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "How many bookings per booking source?",
+            "checked": 2,
+            "satisfied": 2,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "CUSTOMER_CARDINFO",
+              "DUPLICATE_BOOKING",
+              "USER_BOOKINGS",
+              "booking_source",
+              "idb_database",
+              "response_count",
+              "source",
+              "total_room_revenue",
+              "total_rooms_sold"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 396
+      },
+      {
+        "id": "aggregation-01",
+        "category": "AGGREGATION",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 3,
+        "brainSatisfiedAssertions": 3,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "What is the total booking amount per hotel?",
+            "checked": 3,
+            "satisfied": 3,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "EXPANSE_OPERATION",
+              "HOTEL",
+              "amount",
+              "booking_amount",
+              "gross_amount",
+              "hotel_amount",
+              "idb_database.HOTEL_PRICING",
+              "idb_database.PAYMENTS",
+              "idb_database.USER_BOOKINGS",
+              "idb_database.user_bookings",
+              "invoice_booking_amount",
+              "total_amount",
+              "total_amount_after_tax",
+              "total_booking_amount",
+              "total_booking_amount_after_tax",
+              "total_fees",
+              "total_room_revenue",
+              "total_rooms"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 402
+      },
+      {
+        "id": "aggregation-02",
+        "category": "AGGREGATION",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 3,
+        "brainSatisfiedAssertions": 3,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show me the total booking fees by hotel",
+            "checked": 3,
+            "satisfied": 3,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_FEES",
+              "CUSTOM_INVOICE_NUMBER_CONFIG",
+              "HOTEL",
+              "booking_amount",
+              "booking_id",
+              "hotel",
+              "hotel_id",
+              "idb_database",
+              "is_vr",
+              "total_amount",
+              "total_booking_amount",
+              "total_booking_amount_after_tax",
+              "total_fees",
+              "total_room_revenue",
+              "total_tax"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 381
+      },
+      {
+        "id": "aggregation-03",
+        "category": "AGGREGATION",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 2,
+        "brainSatisfiedAssertions": 2,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "How many reservations per room type?",
+            "checked": 2,
+            "satisfied": 2,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "CITY_DEMAND_HOTEL_LIST",
+              "GLOBAL_FEATURES",
+              "HOTEL",
+              "adults",
+              "children",
+              "idb_database",
+              "max_rooms",
+              "min_rooms",
+              "room",
+              "room_type",
+              "type"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 422
+      },
+      {
+        "id": "aggregation-04",
+        "category": "AGGREGATION",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 2,
+        "brainSatisfiedAssertions": 2,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "What is the average booking amount?",
+            "checked": 2,
+            "satisfied": 2,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "CTA_LOOKUP",
+              "amount",
+              "balance_due",
+              "booking_amount",
+              "booking_discount",
+              "booking_savings",
+              "gross_amount",
+              "invoice_booking_amount",
+              "minimum_deposit",
+              "promo_amount",
+              "total_amount",
+              "total_booking_amount"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 615
+      },
+      {
+        "id": "domain-01",
+        "category": "DOMAIN",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 2,
+        "brainSatisfiedAssertions": 2,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "List all payment methods stored in ACCOUNT_PAYMENT_METHODS",
+            "checked": 2,
+            "satisfied": 2,
+            "failures": [],
+            "matchedTables": [
+              "ACCOUNT_PAYMENT_METHODS",
+              "ACCOUNT_PAYMENT_METHOD_INDIA",
+              "BOOKING_TAXES",
+              "CUSTOMER_CARDINFO",
+              "DO_NOT_RENT_STATUS",
+              "GPMS_PENDING_REFUNDS",
+              "ach_account_token",
+              "active",
+              "active_payment_method_id",
+              "card_on_file_id",
+              "group_id",
+              "id",
+              "idb_database",
+              "payment_method_id",
+              "payment_method_type",
+              "pg_name"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 520
+      },
+      {
+        "id": "domain-02",
+        "category": "DOMAIN",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 3,
+        "brainSatisfiedAssertions": 3,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show all hotel taxes",
+            "checked": 3,
+            "satisfied": 3,
+            "failures": [],
+            "matchedTables": [
+              "ADDON_TAXES",
+              "CUSTOM_INVOICE_NUMBER_CONFIG",
+              "HOTEL",
+              "HOTEL_SERVICE_TAXES",
+              "HOTEL_TAXES",
+              "be_show_room_price_with_tax",
+              "hotel",
+              "idb_database",
+              "is_vr",
+              "service_tax",
+              "tax_name",
+              "total_amount",
+              "total_tax"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 382
+      },
+      {
+        "id": "domain-03",
+        "category": "DOMAIN",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 2,
+        "brainSatisfiedAssertions": 2,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "What fees are configured for hotels?",
+            "checked": 2,
+            "satisfied": 2,
+            "failures": [],
+            "matchedTables": [
+              "CUSTOMER_CARDINFO",
+              "CUSTOM_INVOICE_NUMBER_CONFIG",
+              "GUEST_COMPANY_DETAILS",
+              "GUEST_MAPPING",
+              "HOTEL",
+              "HOTEL_FEES",
+              "fee_value",
+              "hotel_id",
+              "idb_database",
+              "late_checkout_charges",
+              "poststay",
+              "room_night_fee",
+              "self_service_ecin_commission",
+              "self_service_lcout_commission",
+              "self_service_room_upgrade_commission",
+              "self_service_scin_commission",
+              "service_charge_india",
+              "service_charge_other",
+              "service_charge_usa",
+              "total_fees"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 468
+      },
+      {
+        "id": "domain-04",
+        "category": "DOMAIN",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 3,
+        "brainSatisfiedAssertions": 3,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show cancellation details with refund amounts",
+            "checked": 3,
+            "satisfied": 3,
+            "failures": [],
+            "matchedTables": [
+              "CUSTOMER_CARDINFO",
+              "CUSTOMER_NOTES",
+              "DO_NOT_RENT_STATUS",
+              "GUEST_COMPANY_DETAILS",
+              "GUEST_MAPPING",
+              "USER_CANCELLATIONS",
+              "amount_breakdown",
+              "booking_amount",
+              "cancel_charge",
+              "cancel_taxes",
+              "cancelled_room_revenue",
+              "idb_database",
+              "policy_desc",
+              "refund",
+              "refund_amount",
+              "value"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 467
+      },
+      {
+        "id": "domain-05",
+        "category": "DOMAIN",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 2,
+        "brainSatisfiedAssertions": 2,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show hotel services with their amounts",
+            "checked": 2,
+            "satisfied": 2,
+            "failures": [],
+            "matchedTables": [
+              "CUSTOM_INVOICE_NUMBER_CONFIG",
+              "HOTEL",
+              "HOTEL_SERVICES",
+              "hotel",
+              "hotel_id",
+              "idb_database",
+              "is_tax_on_tax",
+              "is_vr",
+              "service_amount",
+              "service_amount_desc",
+              "service_discount",
+              "service_tax",
+              "tax_amount"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 399
+      },
+      {
+        "id": "join-01",
+        "category": "JOIN",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 4,
+        "brainSatisfiedAssertions": 4,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show customer names, emails, and booking amounts along with their hotel name from USER_BOOKINGS",
+            "checked": 4,
+            "satisfied": 4,
+            "failures": [],
+            "matchedTables": [
+              "CUSTOMER_NOTES",
+              "DO_NOT_RENT_STATUS",
+              "GUEST_COMPANY_DETAILS",
+              "GUEST_MAPPING",
+              "HOTEL",
+              "STAGED_USERBOOKINGS",
+              "USER",
+              "USER_BOOKINGS",
+              "booking_amount",
+              "idb_database",
+              "idb_database.HOTEL_PRICING",
+              "idb_database.PAYMENTS",
+              "idb_database.USER_BOOKINGS",
+              "idb_database.user_bookings",
+              "name",
+              "user_bookings",
+              "user_email",
+              "user_name"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 605
+      },
+      {
+        "id": "join-02",
+        "category": "JOIN",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 3,
+        "brainSatisfiedAssertions": 3,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show orders with their item details",
+            "checked": 3,
+            "satisfied": 3,
+            "failures": [],
+            "matchedTables": [
+              "CUSTOMER_CARDINFO",
+              "CUSTOMER_NOTES",
+              "DO_NOT_RENT_STATUS",
+              "GUEST_MAPPING",
+              "ORDERS",
+              "ORDER_DETAIL",
+              "id",
+              "idb_database",
+              "order_desc",
+              "order_id",
+              "order_metadata",
+              "product_id",
+              "product_name",
+              "product_wise_discount"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 378
+      },
+      {
+        "id": "join-03",
+        "category": "JOIN",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 4,
+        "brainSatisfiedAssertions": 4,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show booking taxes along with the booking amounts from USER_BOOKINGS",
+            "checked": 4,
+            "satisfied": 4,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "USER",
+              "USER_BOOKINGS",
+              "booking_amount",
+              "idb_database",
+              "idb_database.HOTEL_PRICING",
+              "idb_database.PAYMENTS",
+              "idb_database.USER_BOOKINGS",
+              "idb_database.user_bookings",
+              "person_tax",
+              "tax",
+              "tax_name",
+              "tax_percentage",
+              "tax_value",
+              "total_amount",
+              "total_amount_after_tax",
+              "total_booking_amount",
+              "total_booking_amount_after_tax",
+              "total_booking_tax",
+              "total_fees"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 382
+      },
+      {
+        "id": "temporal-01",
+        "category": "TEMPORAL",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 2,
+        "brainSatisfiedAssertions": 2,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "How many bookings were made per month?",
+            "checked": 2,
+            "satisfied": 2,
+            "failures": [],
+            "matchedTables": [
+              "1000",
+              "BOOKING_TAXES",
+              "CUSTOMER_CARDINFO",
+              "USER_BOOKINGS",
+              "booking_amount",
+              "booking_made_on",
+              "count",
+              "hotel_id",
+              "idb_databaseUSER_BOOKINGS",
+              "month",
+              "quantity",
+              "self_checkin_lead_hrs",
+              "total_rooms",
+              "total_rooms_sold"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 390
+      },
+      {
+        "id": "temporal-02",
+        "category": "TEMPORAL",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 2,
+        "brainSatisfiedAssertions": 2,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "What are the top 5 months by total payment amount from PAYMENTS?",
+            "checked": 2,
+            "satisfied": 2,
+            "failures": [],
+            "matchedTables": [
+              "ACCOUNT_PAYMENT_METHOD_INDIA",
+              "BOOKING_TAXES",
+              "CUSTOMER_CARDINFO",
+              "GPMS_PENDING_REFUNDS",
+              "PAID_MONTH",
+              "PAYMENTS",
+              "amount",
+              "id",
+              "idb_database",
+              "idb_database.HOTEL_PRICING",
+              "idb_database.PAYMENTS",
+              "idb_database.USER_BOOKINGS",
+              "idb_database.user_bookings",
+              "month",
+              "payment_made",
+              "refund_amount",
+              "status",
+              "year"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 384
+      },
+      {
+        "id": "count-01",
+        "category": "COUNT",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 1,
+        "brainSatisfiedAssertions": 1,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "How many hotels are there?",
+            "checked": 1,
+            "satisfied": 1,
+            "failures": [],
+            "matchedTables": [
+              "AMENDMENT_POLICY",
+              "CTA_LOOKUP",
+              "CUSTOMER_CARDINFO",
+              "GUEST_MAPPING",
+              "HOTEL",
+              "USER_BOOKINGS",
+              "allocated_room_count",
+              "available_inventory",
+              "booked_rooms",
+              "hotel_list",
+              "hotel_referral_count",
+              "id",
+              "idb_database",
+              "last_n_days",
+              "next_n_days",
+              "quantity",
+              "rooms",
+              "self_checkin_lead_hrs",
+              "star",
+              "total_room_count"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 451
+      },
+      {
+        "id": "count-02",
+        "category": "COUNT",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 1,
+        "brainSatisfiedAssertions": 1,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "How many bookings are there?",
+            "checked": 1,
+            "satisfied": 1,
+            "failures": [],
+            "matchedTables": [
+              "AMENDMENT_POLICY",
+              "CUSTOMER_CARDINFO",
+              "USER_BOOKINGS",
+              "booking_amount",
+              "booking_id",
+              "count",
+              "idb_database",
+              "num_people",
+              "quantity",
+              "self_checkin_lead_hrs",
+              "total_rooms",
+              "unread_count_for_guest"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 400
+      },
+      {
+        "id": "join-04",
+        "category": "JOIN",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 4,
+        "brainSatisfiedAssertions": 4,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show total billing amounts per month for accounts in India by joining ACCOUNTS and ACCOUNT_LEDGER on group_id",
+            "checked": 4,
+            "satisfied": 4,
+            "failures": [],
+            "matchedTables": [
+              "ACCOUNTS",
+              "ACCOUNT_LEDGER",
+              "CITY_DEMAND_HOTEL_LIST",
+              "EXPANSE_OPERATION",
+              "amount",
+              "billing_day",
+              "group_id",
+              "idb_database",
+              "idb_database.ACCOUNTS",
+              "idb_database.ACCOUNT_LEDGER",
+              "idb_database.HOTEL_PRICING",
+              "month"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 424
+      },
+      {
+        "id": "domain-06",
+        "category": "DOMAIN",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 3,
+        "brainSatisfiedAssertions": 3,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Give me total bookings revenue per hotel for 2025",
+            "checked": 3,
+            "satisfied": 3,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "CUSTOMER_CARDINFO",
+              "HOTEL",
+              "USER_BOOKINGS",
+              "booking_amount",
+              "hotel_id",
+              "idb_database",
+              "is_vr",
+              "net_amount",
+              "rev_target",
+              "revenue_by_booking_source_aggregation",
+              "total_revpar",
+              "total_room_revenue",
+              "total_rooms_sold"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 477
+      },
+      {
+        "id": "metadata-route-01",
+        "category": "METADATA_ROUTING",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 4,
+        "brainSatisfiedAssertions": 4,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "How many key columns do we have?",
+            "checked": 4,
+            "satisfied": 4,
+            "failures": [],
+            "matchedTables": [],
+            "skipReason": "simple_schema_question",
+            "ragResultCount": 0
+          }
+        ],
+        "durationMs": 52
+      },
+      {
+        "id": "metadata-route-02",
+        "category": "METADATA_ROUTING",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 4,
+        "brainSatisfiedAssertions": 4,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "How are USER_BOOKINGS and HOTEL related?",
+            "checked": 4,
+            "satisfied": 4,
+            "failures": [],
+            "matchedTables": [
+              "CUSTOM_INVOICE_NUMBER_CONFIG",
+              "HOTEL",
+              "USER",
+              "USER_BOOKINGS",
+              "USER_BOOKING_LOG",
+              "booking_id",
+              "hotel",
+              "hotel_id",
+              "idb_database",
+              "is_vr",
+              "user_bookings"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 402
+      },
+      {
+        "id": "metadata-route-03",
+        "category": "METADATA_ROUTING",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 4,
+        "brainSatisfiedAssertions": 1,
+        "brainCoverage": 0.25,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: PATTERN",
+          "turn 0: keyword: FACT",
+          "turn 0: keyword: DIMENSION"
+        ],
+        "turns": [
+          {
+            "prompt": "What is our schema pattern and which fact and dimension tables are identified?",
+            "checked": 4,
+            "satisfied": 1,
+            "failures": [
+              "keyword: PATTERN",
+              "keyword: FACT",
+              "keyword: DIMENSION"
+            ],
+            "matchedTables": [],
+            "skipReason": "simple_schema_question",
+            "ragResultCount": 0
+          }
+        ],
+        "durationMs": 49
+      },
+      {
+        "id": "clarify-01",
+        "category": "CLARIFICATION",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 0,
+        "brainSatisfiedAssertions": 0,
+        "brainCoverage": null,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show booking revenue trend",
+            "checked": 0,
+            "satisfied": 0,
+            "failures": [],
+            "matchedTables": [
+              "AMENDMENT_POLICY",
+              "BOOKING_TAXES",
+              "booking_amount",
+              "booking_savings",
+              "date",
+              "hotel_id",
+              "idb_database",
+              "net_amount",
+              "net_room_revenue",
+              "noshow_room_revenue",
+              "revenue_by_booking_source_aggregation",
+              "total_room_revenue",
+              "total_rooms_sold"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 1367
+      },
+      {
+        "id": "clarify-02",
+        "category": "CLARIFICATION",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 0,
+        "brainSatisfiedAssertions": 0,
+        "brainCoverage": null,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show top customers",
+            "checked": 0,
+            "satisfied": 0,
+            "failures": [],
+            "matchedTables": [
+              "AMENDMENT_POLICY",
+              "BOOKING_TAXES",
+              "CTA_LOOKUP",
+              "CUSTOMER_CARDINFO",
+              "booking_invoice_header",
+              "chat_rule_119b1c4a",
+              "contract_upload",
+              "cust_name",
+              "hotel_id",
+              "idb_database",
+              "idb_databaseACCOUNTS",
+              "idb_databaseHOTEL",
+              "idb_databaseSETTLEMENT_INVOICES",
+              "idb_databaseUSER",
+              "is_tax_on_tax",
+              "is_white_labelled",
+              "margin_top",
+              "type"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 437
+      },
+      {
+        "id": "clarify-03",
+        "category": "CLARIFICATION",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 0,
+        "brainSatisfiedAssertions": 0,
+        "brainCoverage": null,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Compare payment gateway performance",
+            "checked": 0,
+            "satisfied": 0,
+            "failures": [],
+            "matchedTables": [
+              "AMENDMENT_POLICY",
+              "BOOKING_TAXES",
+              "CUSTOMER_CARDINFO",
+              "CUSTOM_PAYMENT_GATEWAY_INFO",
+              "GPMS_PENDING_REFUNDS",
+              "active_pg_name",
+              "idb_database",
+              "invoice_gateway",
+              "pg_account_type",
+              "pg_avs_result_code",
+              "pg_name",
+              "pg_refund_speed",
+              "pg_transfer_on",
+              "pm_gateway_fee",
+              "pm_gateway_name",
+              "pm_gateway_request",
+              "refund_amount",
+              "rzp_recurring_payment_authorization_payment_id",
+              "sf_commission_amount_excl_pg_fee"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 360
+      },
+      {
+        "id": "selection-01",
+        "category": "TABLE_SELECTION",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 4,
+        "brainSatisfiedAssertions": 4,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show orders from checkout with their item details",
+            "checked": 4,
+            "satisfied": 4,
+            "failures": [],
+            "matchedTables": [
+              "CUSTOMER_NOTES",
+              "CUSTOM_INVOICE_NUMBER_CONFIG",
+              "DO_NOT_RENT_STATUS",
+              "GUEST_COMPANY_DETAILS",
+              "HOTEL",
+              "ORDERS",
+              "ORDER_DETAIL",
+              "checkout",
+              "display_checkout",
+              "idb_database",
+              "is_qr_order",
+              "item_id",
+              "order_desc",
+              "order_id",
+              "product_wise_discount",
+              "rm_name"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 394
+      },
+      {
+        "id": "join-path-01",
+        "category": "JOIN_PATH",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 4,
+        "brainSatisfiedAssertions": 4,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show booking amounts with hotel names for each booking",
+            "checked": 4,
+            "satisfied": 4,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_FEES",
+              "BOOKING_NOTES",
+              "BOOKING_TAXES",
+              "HOTEL",
+              "amount",
+              "amount_breakdown",
+              "balance_due",
+              "booking_amount",
+              "hotel_amount",
+              "hotel_id",
+              "name",
+              "total_amount",
+              "total_booking_amount",
+              "total_booking_amount_after_tax",
+              "total_room_revenue"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 644
+      },
+      {
+        "id": "key-column-01",
+        "category": "KEY_COLUMN_SELECTION",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 5,
+        "brainSatisfiedAssertions": 5,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show customer names and booking amounts from USER_BOOKINGS joined to their hotel by hotel_id",
+            "checked": 5,
+            "satisfied": 5,
+            "failures": [],
+            "matchedTables": [
+              "CUSTOMER_NOTES",
+              "CUSTOM_INVOICE_NUMBER_CONFIG",
+              "DO_NOT_RENT_STATUS",
+              "HOTEL",
+              "USER",
+              "USER_BOOKINGS",
+              "booking_amount",
+              "idb_database",
+              "name",
+              "refund",
+              "user_bookings"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 475
+      },
+      {
+        "id": "multi-hop-01",
+        "category": "MULTI_HOP_JOIN",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 5,
+        "brainSatisfiedAssertions": 5,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show hotel names and customer emails with booking amounts from USER_BOOKINGS",
+            "checked": 5,
+            "satisfied": 5,
+            "failures": [],
+            "matchedTables": [
+              "CUSTOMER_NOTES",
+              "DO_NOT_RENT_STATUS",
+              "GUEST_MAPPING",
+              "HOTEL",
+              "STAGED_USERBOOKINGS",
+              "USER",
+              "USER_BOOKINGS",
+              "idb_database",
+              "name",
+              "refund",
+              "user_bookings",
+              "user_email"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 841
+      },
+      {
+        "id": "clause-shape-01",
+        "category": "CLAUSE_SHAPE",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 5,
+        "brainSatisfiedAssertions": 1,
+        "brainCoverage": 0.2,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: expected_table: USER_BOOKINGS",
+          "turn 0: expected_column: booking_amount",
+          "turn 0: expected_column: booking_made_on",
+          "turn 0: forbidden_table: PAYMENTS"
+        ],
+        "turns": [
+          {
+            "prompt": "Show top 10 hotels by booking revenue in the last 30 days",
+            "checked": 5,
+            "satisfied": 1,
+            "failures": [
+              "expected_table: USER_BOOKINGS",
+              "expected_column: booking_amount",
+              "expected_column: booking_made_on",
+              "forbidden_table: PAYMENTS"
+            ],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "GLOBAL_FEATURES",
+              "HOTEL",
+              "hotel_id",
+              "idb_database",
+              "idb_databaseHOTEL",
+              "payment_percent",
+              "revenue_by_booking_source_aggregation",
+              "total_room_revenue",
+              "total_rooms_sold"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 460
+      },
+      {
+        "id": "wrong-table-01",
+        "category": "WRONG_TABLE",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 5,
+        "brainSatisfiedAssertions": 4,
+        "brainCoverage": 0.8,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: forbidden_table: PAYMENTS"
+        ],
+        "turns": [
+          {
+            "prompt": "Give me booking revenue by hotel for 2025",
+            "checked": 5,
+            "satisfied": 4,
+            "failures": [
+              "forbidden_table: PAYMENTS"
+            ],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "CUSTOM_INVOICE_NUMBER_CONFIG",
+              "HOTEL",
+              "USER_BOOKINGS",
+              "bookflexi_hotel_id",
+              "hotel_id",
+              "idb_database",
+              "is_vr",
+              "net_amount",
+              "rev_target",
+              "revenue_by_booking_source_aggregation",
+              "total_room_revenue",
+              "total_rooms_sold"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 371
+      },
+      {
+        "id": "metadata-route-04",
+        "category": "METADATA_ROUTING",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 4,
+        "brainSatisfiedAssertions": 4,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "How are ORDERS and ORDER_DETAIL related?",
+            "checked": 4,
+            "satisfied": 4,
+            "failures": [],
+            "matchedTables": [
+              "CTA_LOOKUP",
+              "CUSTOMER_CARDINFO",
+              "GUEST_COMPANY_DETAILS",
+              "GUEST_MAPPING",
+              "ORDERS",
+              "ORDER_DETAIL",
+              "hotel_id",
+              "id",
+              "idb_database",
+              "order_id",
+              "order_metadata",
+              "order_table_id",
+              "product_id",
+              "product_qty"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 51
+      },
+      {
+        "id": "safety-01",
+        "category": "READ_ONLY_SAFETY",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 3,
+        "brainSatisfiedAssertions": 2,
+        "brainCoverage": 0.6666666666666666,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: READ-ONLY"
+        ],
+        "turns": [
+          {
+            "prompt": "Delete bookings older than 2024",
+            "checked": 3,
+            "satisfied": 2,
+            "failures": [
+              "keyword: READ-ONLY"
+            ],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "CUSTOMER_CARDINFO",
+              "DELETED_BOOKINGS",
+              "GUEST_MAPPING",
+              "USER_BOOKINGS",
+              "booking_made_on",
+              "booking_to_date",
+              "check_in",
+              "check_out",
+              "checkout",
+              "data_snapshot",
+              "deleted_at",
+              "enquiry_expiration_time",
+              "id",
+              "idb_database",
+              "last_updated"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 370
+      },
+      {
+        "id": "clarify-04",
+        "category": "CLARIFICATION",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 0,
+        "brainSatisfiedAssertions": 0,
+        "brainCoverage": null,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show refund performance",
+            "checked": 0,
+            "satisfied": 0,
+            "failures": [],
+            "matchedTables": [
+              "AMENDMENT_POLICY",
+              "BOOKING_TAXES",
+              "GPMS_PENDING_REFUNDS",
+              "PAYMENT_REFUNDS",
+              "action_by",
+              "idb_database",
+              "pg_refund_speed",
+              "refund",
+              "refund_amount",
+              "refund_poststay",
+              "refund_status"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 413
+      },
+      {
+        "id": "continuity-01",
+        "category": "FOLLOW_UP_CONTINUITY",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 5,
+        "brainSatisfiedAssertions": 3,
+        "brainCoverage": 0.6,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: expected_column: user_name",
+          "turn 0: expected_column: booking_amount"
+        ],
+        "turns": [
+          {
+            "prompt": "Continue the prior customer booking query with a status filter",
+            "checked": 5,
+            "satisfied": 3,
+            "failures": [
+              "expected_column: user_name",
+              "expected_column: booking_amount"
+            ],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "CUSTOMER_NOTES",
+              "DO_NOT_RENT_STATUS",
+              "booking_status",
+              "idb_database",
+              "reservation_status",
+              "self_service_status",
+              "star_rating",
+              "status"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 404
+      }
+    ],
+    "chat-resilience": [
+      {
+        "id": "simple-bi-aggregation-01",
+        "category": "SIMPLE_BI",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 1,
+        "brainSatisfiedAssertions": 1,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "What is the total booking amount per hotel?",
+            "checked": 1,
+            "satisfied": 1,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "EXPANSE_OPERATION",
+              "HOTEL",
+              "amount",
+              "booking_amount",
+              "gross_amount",
+              "hotel_amount",
+              "idb_database.HOTEL_PRICING",
+              "idb_database.PAYMENTS",
+              "idb_database.USER_BOOKINGS",
+              "idb_database.user_bookings",
+              "invoice_booking_amount",
+              "total_amount",
+              "total_amount_after_tax",
+              "total_booking_amount",
+              "total_booking_amount_after_tax",
+              "total_fees",
+              "total_room_revenue",
+              "total_rooms"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 50
+      },
+      {
+        "id": "simple-bi-multipart-01",
+        "category": "SIMPLE_BI",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 0,
+        "brainSatisfiedAssertions": 0,
+        "brainCoverage": null,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "what is the MRR contributed by new properties in last month? also, show me details of all those properties. Hotel name, country, subscription amount.",
+            "checked": 0,
+            "satisfied": 0,
+            "failures": [],
+            "matchedTables": [
+              "ACCOUNTS",
+              "CUSTOM_INVOICE_NUMBER_CONFIG",
+              "GLOBAL_FEATURES",
+              "HOTEL",
+              "HOTEL_PRICING",
+              "city",
+              "country",
+              "idb_database",
+              "idb_databaseHOTEL",
+              "last_paid_amount",
+              "mmt_rate",
+              "month",
+              "name",
+              "net_room_revenue",
+              "net_rooms_sold",
+              "noshow_room_revenue",
+              "total_revpar",
+              "total_room_revenue",
+              "total_rooms_sold"
+            ],
+            "skipReason": null,
+            "ragResultCount": 25
+          }
+        ],
+        "durationMs": 435
+      },
+      {
+        "id": "simple-schema-columns-01",
+        "category": "SIMPLE_SCHEMA",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 9,
+        "brainSatisfiedAssertions": 9,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "What columns are there in HOTEL table?",
+            "checked": 9,
+            "satisfied": 9,
+            "failures": [],
+            "matchedTables": [
+              "HOTEL"
+            ],
+            "skipReason": "simple_schema_question",
+            "ragResultCount": 0
+          }
+        ],
+        "durationMs": 53
+      },
+      {
+        "id": "simple-schema-relationships-01",
+        "category": "SIMPLE_SCHEMA",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 2,
+        "brainSatisfiedAssertions": 2,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "How are USER_BOOKINGS and GUEST_MAPPING related?",
+            "checked": 2,
+            "satisfied": 2,
+            "failures": [],
+            "matchedTables": [
+              "CTA_LOOKUP",
+              "CUSTOMER_CARDINFO",
+              "GUEST_COMPANY_DETAILS",
+              "GUEST_MAPPING",
+              "USER",
+              "USER_BOOKINGS",
+              "booking_id",
+              "id",
+              "idb_database",
+              "reservation_id",
+              "user_bookings"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 359
+      },
+      {
+        "id": "same-topic-clarification-chain-01",
+        "category": "SAME_TOPIC_CHAIN",
+        "needsAgent": true,
+        "isMultiTurn": true,
+        "brainCheckedAssertions": 3,
+        "brainSatisfiedAssertions": 3,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show top customers",
+            "checked": 0,
+            "satisfied": 0,
+            "failures": [],
+            "matchedTables": [
+              "AMENDMENT_POLICY",
+              "BOOKING_TAXES",
+              "CTA_LOOKUP",
+              "CUSTOMER_CARDINFO",
+              "booking_invoice_header",
+              "chat_rule_119b1c4a",
+              "contract_upload",
+              "cust_name",
+              "hotel_id",
+              "idb_database",
+              "idb_databaseACCOUNTS",
+              "idb_databaseHOTEL",
+              "idb_databaseSETTLEMENT_INVOICES",
+              "idb_databaseUSER",
+              "is_tax_on_tax",
+              "is_white_labelled",
+              "margin_top",
+              "type"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          },
+          {
+            "prompt": "Show top 10 customers by total booking amount in the last 30 days with their names and emails.",
+            "checked": 3,
+            "satisfied": 3,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "GLOBAL_FEATURES",
+              "GUEST_MAPPING",
+              "USER_BOOKINGS",
+              "amount",
+              "idb_databaseACCOUNTS",
+              "idb_databaseHOTEL",
+              "idb_databaseSETTLEMENT_INVOICES",
+              "idb_databaseUSER",
+              "is_tax_on_tax",
+              "revenue_by_booking_source_aggregation",
+              "total_booking_amount",
+              "total_booking_amount_after_tax",
+              "user_email"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 446
+      },
+      {
+        "id": "same-topic-followup-chain-01",
+        "category": "SAME_TOPIC_CHAIN",
+        "needsAgent": true,
+        "isMultiTurn": true,
+        "brainCheckedAssertions": 8,
+        "brainSatisfiedAssertions": 6,
+        "brainCoverage": 0.75,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 1: expected_table: GUEST_MAPPING",
+          "turn 1: expected_table: USER_BOOKINGS"
+        ],
+        "turns": [
+          {
+            "prompt": "Show guest names and emails from GUEST_MAPPING with their booking amounts for the last 30 days.",
+            "checked": 5,
+            "satisfied": 5,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "GUEST_MAPPING",
+              "USER_BOOKINGS",
+              "booking_id",
+              "email",
+              "id",
+              "idb_database",
+              "primary_guest",
+              "reservation_id",
+              "user_name"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          },
+          {
+            "prompt": "Now only cancelled ones.",
+            "checked": 3,
+            "satisfied": 1,
+            "failures": [
+              "expected_table: GUEST_MAPPING",
+              "expected_table: USER_BOOKINGS"
+            ],
+            "matchedTables": [
+              "AMENDMENT_POLICY",
+              "BOOKING_TAXES",
+              "CTA_LOOKUP",
+              "PAYMENT_REFUNDS",
+              "apply",
+              "booking_status",
+              "cancel_by",
+              "cancel_date",
+              "cancel_taxes",
+              "cancelled",
+              "cancelled_room_revenue",
+              "cancelled_rooms_sold",
+              "generate_cust_invoice_cancel_noshow",
+              "hotel_id",
+              "id",
+              "idb_database",
+              "policy_name",
+              "refund"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 734
+      },
+      {
+        "id": "same-topic-scope-reuse-chain-01",
+        "category": "SAME_TOPIC_CHAIN",
+        "needsAgent": true,
+        "isMultiTurn": true,
+        "brainCheckedAssertions": 3,
+        "brainSatisfiedAssertions": 3,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "show me all the properties that are onboarded in the last 3 days and are active",
+            "checked": 1,
+            "satisfied": 1,
+            "failures": [],
+            "matchedTables": [
+              "ACCOUNTS",
+              "CTA_LOOKUP",
+              "CUSTOM_INVOICE_NUMBER_CONFIG",
+              "GLOBAL_FEATURES",
+              "HOTEL",
+              "HOTEL_PRICING",
+              "PAYMENT_REFUNDS",
+              "account_signup_date",
+              "discount_status",
+              "idb_database",
+              "idb_databaseHOTEL",
+              "name",
+              "onboarding_status",
+              "property_status",
+              "status"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          },
+          {
+            "prompt": "what is the booking volume for these properties?",
+            "checked": 2,
+            "satisfied": 2,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_NOTES",
+              "BOOKING_TAXES",
+              "CUSTOMER_CARDINFO",
+              "GLOBAL_FEATURES",
+              "USER_BOOKINGS",
+              "booked_rooms",
+              "booking_amount",
+              "hotel_id",
+              "idb_database",
+              "net_rooms_sold",
+              "rooms",
+              "total_rooms",
+              "total_rooms_sold"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 782
+      },
+      {
+        "id": "mixed-topic-bi-to-schema-01",
+        "category": "MIXED_TOPIC_CHAIN",
+        "needsAgent": true,
+        "isMultiTurn": true,
+        "brainCheckedAssertions": 8,
+        "brainSatisfiedAssertions": 8,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "What is the total booking amount per hotel?",
+            "checked": 1,
+            "satisfied": 1,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "EXPANSE_OPERATION",
+              "HOTEL",
+              "amount",
+              "booking_amount",
+              "gross_amount",
+              "hotel_amount",
+              "idb_database.HOTEL_PRICING",
+              "idb_database.PAYMENTS",
+              "idb_database.USER_BOOKINGS",
+              "idb_database.user_bookings",
+              "invoice_booking_amount",
+              "total_amount",
+              "total_amount_after_tax",
+              "total_booking_amount",
+              "total_booking_amount_after_tax",
+              "total_fees",
+              "total_room_revenue",
+              "total_rooms"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          },
+          {
+            "prompt": "What columns are there in HOTEL table?",
+            "checked": 7,
+            "satisfied": 7,
+            "failures": [],
+            "matchedTables": [
+              "HOTEL"
+            ],
+            "skipReason": "simple_schema_question",
+            "ragResultCount": 0
+          }
+        ],
+        "durationMs": 99
+      },
+      {
+        "id": "mixed-topic-schema-to-bi-01",
+        "category": "MIXED_TOPIC_CHAIN",
+        "needsAgent": true,
+        "isMultiTurn": true,
+        "brainCheckedAssertions": 6,
+        "brainSatisfiedAssertions": 6,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "What columns are there in USER_BOOKINGS table?",
+            "checked": 4,
+            "satisfied": 4,
+            "failures": [],
+            "matchedTables": [
+              "USER",
+              "USER_BOOKINGS"
+            ],
+            "skipReason": "simple_schema_question",
+            "ragResultCount": 0
+          },
+          {
+            "prompt": "How many bookings per booking status in the last 30 days?",
+            "checked": 2,
+            "satisfied": 2,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_AI_SUMMARY",
+              "BOOKING_CONVERSATION",
+              "BOOKING_CONVERSATION_MESSAGE",
+              "BOOKING_TAXES",
+              "USER_BOOKINGS",
+              "booking_status",
+              "reservation_status",
+              "self_service_status",
+              "status"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 424
+      },
+      {
+        "id": "mixed-topic-bi-to-metadata-01",
+        "category": "MIXED_TOPIC_CHAIN",
+        "needsAgent": true,
+        "isMultiTurn": true,
+        "brainCheckedAssertions": 7,
+        "brainSatisfiedAssertions": 7,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Show total payment amounts grouped by payment gateway",
+            "checked": 3,
+            "satisfied": 3,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "CUSTOMER_CARDINFO",
+              "CUSTOM_PAYMENT_GATEWAY_INFO",
+              "GPMS_PENDING_REFUNDS",
+              "PAYMENTS",
+              "active_pg_name",
+              "booking_amount",
+              "external_payment",
+              "idb_database",
+              "invoice_gateway",
+              "payment_amount",
+              "pg_name",
+              "pm_gateway_fee",
+              "pm_gateway_name",
+              "pm_gateway_request",
+              "refund_amount",
+              "sf_commission_amount_excl_pg_fee"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          },
+          {
+            "prompt": "How are USER_BOOKINGS and GUEST_MAPPING related?",
+            "checked": 4,
+            "satisfied": 4,
+            "failures": [],
+            "matchedTables": [
+              "CTA_LOOKUP",
+              "CUSTOMER_CARDINFO",
+              "GUEST_COMPANY_DETAILS",
+              "GUEST_MAPPING",
+              "USER",
+              "USER_BOOKINGS",
+              "booking_id",
+              "id",
+              "idb_database",
+              "reservation_id",
+              "user_bookings"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 117
+      },
+      {
+        "id": "mixed-topic-unrelated-shift-01",
+        "category": "MIXED_TOPIC_CHAIN",
+        "needsAgent": true,
+        "isMultiTurn": true,
+        "brainCheckedAssertions": 8,
+        "brainSatisfiedAssertions": 5,
+        "brainCoverage": 0.625,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 1: keyword: PATTERN",
+          "turn 1: keyword: FACT",
+          "turn 1: keyword: DIMENSION"
+        ],
+        "turns": [
+          {
+            "prompt": "Show guest names and emails from GUEST_MAPPING with their booking amounts for the last 30 days.",
+            "checked": 2,
+            "satisfied": 2,
+            "failures": [],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "GUEST_MAPPING",
+              "USER_BOOKINGS",
+              "booking_id",
+              "email",
+              "id",
+              "idb_database",
+              "primary_guest",
+              "reservation_id",
+              "user_name"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          },
+          {
+            "prompt": "What is our schema pattern and which fact and dimension tables are identified?",
+            "checked": 6,
+            "satisfied": 3,
+            "failures": [
+              "keyword: PATTERN",
+              "keyword: FACT",
+              "keyword: DIMENSION"
+            ],
+            "matchedTables": [],
+            "skipReason": "simple_schema_question",
+            "ragResultCount": 0
+          }
+        ],
+        "durationMs": 132
+      }
+    ],
+    "performance-monitoring": [
+      {
+        "id": "perf-column-impact",
+        "category": "COLUMN_IMPACT",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 14,
+        "brainSatisfiedAssertions": 10,
+        "brainCoverage": 0.7142857142857143,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: performance",
+          "turn 0: keyword: impact",
+          "turn 0: keyword: key-column",
+          "turn 0: keyword: anti-pattern"
+        ],
+        "turns": [
+          {
+            "prompt": "Which columns are impacting query performance?",
+            "checked": 14,
+            "satisfied": 10,
+            "failures": [
+              "keyword: performance",
+              "keyword: impact",
+              "keyword: key-column",
+              "keyword: anti-pattern"
+            ],
+            "matchedTables": [],
+            "skipReason": "simple_schema_question",
+            "ragResultCount": 0
+          }
+        ],
+        "durationMs": 45
+      },
+      {
+        "id": "perf-column-impact-wording-variant",
+        "category": "COLUMN_IMPACT",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 14,
+        "brainSatisfiedAssertions": 10,
+        "brainCoverage": 0.7142857142857143,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: performance",
+          "turn 0: keyword: impact",
+          "turn 0: keyword: key-column",
+          "turn 0: keyword: anti-pattern"
+        ],
+        "turns": [
+          {
+            "prompt": "Which columns are impacting the query performance?",
+            "checked": 14,
+            "satisfied": 10,
+            "failures": [
+              "keyword: performance",
+              "keyword: impact",
+              "keyword: key-column",
+              "keyword: anti-pattern"
+            ],
+            "matchedTables": [],
+            "skipReason": "simple_schema_question",
+            "ragResultCount": 0
+          }
+        ],
+        "durationMs": 46
+      },
+      {
+        "id": "perf-change-summary-24h",
+        "category": "PERFORMANCE_SUMMARY",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 14,
+        "brainSatisfiedAssertions": 9,
+        "brainCoverage": 0.6428571428571429,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: CPU",
+          "turn 0: keyword: connections",
+          "turn 0: keyword: actions",
+          "turn 0: forbidden_keyword: TABLE_ROWS",
+          "turn 0: forbidden_keyword: ENGINE"
+        ],
+        "turns": [
+          {
+            "prompt": "What changed in database performance over the last 24 hours?",
+            "checked": 14,
+            "satisfied": 9,
+            "failures": [
+              "keyword: CPU",
+              "keyword: connections",
+              "keyword: actions",
+              "forbidden_keyword: TABLE_ROWS",
+              "forbidden_keyword: ENGINE"
+            ],
+            "matchedTables": [
+              "CUSTOM_INVOICE_NUMBER_CONFIG",
+              "DO_NOT_RENT_STATUS",
+              "GLOBAL_FEATURES",
+              "HOTEL",
+              "INFORMATION_SCHEMACOLUMNS",
+              "INFORMATION_SCHEMATABLES",
+              "PAYMENTS",
+              "applied",
+              "card_last4",
+              "hours",
+              "idb_database",
+              "idb_databaseACCOUNTS",
+              "idb_databaseHOTEL",
+              "idb_databaseSETTLEMENT_INVOICES",
+              "idb_databaseUSER",
+              "last_login",
+              "last_modified_time",
+              "last_updated",
+              "new_created_at",
+              "update_time"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 368
+      },
+      {
+        "id": "perf-actions-roi",
+        "category": "PERFORMANCE_ACTIONS",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 13,
+        "brainSatisfiedAssertions": 10,
+        "brainCoverage": 0.7692307692307693,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: ranked",
+          "turn 0: keyword: benefit",
+          "turn 0: forbidden_keyword: TABLE_ROWS"
+        ],
+        "turns": [
+          {
+            "prompt": "What are the top performance actions I should take right now, ranked by ROI?",
+            "checked": 13,
+            "satisfied": 10,
+            "failures": [
+              "keyword: ranked",
+              "keyword: benefit",
+              "forbidden_keyword: TABLE_ROWS"
+            ],
+            "matchedTables": [
+              "AIRBNB_REVIEW",
+              "CTA_LOOKUP",
+              "CUSTOMER_CARDINFO",
+              "CUSTOM_INVOICE_NUMBER_CONFIG",
+              "GUEST_MAPPING",
+              "HOTEL",
+              "INFORMATION_SCHEMATABLES",
+              "PAYMENTS",
+              "USER_BOOKINGS",
+              "action_val",
+              "chat_rule_119b1c4a",
+              "chat_rule_2deec17f",
+              "description",
+              "idb_database",
+              "idb_databaseACCOUNTS",
+              "idb_databaseSETTLEMENT_INVOICES",
+              "idb_databaseUSER",
+              "offset_hrs",
+              "operation_type",
+              "permission_id"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 392
+      },
+      {
+        "id": "perf-active-queries-pressure",
+        "category": "ACTIVE_QUERIES",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 12,
+        "brainSatisfiedAssertions": 8,
+        "brainCoverage": 0.6666666666666666,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: waiting",
+          "turn 0: keyword: pressure",
+          "turn 0: keyword: wait",
+          "turn 0: forbidden_keyword: TABLE_ROWS"
+        ],
+        "turns": [
+          {
+            "prompt": "Which active queries are causing pressure right now, and what are they waiting on?",
+            "checked": 12,
+            "satisfied": 8,
+            "failures": [
+              "keyword: waiting",
+              "keyword: pressure",
+              "keyword: wait",
+              "forbidden_keyword: TABLE_ROWS"
+            ],
+            "matchedTables": [
+              "ACCOUNTS",
+              "CTA_LOOKUP",
+              "CUSTOM_INVOICE_NUMBER_CONFIG",
+              "HOTEL",
+              "HOTEL_PRICING",
+              "INFORMATION_SCHEMACOLUMNS",
+              "INFORMATION_SCHEMATABLES",
+              "PAYMENTS",
+              "USER_BOOKINGS",
+              "active",
+              "chat_rule_119b1c4a",
+              "chat_rule_2deec17f",
+              "idb_databaseACCOUNTS",
+              "idb_databaseSETTLEMENT_INVOICES",
+              "idb_databaseUSER"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 398
+      },
+      {
+        "id": "perf-plan-regressions",
+        "category": "PLAN_REGRESSIONS",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 11,
+        "brainSatisfiedAssertions": 8,
+        "brainCoverage": 0.7272727272727273,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: regress",
+          "turn 0: keyword: worse",
+          "turn 0: forbidden_keyword: TABLE_ROWS"
+        ],
+        "turns": [
+          {
+            "prompt": "Did any query plans regress recently, and which queries got worse?",
+            "checked": 11,
+            "satisfied": 8,
+            "failures": [
+              "keyword: regress",
+              "keyword: worse",
+              "forbidden_keyword: TABLE_ROWS"
+            ],
+            "matchedTables": [
+              "AMENDMENT_POLICY",
+              "BOOKING_TAXES",
+              "CTA_LOOKUP",
+              "GUEST_COMPANY_DETAILS",
+              "INFORMATION_SCHEMACOLUMNS",
+              "INFORMATION_SCHEMATABLES",
+              "PAYMENTS",
+              "chat_rule_119b1c4a",
+              "chat_rule_2deec17f",
+              "idb_databaseACCOUNTS",
+              "idb_databaseSETTLEMENT_INVOICES",
+              "idb_databaseUSER",
+              "rate_plan_id",
+              "revenue_by_booking_source_aggregation"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 392
+      },
+      {
+        "id": "perf-index-priority",
+        "category": "INDEX_RECOMMENDATIONS",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 12,
+        "brainSatisfiedAssertions": 8,
+        "brainCoverage": 0.6666666666666666,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: index",
+          "turn 0: keyword: workload",
+          "turn 0: keyword: recommendation",
+          "turn 0: keyword: why"
+        ],
+        "turns": [
+          {
+            "prompt": "Which columns or tables most urgently need indexes for current workload?",
+            "checked": 12,
+            "satisfied": 8,
+            "failures": [
+              "keyword: index",
+              "keyword: workload",
+              "keyword: recommendation",
+              "keyword: why"
+            ],
+            "matchedTables": [],
+            "skipReason": "simple_schema_question",
+            "ragResultCount": 0
+          }
+        ],
+        "durationMs": 69
+      },
+      {
+        "id": "perf-hot-tables",
+        "category": "TABLE_USAGE",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 11,
+        "brainSatisfiedAssertions": 10,
+        "brainCoverage": 0.9090909090909091,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: forbidden_keyword: TABLE_ROWS"
+        ],
+        "turns": [
+          {
+            "prompt": "Which tables are hottest right now, and how are they being used?",
+            "checked": 11,
+            "satisfied": 10,
+            "failures": [
+              "forbidden_keyword: TABLE_ROWS"
+            ],
+            "matchedTables": [
+              "CLOSING_STOCK",
+              "CTA_LOOKUP",
+              "CUSTOM_INVOICE_NUMBER_CONFIG",
+              "DEMAND_TREND_HOTEL",
+              "GUEST_MAPPING",
+              "HOTEL",
+              "INFORMATION_SCHEMACOLUMNS",
+              "INFORMATION_SCHEMATABLES",
+              "PAYMENT_REFUNDS",
+              "hotel_id",
+              "id",
+              "idb_database",
+              "permission_id"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 536
+      },
+      {
+        "id": "perf-workload-shape",
+        "category": "WORKLOAD",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 11,
+        "brainSatisfiedAssertions": 8,
+        "brainCoverage": 0.7272727272727273,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: OLTP",
+          "turn 0: keyword: OLAP",
+          "turn 0: forbidden_keyword: TABLE_ROWS"
+        ],
+        "turns": [
+          {
+            "prompt": "Is the workload OLTP, OLAP, or mixed, and what does that imply for tuning?",
+            "checked": 11,
+            "satisfied": 8,
+            "failures": [
+              "keyword: OLTP",
+              "keyword: OLAP",
+              "forbidden_keyword: TABLE_ROWS"
+            ],
+            "matchedTables": [
+              "BOOKING_TAXES",
+              "CTA_LOOKUP",
+              "GLOBAL_FEATURES",
+              "INFORMATION_SCHEMACOLUMNS",
+              "INFORMATION_SCHEMATABLES",
+              "USER_BOOKINGS",
+              "chat_rule_119b1c4a",
+              "chat_rule_2deec17f",
+              "display_description",
+              "hotel_id",
+              "idb_database",
+              "mode",
+              "notification_description",
+              "pss_manual_commission",
+              "report_type",
+              "role_desc",
+              "role_description",
+              "type"
+            ],
+            "skipReason": null,
+            "ragResultCount": 25
+          }
+        ],
+        "durationMs": 642
+      },
+      {
+        "id": "perf-config-knobs",
+        "category": "TUNING",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 11,
+        "brainSatisfiedAssertions": 9,
+        "brainCoverage": 0.8181818181818182,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: latency",
+          "turn 0: keyword: knob"
+        ],
+        "turns": [
+          {
+            "prompt": "What config knobs matter most for reducing latency on this database?",
+            "checked": 11,
+            "satisfied": 9,
+            "failures": [
+              "keyword: latency",
+              "keyword: knob"
+            ],
+            "matchedTables": [
+              "CUSTOMER_CARDINFO",
+              "CUSTOM_INVOICE_NUMBER_CONFIG",
+              "GUEST_MAPPING",
+              "HOTEL",
+              "config",
+              "idb_database",
+              "invoice_discount_amount",
+              "notification_description",
+              "refund_amount",
+              "returned_qty",
+              "role_desc"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 356
+      },
+      {
+        "id": "perf-cardinality-pain",
+        "category": "CARDINALITY",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 12,
+        "brainSatisfiedAssertions": 12,
+        "brainCoverage": 1.0,
+        "brainAlonePasses": false,
+        "failures": [],
+        "turns": [
+          {
+            "prompt": "Where are our statistics or cardinality estimates hurting plan quality?",
+            "checked": 12,
+            "satisfied": 12,
+            "failures": [],
+            "matchedTables": [
+              "CTA_LOOKUP",
+              "CUSTOMER_CARDINFO",
+              "GUEST_MAPPING",
+              "INFORMATION_SCHEMACOLUMNS",
+              "PAYMENT_REFUNDS",
+              "USER_BOOKINGS",
+              "chat_rule_119b1c4a",
+              "hotel_id",
+              "idb_database",
+              "order",
+              "push"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 396
+      },
+      {
+        "id": "perf-risky-growth",
+        "category": "GROWTH",
+        "needsAgent": true,
+        "isMultiTurn": false,
+        "brainCheckedAssertions": 13,
+        "brainSatisfiedAssertions": 8,
+        "brainCoverage": 0.6153846153846154,
+        "brainAlonePasses": false,
+        "failures": [
+          "turn 0: keyword: growth",
+          "turn 0: keyword: risk",
+          "turn 0: keyword: capacity",
+          "turn 0: keyword: run out",
+          "turn 0: forbidden_keyword: TABLE_ROWS"
+        ],
+        "turns": [
+          {
+            "prompt": "Which tables are on a risky growth path, and what might run out first?",
+            "checked": 13,
+            "satisfied": 8,
+            "failures": [
+              "keyword: growth",
+              "keyword: risk",
+              "keyword: capacity",
+              "keyword: run out",
+              "forbidden_keyword: TABLE_ROWS"
+            ],
+            "matchedTables": [
+              "CLOSING_STOCK",
+              "CTA_LOOKUP",
+              "CUSTOM_INVOICE_NUMBER_CONFIG",
+              "GUEST_MAPPING",
+              "HOTEL",
+              "INFORMATION_SCHEMACOLUMNS",
+              "INFORMATION_SCHEMATABLES",
+              "booking_id",
+              "chat_rule_119b1c4a",
+              "chat_rule_2deec17f",
+              "idb_database",
+              "idb_databaseACCOUNTS",
+              "idb_databaseSETTLEMENT_INVOICES",
+              "idb_databaseUSER",
+              "mode",
+              "self_checkout_status"
+            ],
+            "skipReason": null,
+            "ragResultCount": 20
+          }
+        ],
+        "durationMs": 419
+      }
+    ]
+  },
+  "base": "http://localhost:8080/api",
+  "connection": "a273f43a-a844-44a3-9026-1b0de1167e8f"
+}

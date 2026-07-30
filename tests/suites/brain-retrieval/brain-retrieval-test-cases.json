@@ -1,0 +1,153 @@
+[
+  {
+    "id": "bi-rag-bookings-by-month",
+    "probe": "training_context",
+    "category": "BI_RETRIEVAL",
+    "description": "Temporal aggregation over bookings should pull USER_BOOKINGS into the RAG table set.",
+    "question": "How many bookings were made per month over the last 12 months?",
+    "expectedRagTables": ["USER_BOOKINGS"],
+    "forbiddenRagTables": ["ACCOUNT_LEDGER", "HOTEL"],
+    "minResultCount": 1,
+    "expectedContextKeywords": ["USER_BOOKINGS"]
+  },
+  {
+    "id": "bi-rag-ledger-by-mode",
+    "probe": "training_context",
+    "category": "BI_RETRIEVAL",
+    "description": "Enum-style grouping should anchor on ACCOUNT_LEDGER and its mode/amount columns.",
+    "question": "What is the total amount for each mode in ACCOUNT_LEDGER?",
+    "expectedRagTables": ["ACCOUNT_LEDGER"],
+    "forbiddenRagTables": ["USER_BOOKINGS"],
+    "minResultCount": 1,
+    "expectedContextKeywords": ["ACCOUNT_LEDGER"]
+  },
+  {
+    "id": "bi-rag-revenue-by-hotel",
+    "probe": "training_context",
+    "category": "BI_RETRIEVAL",
+    "description": "Cross-entity BI (revenue per hotel) should retrieve both the bookings fact and the hotel dimension.",
+    "question": "What is the total booking revenue per hotel for the last 30 days?",
+    "expectedRagTables": ["USER_BOOKINGS", "HOTEL"],
+    "minResultCount": 1
+  },
+  {
+    "id": "bi-rag-guest-booking-join",
+    "probe": "training_context",
+    "category": "BI_RETRIEVAL",
+    "description": "Guest-to-booking attribution requires both GUEST_MAPPING and USER_BOOKINGS in the retrieval set.",
+    "question": "Show guest names and emails along with their booking amounts.",
+    "expectedRagTables": ["GUEST_MAPPING", "USER_BOOKINGS"],
+    "minResultCount": 1
+  },
+  {
+    "id": "bi-rag-ledger-temporal",
+    "probe": "training_context",
+    "category": "BI_RETRIEVAL",
+    "description": "Time-windowed ledger queries should keep ACCOUNT_LEDGER as the anchor and not drag in unrelated booking tables.",
+    "question": "What is the daily total settled amount in ACCOUNT_LEDGER over the last 14 days?",
+    "expectedRagTables": ["ACCOUNT_LEDGER"],
+    "forbiddenRagTables": ["USER_BOOKINGS"],
+    "minResultCount": 1
+  },
+  {
+    "id": "bi-rag-top-channels",
+    "probe": "training_context",
+    "category": "BI_RETRIEVAL",
+    "description": "Top-channel BI question should surface the bookings fact and not collapse onto reference dimension tables only.",
+    "question": "Which channels drove the highest booking value this quarter?",
+    "expectedRagTables": ["USER_BOOKINGS"],
+    "minResultCount": 1
+  },
+  {
+    "id": "bi-retrieve-orders-topk",
+    "probe": "training_retrieve",
+    "category": "BI_RETRIEVAL",
+    "description": "Top-K retrieval for orders BI should rank ORDERS in the covered table set.",
+    "question": "Show total order value by customer in the last 30 days.",
+    "topK": 15,
+    "expectedTablesCovered": ["ORDERS"],
+    "minTotalResults": 1
+  },
+  {
+    "id": "schema-retrieve-hotel-columns",
+    "probe": "training_retrieve",
+    "category": "SCHEMA_EXPLORATION",
+    "description": "Direct column-listing question should retrieve the HOTEL table at the top of the ranking.",
+    "question": "What columns are there in the HOTEL table?",
+    "topK": 15,
+    "expectedTablesCovered": ["HOTEL"],
+    "expectedSnippetKeywords": ["HOTEL"],
+    "minTotalResults": 1
+  },
+  {
+    "id": "schema-retrieve-orders-detail-join",
+    "probe": "training_retrieve",
+    "category": "SCHEMA_EXPLORATION",
+    "description": "Pair-scoped join question should retrieve both ORDERS and ORDER_DETAIL.",
+    "question": "How should ORDERS and ORDER_DETAIL be joined?",
+    "topK": 15,
+    "expectedTablesCovered": ["ORDERS", "ORDER_DETAIL"],
+    "minTotalResults": 1
+  },
+  {
+    "id": "schema-retrieve-guest-mapping-purpose",
+    "probe": "training_retrieve",
+    "category": "SCHEMA_EXPLORATION",
+    "description": "Purpose-of-table question should retrieve GUEST_MAPPING with descriptive snippets.",
+    "question": "What is the purpose of the GUEST_MAPPING table and which booking tables references it?",
+    "topK": 15,
+    "expectedTablesCovered": ["GUEST_MAPPING"],
+    "minTotalResults": 1
+  },
+  {
+    "id": "schema-context-find-fact-table",
+    "probe": "training_context",
+    "category": "SCHEMA_EXPLORATION",
+    "description": "Find-the-fact-table question should retrieve the bookings fact, not pure dimension tables.",
+    "question": "Which table stores the booking transactions with amounts and timestamps?",
+    "expectedRagTables": ["USER_BOOKINGS"],
+    "minResultCount": 1
+  },
+  {
+    "id": "schema-context-find-ledger-mode-column",
+    "probe": "training_context",
+    "category": "SCHEMA_EXPLORATION",
+    "description": "Locate-the-column question should retrieve ACCOUNT_LEDGER and surface the 'mode' column in the context blob.",
+    "question": "Which table has a payment mode column, and what values can it take?",
+    "expectedRagTables": ["ACCOUNT_LEDGER"],
+    "expectedContextKeywords": ["MODE"],
+    "minResultCount": 1
+  },
+  {
+    "id": "schema-retrieve-account-ledger-shape",
+    "probe": "training_retrieve",
+    "category": "SCHEMA_EXPLORATION",
+    "description": "Schema-only retrieval should return at least one snippet covering ACCOUNT_LEDGER for an exact-table lookup.",
+    "question": "What columns does ACCOUNT_LEDGER expose?",
+    "topK": 10,
+    "expectedTablesCovered": ["ACCOUNT_LEDGER"],
+    "minTotalResults": 1
+  },
+  {
+    "id": "rules-shape-with-question",
+    "probe": "business_rules",
+    "category": "BUSINESS_RULES",
+    "description": "Business rules endpoint should return a well-shaped response with both activeRules and applicableGuardrails arrays.",
+    "question": "How many bookings were made last week?",
+    "minActiveRules": 0
+  },
+  {
+    "id": "rules-shape-without-question",
+    "probe": "business_rules",
+    "category": "BUSINESS_RULES",
+    "description": "Calling business rules without a question should still return the active rule set for the connection.",
+    "minActiveRules": 0
+  },
+  {
+    "id": "inferred-relationships-shape",
+    "probe": "inferred_relationships",
+    "category": "INFERRED_RELATIONSHIPS",
+    "description": "Inferred relationships endpoint should return a JSON array (may be empty for an unanalyzed connection, but shape must hold).",
+    "minRelationships": 0
+  }
+]

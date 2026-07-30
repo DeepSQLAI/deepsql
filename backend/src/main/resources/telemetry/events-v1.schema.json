@@ -1,0 +1,57 @@
+{
+  "schema_version": "v1",
+  "events": {
+    "install.bootstrapped": {
+      "properties": {
+        "install_method":  { "type": "string", "enum": ["curl-pipe-bash", "cfn", "local-checkout", "manual", "unknown"] },
+        "os":              { "type": "string" },
+        "arch":            { "type": "string" }
+      }
+    },
+    "install.heartbeat": {
+      "properties": {
+        "services_up":                   { "type": "array",   "items": { "type": "string" } },
+        "connections_count":             { "type": "integer" },
+        "active_brain_inits":            { "type": "integer" },
+        "active_users_24h":              { "type": "integer" },
+        "sql_executed_count":            { "type": "integer" },
+        "sql_executed_by_role":          { "type": "object" },
+        "queries_interval_total":             { "type": "integer" },
+        "queries_interval_source_ui":         { "type": "integer" },
+        "queries_interval_source_chat":       { "type": "integer" },
+        "queries_interval_source_mcp":        { "type": "integer" },
+        "queries_interval_source_scheduled":  { "type": "integer" },
+        "queries_interval_source_api":        { "type": "integer" },
+        "queries_interval_source_internal":   { "type": "integer" },
+        "queries_interval_source_unknown":    { "type": "integer" },
+        "queries_interval_dialect_postgres":  { "type": "integer" },
+        "queries_interval_dialect_mysql":     { "type": "integer" },
+        "queries_interval_dialect_unknown":   { "type": "integer" },
+        "brain_retrievals_interval_total":    { "type": "integer" },
+        "slow_query_ingestion_runs_interval": { "type": "integer" },
+        "frontend_reachable":            { "type": "boolean" },
+        "uptime_seconds":                { "type": "integer" }
+      }
+    },
+    "connection.created": {
+      "properties": {
+        "db_dialect":            { "type": "string", "enum": ["postgres", "mysql", "unknown"] },
+        "ssh_enabled":           { "type": "boolean" },
+        "cloud_provider":        { "type": "string" }
+      }
+    },
+    "connection.deleted": {
+      "properties": {
+        "db_dialect":            { "type": "string", "enum": ["postgres", "mysql", "unknown"] }
+      }
+    },
+    "slow_query.ingestion_run.completed": {
+      "properties": {
+        "dialect":         { "type": "string", "enum": ["postgres", "mysql", "unknown"] },
+        "rows_ingested":   { "type": "integer" },
+        "run_duration_ms": { "type": "integer" },
+        "success":         { "type": "boolean" }
+      }
+    }
+  }
+}

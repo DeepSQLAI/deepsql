@@ -1,0 +1,310 @@
+.brainPanel {
+    width: 100%;
+    background: white;
+    padding: 0 16px 16px;
+}
+
+.brainHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 24px;
+}
+
+.brainHeader h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #111827;
+    margin: 0 0 4px 0;
+}
+
+.brainHeader p {
+    font-size: 14px;
+    color: #6B7280;
+    margin: 0;
+}
+
+.brainHeaderActions {
+    display: flex;
+    gap: 12px;
+}
+
+.profileButton {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: #111827;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.profileButton:hover:not(:disabled) {
+    background: #374151;
+    transform: translateY(-1px);
+}
+
+.profileButton:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.brainError {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    border-radius: 8px;
+    color: #B91C1C;
+    font-size: 13px;
+    margin-bottom: 16px;
+}
+
+.loadingState {
+    text-align: center;
+    padding: 48px;
+    color: #6B7280;
+}
+
+.spinner {
+    animation: spin 1s linear infinite;
+    margin-bottom: 12px;
+    color: #111827;
+}
+
+.brainTabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    padding: 4px;
+    background: #F3F4F6;
+    border-radius: 8px;
+    width: fit-content;
+}
+
+.brainTab {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #6B7280;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.brainTab:hover {
+    color: #111827;
+    background: rgba(255, 255, 255, 0.5);
+}
+
+.brainTabActive {
+    background: white;
+    color: #111827;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    font-weight: 600;
+}
+
+.warningBox {
+    background: #FFF7ED;
+    border: 1px solid #FED7AA;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.warningIcon {
+    color: #F59E0B;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.warningBox h4 {
+    margin: 0 0 8px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #B45309;
+}
+
+.warningBox p {
+    margin: 0 0 12px 0;
+    font-size: 13px;
+    color: #B45309;
+    line-height: 1.5;
+}
+
+.warningBox ol {
+    margin: 0;
+    padding-left: 20px;
+    font-size: 13px;
+    color: #B45309;
+    line-height: 1.8;
+}
+
+/* Table Styles */
+.tableWrapper {
+    margin-bottom: 16px;
+}
+
+.tableHeader {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.tableHeader h4 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.tableHeader span {
+    font-weight: 400;
+    color: #6B7280;
+    margin-left: 8px;
+}
+
+.tableScroll {
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    overflow: hidden;
+    background: white;
+}
+
+.table {
+    width: 100%;
+    min-width: 800px;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.table thead {
+    background: #F9FAFB;
+    border-bottom: 1px solid #E5E7EB;
+}
+
+.table th {
+    padding: 12px 16px;
+    font-weight: 600;
+    color: #374151;
+    white-space: nowrap;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+}
+
+.thLeft {
+    text-align: left;
+}
+
+.thCenter {
+    text-align: center;
+}
+
+.table tbody tr {
+    border-bottom: 1px solid #F3F4F6;
+    transition: background 0.15s ease;
+}
+
+.table tbody tr:last-child {
+    border-bottom: none;
+}
+
+.table tbody tr:hover {
+    background: #F9FAFB;
+}
+
+.table td {
+    padding: 12px 16px;
+    color: #111827;
+    vertical-align: middle;
+}
+
+.tableCell {
+    text-align: left;
+}
+
+.tableCellName {
+    text-align: left;
+    font-family: 'Geist Mono', monospace;
+    font-weight: 500;
+}
+
+.tableCellCenter {
+    text-align: center;
+}
+
+.tableCellRight {
+    text-align: right;
+    font-feature-settings: "tnum";
+}
+
+.tableCellSmall {
+    font-size: 12px;
+    color: #6B7280;
+}
+
+/* Badges */
+.roleBadge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.healthScore {
+    font-weight: 700;
+}
+
+.emptyState {
+    text-align: center;
+    padding: 64px 24px;
+    color: #9CA3AF;
+    background: #F9FAFB;
+    border-radius: 12px;
+    border: 1px dashed #E5E7EB;
+}
+
+.emptyTitle {
+    font-size: 16px;
+    font-weight: 600;
+    color: #374151;
+    margin: 16px 0 8px;
+}
+
+.emptyDesc {
+    font-size: 14px;
+    color: #6B7280;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}

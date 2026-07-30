@@ -1,0 +1,269 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px;
+  max-width: 680px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+  padding: 16px;
+}
+
+.cardHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.lead {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: #6b7280;
+  line-height: 1.55;
+}
+
+.lead code {
+  font-family: var(--font-family-mono, ui-monospace, Menlo, monospace);
+  font-size: 11.5px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.autoBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.savedBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.tenantRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.inlineLabel {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.select {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: var(--font-family-mono, ui-monospace, Menlo, monospace);
+  color: #111827;
+  background: #fff;
+  cursor: pointer;
+}
+
+.select:focus {
+  outline: none;
+  border-color: #111827;
+}
+
+.lookupLine {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.advancedToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 6px 4px;
+  border: none;
+  background: transparent;
+  color: #4b5563;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.advancedToggle:hover {
+  color: #111827;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.toggleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.saveButton {
+  align-self: flex-start;
+  padding: 8px 16px;
+  border: 1px solid #111827;
+  border-radius: 8px;
+  background: #111827;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.saveButton:hover {
+  opacity: 0.85;
+}
+
+.empty {
+  padding: 32px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+/* ── danger zone ──────────────────────────────────────────────────── */
+
+.dangerH3 {
+  color: #991b1b;
+}
+
+.resetWarning {
+  font-size: 12.5px;
+  color: #991b1b;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 7px;
+  padding: 9px 12px;
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+.resetRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.resetButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 7px;
+  background: #fff;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.resetButton:hover:not(:disabled) {
+  border-color: #991b1b;
+  color: #991b1b;
+}
+
+.resetButton:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.resetButtonDanger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid #dc2626;
+  border-radius: 7px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+
+.resetButtonDanger:hover {
+  opacity: 0.88;
+}
+
+.cancelButton {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 7px;
+  background: #fff;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.cancelButton:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+@media (max-width: 680px) {
+  .row {
+    flex-direction: column;
+  }
+}

@@ -1,0 +1,157 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #374151;
+}
+
+.textBlock {
+  /* inherits from root */
+}
+
+/* ── Artifact card (chart or table) ──────────────────────────────────────── */
+.artifact {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.artifactHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f3f4f6;
+  background: #fafafa;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.artifactTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rowCount {
+  font-size: 11px;
+  font-weight: 500;
+  color: #9ca3af;
+  background: #f3f4f6;
+  padding: 2px 7px;
+  border-radius: 20px;
+}
+
+/* Recharts container padding */
+.artifact > div[class*="recharts"] {
+  padding: 16px 12px 8px;
+}
+
+/* ── Download toolbar ────────────────────────────────────────────────────── */
+.downloadBar {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.downloadBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-family-sans);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+  white-space: nowrap;
+}
+
+.downloadBtn:hover {
+  background: #f3f4f6;
+  color: #111;
+  border-color: #d1d5db;
+}
+
+/* ── Table ───────────────────────────────────────────────────────────────── */
+.tableWrap {
+  overflow-x: auto;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.th {
+  position: sticky;
+  top: 0;
+  padding: 9px 14px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+}
+
+.tr {
+  transition: background 0.1s;
+}
+
+.tr:hover {
+  background: #f9fafb;
+}
+
+.tr:not(:last-child) .td {
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.td {
+  padding: 8px 14px;
+  color: #374151;
+  font-size: 12.5px;
+  white-space: nowrap;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toggleRows {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  padding: 9px;
+  border: none;
+  border-top: 1px solid #f3f4f6;
+  background: #fafafa;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-family-sans);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.toggleRows:hover {
+  background: #f3f4f6;
+  color: #111;
+}

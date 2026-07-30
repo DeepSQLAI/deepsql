@@ -1,0 +1,89 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/mcp/node_modules
+/.pnp
+.pnp.js
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env*.local
+.env
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# backend
+backend/data/
+backend/target/
+# Production property files contain real credentials — never commit
+backend/src/main/resources/application-prod.properties
+backend/src/main/resources/application-azprod.properties
+backend/.mvn/
+# large test data (over GitHub 100MB limit)
+backend/test_data_inserts.sql
+backend/comprehensive_test_data_mysql.sql
+
+# log
+*.log
+dist
+/backend/slow-query-logs/
+test-results/
+e2e/screenshots/
+playwright-report/
+
+# E2E test screenshots
+mockups/
+output/
+.playwright-mcp/
+
+# Rust / optd-sidecar
+optd-sidecar/target/
+
+# Process IDs
+*.pid
+
+# Worktrees
+.worktrees/
+
+# Subdirectory CLAUDE.md files (claude-mem auto-generated activity logs)
+# Root CLAUDE.md and docs/root/CLAUDE.md are tracked; all others are excluded.
+# mcp/CLAUDE.md is also tracked — it's runtime guidance shipped in @deepsql/mcp.
+**/CLAUDE.md
+!/CLAUDE.md
+!/docs/root/CLAUDE.md
+!/mcp/CLAUDE.md
+
+# Claude Code agent worktrees
+.claude/worktrees/
+
+# Stray upstream sources at the repo root. Four JSQLParser files and Spring Batch's
+# schema-postgresql.sql were once committed here byte-identical to their upstream jars.
+# They were on no build path (the Maven module is backend/; there is no root pom.xml)
+# and were removed. Anchored so an IDE "download sources"/decompile action cannot
+# silently recreate them — real code lives under backend/src or src.
+/net/
+/org/

@@ -1,0 +1,1309 @@
+/* ── Layout ─────────────────────────────────────────────────────────────── */
+.root {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+  background: #fff;
+  font-family: var(--font-family-sans);
+}
+
+/* ── Sidebar ────────────────────────────────────────────────────────────── */
+.sidebar {
+  width: 300px;
+  min-width: 260px;
+  border-right: 1px solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebarHeader {
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid #f0f0f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sidebarTitle {
+  font-size: 15px;
+  font-weight: 700;
+  color: #111;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.newBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: none;
+  background: #000;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-family-sans);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, transform 0.1s;
+}
+
+.newBtn:hover {
+  background: #222;
+  transform: translateY(-1px);
+}
+
+.agentList {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+/* ── Agent Card (sidebar) ────────────────────────────────────────────────── */
+.agentCard {
+  padding: 12px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.1s;
+  margin-bottom: 2px;
+  border: 1px solid transparent;
+  position: relative;
+}
+
+.agentCard:hover {
+  background: #f9fafb;
+}
+
+.agentCardActive {
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+}
+
+.agentCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.agentIcon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #111;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.agentIconDisabled {
+  background: #d1d5db;
+}
+
+.agentCardName {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.agentCardNameDisabled {
+  color: #9ca3af;
+}
+
+.agentCardDesc {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.agentCardMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.scheduleBadge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 20px;
+  background: #f3f4f6;
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #d1d5db;
+  flex-shrink: 0;
+}
+
+.statusDotEnabled {
+  background: #10b981;
+}
+
+.lastRun {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+/* ── Empty sidebar state ──────────────────────────────────────────────────── */
+.emptyList {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 32px 24px;
+  text-align: center;
+  gap: 10px;
+}
+
+.emptyListIcon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.emptyListTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+  margin: 0;
+}
+
+.emptyListSub {
+  font-size: 12px;
+  color: #9ca3af;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ── Main panel ───────────────────────────────────────────────────────────── */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Welcome / No selection state ─────────────────────────────────────────── */
+.welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px;
+  text-align: center;
+}
+
+.welcomeIcon {
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  background: #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.welcomeTitle {
+  font-size: 20px;
+  font-weight: 700;
+  color: #111;
+  letter-spacing: -0.03em;
+  margin: 0;
+}
+
+.welcomeSubtitle {
+  font-size: 14px;
+  color: #6b7280;
+  max-width: 440px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.welcomeExamples {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 500px;
+  margin-top: 8px;
+}
+
+.welcomeExampleCard {
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid #f0f0f0;
+  background: #fafafa;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.welcomeExampleCard:hover {
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+}
+
+.welcomeExampleTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111;
+  margin-bottom: 2px;
+}
+
+.welcomeExampleDesc {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+/* ── Agent Detail panel ──────────────────────────────────────────────────── */
+.detailHeader {
+  padding: 20px 28px 0;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+
+.detailHeaderTop {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding-bottom: 16px;
+}
+
+.detailIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: #111;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.detailIconDisabled {
+  background: #d1d5db;
+}
+
+.detailMeta {
+  flex: 1;
+  min-width: 0;
+}
+
+.detailName {
+  font-size: 17px;
+  font-weight: 700;
+  color: #111;
+  letter-spacing: -0.02em;
+  margin: 0 0 4px;
+}
+
+.detailDesc {
+  font-size: 13px;
+  color: #6b7280;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.detailActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.actionBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 13px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-family-sans);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.actionBtn:hover {
+  background: #f9fafb;
+}
+
+.actionBtnPrimary {
+  background: #000;
+  color: #fff;
+  border-color: #000;
+}
+
+.actionBtnPrimary:hover {
+  background: #222;
+  border-color: #222;
+}
+
+.actionBtnPrimary:disabled {
+  background: #9ca3af;
+  border-color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.actionBtnDanger {
+  color: #dc2626;
+}
+
+.actionBtnDanger:hover {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.toggleSwitch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  font-family: var(--font-family-sans);
+  transition: background 0.1s;
+}
+
+.toggleSwitch:hover {
+  background: #f9fafb;
+}
+
+.detailTabs {
+  display: flex;
+  gap: 0;
+  padding-top: 4px;
+}
+
+.detailTab {
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #6b7280;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  font-family: var(--font-family-sans);
+  transition: color 0.1s;
+}
+
+.detailTab:hover {
+  color: #111;
+}
+
+.detailTabActive {
+  color: #111;
+  border-bottom-color: #111;
+  font-weight: 600;
+}
+
+/* ── Detail body (config tab) ──────────────────────────────────────────────── */
+.detailBody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px;
+}
+
+/* ── Conversation layout ──────────────────────────────────────────────────── */
+.conversationWrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.conversationScroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+/* ── Turn: one user+agent exchange ─────────────────────────────────────────── */
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* User message — right-aligned */
+.turnUser {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.userBubble {
+  max-width: 75%;
+  background: #111;
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 14px 14px 2px 14px;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Agent response — left-aligned with avatar */
+.turnAgent {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.agentAvatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #111;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.agentBubble {
+  flex: 1;
+  min-width: 0;
+}
+
+.agentBubbleMeta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 7px;
+}
+
+.agentBubbleTime {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.agentBubbleDuration {
+  font-size: 11px;
+  color: #d1d5db;
+  padding: 1px 6px;
+  background: #f3f4f6;
+  border-radius: 20px;
+}
+
+.agentBubbleContent {
+  font-size: 13px;
+  color: #374151;
+  line-height: 1.65;
+}
+
+/* ── Working bubble (animated in-flight state) ─────────────────────────────── */
+.workingBubble {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #f8faff;
+  border: 1px solid #e0e7ff;
+  border-radius: 10px;
+}
+
+.workingDots {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.workingStatus {
+  font-size: 12px;
+  font-weight: 500;
+  color: #4f46e5;
+  animation: fadeStatus 0.4s ease;
+}
+
+@keyframes fadeStatus {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.workingConn {
+  font-size: 11px;
+  color: #a5b4fc;
+}
+
+/* Thinking dots */
+.thinkingDots {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.thinkingDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #818cf8;
+  animation: blink 1.4s ease-in-out infinite;
+}
+
+.thinkingDot:nth-child(2) { animation-delay: 0.2s; }
+.thinkingDot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes blink {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40%           { opacity: 1;   transform: scale(1); }
+}
+
+/* ── Locked input state ──────────────────────────────────────────────────── */
+.replyAreaLocked {
+  background: #fafafa;
+}
+
+.replyLocked {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px dashed #e5e7eb;
+  border-radius: 10px;
+  background: #f9fafb;
+}
+
+.replyLockedText {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+/* ── Reply input area ──────────────────────────────────────────────────────── */
+.replyArea {
+  flex-shrink: 0;
+  padding: 10px 20px 14px;
+  border-top: 1px solid #f0f0f0;
+  background: #fff;
+}
+
+.replyHint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #9ca3af;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.clearHistoryBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 11px;
+  font-family: var(--font-family-sans);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.clearHistoryBtn:hover {
+  background: #fef2f2;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.replyWrap {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 10px 10px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fafafa;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.replyWrap:focus-within {
+  border-color: #111;
+  background: #fff;
+}
+
+.replyInput {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-family: var(--font-family-sans);
+  color: #111;
+  outline: none;
+  resize: none;
+  min-height: 22px;
+  max-height: 140px;
+  line-height: 1.55;
+  overflow-y: auto;
+}
+
+.replyInput::placeholder {
+  color: #b0b7c3;
+}
+
+.replyInput:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.replySendBtn {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: none;
+  background: #000;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s, transform 0.1s;
+}
+
+.replySendBtn:not(:disabled):hover {
+  background: #222;
+  transform: translateY(-1px);
+}
+
+.replySendBtn:disabled {
+  background: #e5e7eb;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.replyFooter {
+  font-size: 11px;
+  color: #d1d5db;
+  margin: 6px 2px 0;
+  text-align: right;
+}
+
+/* ── Config tab ──────────────────────────────────────────────────────────── */
+.configSection {
+  margin-bottom: 28px;
+}
+
+.configLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: #9ca3af;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.configValue {
+  font-size: 13px;
+  color: #111;
+  line-height: 1.6;
+  padding: 12px 14px;
+  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #f0f0f0;
+  white-space: pre-wrap;
+}
+
+.configRow {
+  display: flex;
+  gap: 16px;
+}
+
+.configRow .configSection {
+  flex: 1;
+}
+
+/* ── Runs / conversation empty state ──────────────────────────────────────── */
+.runsEmpty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 32px;
+  gap: 12px;
+  text-align: center;
+}
+
+.runsEmptyIcon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.runsEmptyText {
+  font-size: 13px;
+  color: #9ca3af;
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* ── Detail icon running state ───────────────────────────────────────────── */
+.detailIconRunning {
+  background: #4f46e5;
+  animation: iconPulse 2s ease-in-out infinite;
+}
+
+@keyframes iconPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(79, 70, 229, 0); }
+}
+
+/* ── Running label in header ────────────────────────────────────────────── */
+.detailRunningLabel {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #4f46e5;
+  font-weight: 500;
+  margin: 0;
+}
+
+.pulsingDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4f46e5;
+  flex-shrink: 0;
+  animation: dotPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes dotPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(0.75); }
+}
+
+/* ── Agent card running indicator ──────────────────────────────────────── */
+.agentCardRunningDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4f46e5;
+  flex-shrink: 0;
+  animation: dotPulse 1.5s ease-in-out infinite;
+}
+
+/* ── Run now button running state ──────────────────────────────────────── */
+.actionBtnRunning {
+  background: #4f46e5 !important;
+  border-color: #4f46e5 !important;
+  cursor: not-allowed;
+}
+
+.runningSpinner {
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+  flex-shrink: 0;
+}
+
+/* ── Spinner icon ────────────────────────────────────────────────────────── */
+.spinIcon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Deployed / Draft agent card badge ───────────────────────────────────── */
+.deployedBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #059669;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  padding: 2px 7px;
+  border-radius: 20px;
+}
+
+.statusDotDeployed {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(16,185,129,0.25);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(16,185,129,0.25); }
+  50%       { box-shadow: 0 0 0 4px rgba(16,185,129,0.1); }
+}
+
+/* ── Deploy / Deployed action buttons ────────────────────────────────────── */
+.actionBtnDeploy {
+  background: #111 !important;
+  color: #fff !important;
+  border-color: #111 !important;
+}
+
+.actionBtnDeploy:hover:not(:disabled) {
+  background: #333 !important;
+  border-color: #333 !important;
+}
+
+.actionBtnDeployed {
+  background: #ecfdf5 !important;
+  color: #059669 !important;
+  border-color: #a7f3d0 !important;
+}
+
+.actionBtnDeployed:hover:not(:disabled) {
+  background: #d1fae5 !important;
+  border-color: #6ee7b7 !important;
+}
+
+/* ── Deployed / Draft pills in tab row ───────────────────────────────────── */
+.deployedPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #059669;
+  margin-left: auto;
+  padding: 3px 10px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 20px;
+}
+
+.deployedDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  flex-shrink: 0;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.nextRunLabel {
+  color: #6ee7b7;
+  font-weight: 400;
+}
+
+.draftPill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 500;
+  color: #9ca3af;
+  margin-left: auto;
+  padding: 3px 10px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 20px;
+}
+
+/* ── Test now button (empty state) ───────────────────────────────────────── */
+.testNowBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font-family-sans);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.testNowBtn:hover:not(:disabled) {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+  color: #111;
+}
+
+.testNowBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Reply area Test + Send buttons ──────────────────────────────────────── */
+.replyBtns {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.replyTestBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-family-sans);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.replyTestBtn:hover:not(:disabled) {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+  color: #111;
+}
+
+.replyTestBtn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ── Run type badges (Test / Scheduled) on conversation turns ────────────── */
+.runBadgeTest {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 20px;
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.runBadgeScheduled {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 20px;
+  background: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+}
+
+/* ── Output / Inspect tab bar ────────────────────────────────────────────── */
+.tabBar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  background: #f3f4f6;
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.tabBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-family-sans);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.tabBtn:hover {
+  background: #e5e7eb;
+  color: #111;
+}
+
+.tabBtnActive {
+  background: #fff;
+  color: #111;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+}
+
+/* ── Inspect panel ───────────────────────────────────────────────────────── */
+.inspectPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 2px 0;
+}
+
+/* ── Inspect execution context strip ──────────────────────────────────────── */
+
+.inspectMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 8px 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.inspectMetaItem {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+}
+
+.inspectMetaLabel {
+  font-weight: 600;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+}
+
+.inspectMetaValue {
+  color: #374151;
+  font-size: 11.5px;
+}
+
+.inspectMetaZero .inspectMetaValue {
+  color: #f59e0b;
+  font-weight: 600;
+}
+
+.inspectMetaRows .inspectMetaValue {
+  color: #10b981;
+  font-weight: 600;
+}
+
+.inspectSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inspectSectionTitle {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #9ca3af;
+}
+
+.inspectPlan {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: #f8faff;
+  border: 1px solid #e0e7ff;
+  border-radius: 8px;
+}
+
+.inspectPlanStep {
+  font-size: 12.5px;
+  color: #374151;
+  line-height: 1.5;
+}
+
+.inspectQuery {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inspectQueryLabel {
+  font-size: 10px;
+  font-weight: 600;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.inspectCode {
+  margin: 0;
+  padding: 12px 14px;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 8px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+  word-break: normal;
+}
+
+.inspectEmpty {
+  font-size: 12px;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+/* ── ClarificationCard ───────────────────────────────────────────────────── */
+
+.clarificationCard {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #fafaf9;
+  border: 1px solid #e5e7eb;
+  border-left: 3px solid #6366f1;
+  border-radius: 8px;
+}
+
+.clarificationIcon {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #e0e7ff;
+  color: #4338ca;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clarificationBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.clarificationPreamble {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #374151;
+  line-height: 1.5;
+}
+
+.clarificationList {
+  margin: 0 0 10px;
+  padding-left: 18px;
+}
+
+.clarificationItem {
+  font-size: 13px;
+  color: #111827;
+  line-height: 1.6;
+  margin-bottom: 4px;
+}
+
+.clarificationHint {
+  margin: 0;
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+/* ── PlanSteps ───────────────────────────────────────────────────────────── */
+
+.planSteps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0 6px;
+}
+
+.planStep {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: #9ca3af;
+  transition: color 0.3s ease;
+}
+
+.planStepDone {
+  color: #6b7280;
+}
+
+.planStepDone .planStepText {
+  text-decoration: line-through;
+  text-decoration-color: #d1d5db;
+}
+
+.planStepActive {
+  color: #374151;
+  font-weight: 500;
+}
+
+.planStepDot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #d1d5db;
+  margin-top: 4px;
+  transition: background 0.3s ease;
+}
+
+.planStepDone .planStepDot {
+  background: #10b981;
+}
+
+.planStepActive .planStepDot {
+  background: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}

@@ -1,0 +1,153 @@
+package com.dbaagent.provider.mysql;
+
+import com.dbaagent.model.ConnectionTestResult;
+import com.dbaagent.provider.api.PrivilegeCheckProvider;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
+
+@Component
+@Slf4j
+public class MySQLPrivilegeCheckProvider implements PrivilegeCheckProvider {
+
+    @Override
+    public void checkPrivileges(
+        Connection connection,
+        String database,
+        List<ConnectionTestResult.PrivilegeCheck> checks
+    ) {
+        checks.add(checkSelectOnTables(connection, database));
+        checks.add(checkPrivilege(
+            connection,
+            "PROCESS",
+            "Global",
+            "View running queries",
+            "SHOW PROCESSLIST"
+        ));
+        checks.add(checkPrivilege(
+            connection,
+            "SHOW DATABASES",
+            "Global",
+            "List databases",
+            "SHOW DATABASES"
+        ));
+        checks.add(checkPrivilege(
+            connection,
+            "performance_schema",
+            "System schema",
+            "Slow query analysis",
+            "SELECT thread_id FROM performance_schema.threads LIMIT 1"
+        ));
+    }
+
+    private ConnectionTestResult.PrivilegeCheck checkSelectOnTables(
+        Connection connection,
+        String database
+    ) {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.setQueryTimeout(10);
+
+            String listTablesQuery = database != null && !database.isEmpty()
+                ? "SELECT table_name FROM information_schema.tables " +
+                    "WHERE table_schema = '" + database + "' " +
+                    "AND table_type = 'BASE TABLE' LIMIT 5"
+                : "SELECT table_name FROM information_schema.tables " +
+                    "WHERE table_type = 'BASE TABLE' LIMIT 5";
+
+            ResultSet tablesRs = stmt.executeQuery(listTablesQuery);
+            List<String> tables = new ArrayList<>();
+            while (tablesRs.next()) {
+                tables.add(tablesRs.getString(1));
+            }
+            tablesRs.close();
+
+            if (tables.isEmpty()) {
+                return ConnectionTestResult.PrivilegeCheck.builder()
+                    .name("SELECT")
+                    .scope("All tables")
+                    .reason("Read data for analysis")
+                    .granted(true)
+                    .errorMessage(
+                        "No tables found to verify SELECT access " +
+                            "(database may be empty)"
+                    )
+                    .build();
+            }
+
+            StringBuilder failedTables = new StringBuilder();
+            for (String tableName : tables) {
+                try (Statement selectStmt = connection.createStatement()) {
+                    selectStmt.setQueryTimeout(5);
+                    String selectQuery = "SELECT 1 FROM `" + tableName + "` LIMIT 1";
+                    ResultSet rs = selectStmt.executeQuery(selectQuery);
+                    rs.close();
+                    return ConnectionTestResult.PrivilegeCheck.builder()
+                        .name("SELECT")
+                        .scope("All tables")
+                        .reason("Read data for analysis")
+                        .granted(true)
+                        .build();
+                } catch (SQLException e) {
+                    if (failedTables.length() > 0) {
+                        failedTables.append(", ");
+                    }
+                    failedTables.append(tableName);
+                    log.debug("SELECT failed on table {}: {}", tableName, e.getMessage());
+                }
+            }
+
+            return ConnectionTestResult.PrivilegeCheck.builder()
+                .name("SELECT")
+                .scope("All tables")
+                .reason("Read data for analysis")
+                .granted(false)
+                .errorMessage("Cannot SELECT from tables: " + failedTables)
+                .build();
+
+        } catch (SQLException e) {
+            log.debug("Privilege check failed for SELECT on tables: {}", e.getMessage());
+            return ConnectionTestResult.PrivilegeCheck.builder()
+                .name("SELECT")
+                .scope("All tables")
+                .reason("Read data for analysis")
+                .granted(false)
+                .errorMessage(e.getMessage())
+                .build();
+        }
+    }
+
+    private ConnectionTestResult.PrivilegeCheck checkPrivilege(
+        Connection connection,
+        String name,
+        String scope,
+        String reason,
+        String testQuery
+    ) {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.setQueryTimeout(10);
+            ResultSet rs = stmt.executeQuery(testQuery);
+            rs.close();
+            return ConnectionTestResult.PrivilegeCheck.builder()
+                .name(name)
+                .scope(scope)
+                .reason(reason)
+                .granted(true)
+                .build();
+        } catch (SQLException e) {
+            log.debug("Privilege check failed for {}: {}", name, e.getMessage());
+            return ConnectionTestResult.PrivilegeCheck.builder()
+                .name(name)
+                .scope(scope)
+                .reason(reason)
+                .granted(false)
+                .errorMessage(e.getMessage())
+                .build();
+        }
+    }
+}

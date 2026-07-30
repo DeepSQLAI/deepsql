@@ -1,0 +1,60 @@
+.grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    padding: 16px 20px;
+    background: white;
+    border-bottom: 1px solid #E5E7EB;
+}
+
+.card {
+    background: white;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    padding: 12px 14px;
+    border-left: 3px solid #E5E7EB;
+}
+
+.card.success {
+    border-left-color: #22C55E;
+    background: linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%);
+}
+
+.card.warning {
+    border-left-color: #F59E0B;
+    background: linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%);
+}
+
+.label {
+    font-size: 10px;
+    font-weight: 500;
+    color: #6B7280;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 4px;
+}
+
+.value {
+    font-size: 24px;
+    font-weight: 700;
+    color: #111827;
+    line-height: 1.1;
+}
+
+.subtitle {
+    font-size: 10px;
+    color: #9CA3AF;
+    margin-top: 2px;
+}
+
+@media (max-width: 900px) {
+    .grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 500px) {
+    .grid {
+        grid-template-columns: 1fr;
+    }
+}

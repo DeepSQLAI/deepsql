@@ -1,0 +1,619 @@
+.card {
+  background: white;
+  border: 1px solid #E5E7EB;
+  border-radius: 8px;
+  padding: 16px;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card:hover {
+  border-color: #D1D5DB;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+}
+
+/* Header */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.index {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  font-size: 12px;
+  color: #9CA3AF;
+  font-weight: 500;
+}
+
+.categoryBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+}
+
+/* Header Right Metrics */
+.headerRightMetrics {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.metricItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.metricValue {
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1;
+}
+
+.metricLabel {
+  font-size: 10px;
+  color: #6B7280;
+  text-transform: uppercase;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+
+.impactValue {
+  color: #111827;
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cachedBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: #16A34A;
+  background: #DCFCE7;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 500;
+}
+
+/* Main Content Area */
+.mainContent {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.targetSection {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.targetLabel {
+  font-size: 12px;
+  color: #6B7280;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.targetValue {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  font-size: 14px;
+  color: #111827;
+  background: #F3F4F6;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  border: 1px solid #E5E7EB;
+}
+
+.usageSection {
+  background: #F9FAFB;
+  border: 1px solid #E5E7EB;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.usageText {
+  font-size: 13px;
+  color: #374151;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Recommendation Content (Always Visible) */
+.recommendationContent {
+  margin-top: 4px;
+}
+
+.benefitSection {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid #F3F4F6;
+}
+
+.benefitItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.benefitLabel {
+  font-size: 11px;
+  color: #6B7280;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.benefitValue {
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.benefitValueSmall {
+  font-size: 12px;
+  color: #6B7280;
+  font-weight: 400;
+}
+
+/* Compact variant adjustments */
+.compactStats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.compactStatRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.compactStatLabel {
+  font-size: 11px;
+  color: #6B7280;
+  flex-shrink: 0;
+}
+
+.compactStatValue {
+  font-size: 12px;
+  font-weight: 500;
+  color: #111827;
+  font-family: 'SF Mono', Monaco, Inconsolata, monospace;
+  background: #F3F4F6;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.compactQueriesLink {
+  font-size: 12px;
+  font-weight: 500;
+  color: #111827;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  transition: color 0.15s;
+}
+
+.compactQueriesLink:hover {
+  color: #374151;
+}
+
+.compactMetaRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid #E5E7EB;
+  font-size: 11px;
+  color: #6B7280;
+}
+
+/* Status Badges */
+.statusBadge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.statusBadge.pending {
+  background: #FEF3C7;
+  color: #92400E;
+}
+
+.statusBadge.in_progress {
+  background: #EFF6FF;
+  color: #1E40AF;
+}
+
+.statusBadge.completed {
+  background: #DCFCE7;
+  color: #166534;
+}
+
+.statusBadge.dismissed {
+  background: #F3F4F6;
+  color: #6B7280;
+}
+
+/* Actions Row */
+.actionsRow {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.actionButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid #E5E7EB;
+  border-radius: 6px;
+  background: white;
+  font-size: 12px;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.actionButton:hover {
+  background: #F9FAFB;
+  border-color: #D1D5DB;
+  color: #111827;
+}
+
+/* Code Blocks */
+.codeBlock {
+  background: #F9FAFB;
+  border: 1px solid #E5E7EB;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 12px;
+  overflow-x: auto;
+}
+
+.codeBlock code {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  font-size: 12px;
+  color: #111827;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.codeLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: #9CA3AF;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.configValue {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #F3F4F6;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+
+.configLabel {
+  font-size: 12px;
+  color: #4B5563;
+  font-weight: 500;
+}
+
+.configValue code {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  font-size: 12px;
+  color: #111827;
+  font-weight: 600;
+}
+
+/* Query Compare Styles */
+.compareSection {
+  margin-top: 12px;
+  border: 1px solid #E5E7EB;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.compareHeader {
+  background: #F9FAFB;
+  padding: 8px 12px;
+  border-bottom: 1px solid #E5E7EB;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.compareTabs {
+  display: flex;
+  gap: 4px;
+  background: #E5E7EB;
+  padding: 2px;
+  border-radius: 6px;
+}
+
+.compareTab {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6B7280;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.compareTabActive {
+  background: white;
+  color: #111827;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.compareStats {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.compareStat {
+  color: #4B5563;
+}
+
+.compareDelta {
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.deltaPositive {
+  background: #DCFCE7;
+  color: #166534;
+}
+
+.deltaNegative {
+  background: #FEE2E2;
+  color: #991B1B;
+}
+
+.comparePanel {
+  padding: 12px;
+  background: white;
+}
+
+.compareMeta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: #6B7280;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.compareCode {
+  margin: 0;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  font-size: 12px;
+  color: #1F2937;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #F9FAFB;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid #E5E7EB;
+}
+
+/* Queries Modal */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+  backdrop-filter: blur(2px);
+}
+
+.queriesModal {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  max-width: 600px;
+  width: 100%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modalHeader {
+  padding: 16px 20px;
+  border-bottom: 1px solid #E5E7EB;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #F9FAFB;
+}
+
+.modalTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+}
+
+.modalClose {
+  background: transparent;
+  border: none;
+  color: #6B7280;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.modalClose:hover {
+  background: #E5E7EB;
+  color: #111827;
+}
+
+.modalContent {
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.modalSummary {
+  font-size: 14px;
+  color: #374151;
+  margin-bottom: 16px;
+}
+
+.queriesListSection {
+  margin-top: 20px;
+}
+
+.queriesListTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6B7280;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+.queriesList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border: 1px solid #E5E7EB;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.queryListItem {
+  padding: 12px;
+  border-bottom: 1px solid #E5E7EB;
+  background: #F9FAFB;
+}
+
+.queryListItem:last-child {
+  border-bottom: none;
+}
+
+.queryPreview {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  font-size: 12px;
+  color: #1F2937;
+  margin: 0 0 8px 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.queryMeta {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: #6B7280;
+}
+
+.emptyState {
+  background: #F9FAFB;
+  border: 1px solid #E5E7EB;
+  border-radius: 8px;
+  padding: 24px;
+  text-align: center;
+  color: #6B7280;
+  font-size: 13px;
+}
+
+.emptyStateSub {
+  font-size: 12px;
+  color: #9CA3AF;
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .header {
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .headerRightMetrics {
+    width: 100%;
+    justify-content: space-between;
+    padding-top: 8px;
+    border-top: 1px solid #F3F4F6;
+  }
+
+  .benefitSection {
+    flex-wrap: wrap;
+  }
+  
+  .actionsRow {
+    justify-content: flex-start;
+  }
+}

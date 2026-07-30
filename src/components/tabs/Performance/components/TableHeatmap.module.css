@@ -1,0 +1,102 @@
+.container {
+    background: white;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    padding: 12px 14px;
+}
+
+.header {
+    margin-bottom: 10px;
+}
+
+.title {
+    font-size: 11px;
+    font-weight: 600;
+    color: #374151;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.helpIcon {
+    color: #9CA3AF;
+    cursor: help;
+    transition: color 0.15s;
+}
+
+.helpIcon:hover {
+    color: #6B7280;
+}
+
+.bars {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.barRow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px;
+    margin: -4px -6px;
+    border-radius: 4px;
+    transition: background-color 0.15s;
+}
+
+.barRow:hover {
+    background-color: #F9FAFB;
+}
+
+.tableName {
+    font-size: 9px;
+    font-family: 'Monaco', 'Menlo', monospace;
+    color: #6B7280;
+    width: 80px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
+}
+
+.barTrack {
+    flex: 1;
+    height: 8px;
+    background: #F3F4F6;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.barFill {
+    height: 100%;
+    background: #111827;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.percentage {
+    font-size: 9px;
+    font-weight: 600;
+    color: #374151;
+    width: 28px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+.caption {
+    font-size: 9px;
+    color: #9CA3AF;
+    margin-top: 10px;
+    text-align: center;
+}
+
+.emptyState {
+    font-size: 11px;
+    color: #9CA3AF;
+    text-align: center;
+    padding: 20px;
+    font-style: italic;
+}

@@ -1,0 +1,96 @@
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 0;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.info {
+    font-size: 0.875rem;
+    color: var(--color-grey);
+}
+
+.controls {
+    display: flex;
+    gap: 0.25rem;
+    align-items: center;
+}
+
+.pageButton {
+    min-width: 32px;
+    height: 32px;
+    padding: 0 0.5rem;
+    border: 1px solid var(--color-light-3);
+    background: white;
+    color: var(--color-dark-grey);
+    font-size: 0.875rem;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.pageButton:hover:not(:disabled) {
+    background: var(--color-light-2);
+    border-color: var(--color-light-4);
+}
+
+.pageButton:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.pageButton.active {
+    background: var(--color-primary);
+    color: white;
+    border-color: var(--color-primary);
+}
+
+.ellipsis {
+    padding: 0 0.5rem;
+    color: var(--color-light-5);
+}
+
+.pageSize {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+}
+
+.pageSize label {
+    color: var(--color-grey);
+}
+
+.pageSize select {
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--color-light-3);
+    border-radius: 4px;
+    background: white;
+    cursor: pointer;
+}
+
+/* Dark mode support */
+.dark-mode .pageButton {
+    background: #2a2a2a;
+    border-color: #444;
+    color: #e5e5e5;
+}
+
+.dark-mode .pageButton:hover:not(:disabled) {
+    background: #3a3a3a;
+    border-color: #666;
+}
+
+.dark-mode .pageButton.active {
+    background: var(--color-primary);
+    color: white;
+    border-color: var(--color-primary);
+}
+
+.dark-mode .pageSize select {
+    background: #2a2a2a;
+    border-color: #444;
+    color: #e5e5e5;
+}

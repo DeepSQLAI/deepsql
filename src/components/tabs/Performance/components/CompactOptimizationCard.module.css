@@ -1,0 +1,92 @@
+.card {
+    background: white;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    padding: 12px 16px;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.index {
+    font-size: 11px;
+    font-family: 'Monaco', 'Menlo', monospace;
+    color: #9CA3AF;
+    font-weight: 500;
+}
+
+.title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.tableName {
+    font-size: 11px;
+    font-family: 'Monaco', 'Menlo', monospace;
+    color: #6B7280;
+    margin-left: auto;
+}
+
+.improvementRow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.improvementBadge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: #16A34A;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.arrow {
+    font-size: 10px;
+}
+
+.improvementLabel {
+    font-size: 10px;
+    color: #9CA3AF;
+}
+
+.codeBlock {
+    background: #F3F4F6;
+    border: 1px solid #E5E7EB;
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    overflow-x: auto;
+}
+
+.codeBlock code {
+    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    font-size: 11px;
+    color: #374151;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.4;
+}
+
+.applyBtn {
+    padding: 5px 12px;
+    background: #111827;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.applyBtn:hover {
+    background: #374151;
+}
