@@ -15,25 +15,27 @@
 # show them), in a repo file, or in the printed output.
 #
 # Providers:
-#   current   whatever the stack is already configured with; no reconfiguration
-#   openai    api.openai.com          MATRIX_OPENAI_KEY
-#   litellm   a LiteLLM proxy         MATRIX_LITELLM_KEY, MATRIX_LITELLM_ENDPOINT,
-#                                     MATRIX_LITELLM_CHAT_MODEL,
-#                                     MATRIX_LITELLM_EMBED_MODEL
+#   current    the stack's existing configuration; no reconfiguration
+#   openai     api.openai.com       MATRIX_OPENAI_KEY
+#   anthropic  api.anthropic.com    MATRIX_ANTHROPIC_KEY and MATRIX_OPENAI_KEY
+#   litellm    a LiteLLM proxy      MATRIX_LITELLM_KEY, MATRIX_LITELLM_ENDPOINT,
+#                                   MATRIX_LITELLM_CHAT_MODEL,
+#                                   MATRIX_LITELLM_EMBED_MODEL
 #
-# Anthropic has no OpenAI-compatible endpoint and publishes no embeddings API, so
-# it is reached through LiteLLM: route a Claude model to a LiteLLM alias for chat
-# and point embeddings at a provider that has them. Chat and embeddings resolve
-# independently, so a split configuration is supported. For example, a LiteLLM
-# alias for Claude Haiku 4.5 paired with OpenAI embeddings:
+# Anthropic needs no gateway. It serves an OpenAI-compatible /v1/chat/completions
+# with Bearer auth, so the shipped `openai` provider drives it on configuration
+# alone. What it does not serve is embeddings, so those must come from somewhere
+# else — the `anthropic` profile pairs Claude chat with OpenAI embeddings. That
+# split is a supported configuration rather than a workaround, because chat and
+# embeddings resolve as independent bundles.
 #
-#   MATRIX_LITELLM_CHAT_MODEL=claude-haiku
-#   MATRIX_LITELLM_EMBED_ENDPOINT=https://api.openai.com/v1
-#   MATRIX_LITELLM_EMBED_KEY=$MATRIX_OPENAI_KEY
+# Running `anthropic` and `litellm` against the same Claude model is deliberate:
+# the two differ only by the gateway, so a disagreement between them isolates the
+# gateway as the cause.
 #
-# Name that alias something unlike an OpenAI model. An alias beginning gpt-5, o1,
-# o3, o4 or codex makes use-responses-api="auto" select /v1/responses, which a
-# gateway fronting Anthropic will not serve.
+# Name any gateway alias something unlike an OpenAI model. An alias beginning
+# gpt-5, o1, o3, o4 or codex makes use-responses-api="auto" select /v1/responses,
+# which a gateway fronting Anthropic will not serve.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,7 +51,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --llm)     LLM_PROFILES="$2"; shift 2 ;;
     --engines) ENGINE_ARGS+=(--engines "$2"); shift 2 ;;
-    -h|--help) sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,38p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)         echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -121,6 +123,26 @@ apply_profile() {
       # gpt-5 prefix, it also exercises the Responses API rather than chat
       # completions. Override for the other path: MATRIX_OPENAI_CHAT_MODEL=gpt-4o.
       set_env_var DEEPSQL_CHAT_MODEL         "${MATRIX_OPENAI_CHAT_MODEL:-gpt-5.4-nano}"
+      set_env_var DEEPSQL_EMBEDDING_PROVIDER openai
+      set_env_var DEEPSQL_EMBEDDING_ENDPOINT "https://api.openai.com/v1"
+      set_env_var DEEPSQL_EMBEDDING_API_KEY  "$MATRIX_OPENAI_KEY"
+      set_env_var DEEPSQL_EMBEDDING_MODEL    "${MATRIX_OPENAI_EMBED_MODEL:-text-embedding-3-large}"
+      ;;
+    anthropic)
+      # Anthropic serves an OpenAI-compatible /v1/chat/completions with Bearer auth,
+      # so chat needs no gateway and no provider of its own. Embeddings are the
+      # exception: Anthropic publishes none, so they must come from elsewhere, which
+      # is why chat and embedding resolve as independent bundles.
+      require_var MATRIX_ANTHROPIC_KEY || return 1
+      require_var MATRIX_OPENAI_KEY || return 1
+      set_env_var DEEPSQL_CHAT_PROVIDER      openai
+      set_env_var DEEPSQL_CHAT_ENDPOINT      "https://api.anthropic.com/v1"
+      set_env_var DEEPSQL_CHAT_API_KEY       "$MATRIX_ANTHROPIC_KEY"
+      set_env_var DEEPSQL_CHAT_MODEL         "${MATRIX_ANTHROPIC_CHAT_MODEL:-claude-haiku-4-5-20251001}"
+      # Claude model names match no gpt-5/o1/o3/o4/codex prefix, so "auto" already
+      # resolves to chat completions; pinned anyway because /v1/responses does not
+      # exist here and a silent switch would be a confusing failure.
+      set_env_var DEEPSQL_CHAT_USE_RESPONSES_API false
       set_env_var DEEPSQL_EMBEDDING_PROVIDER openai
       set_env_var DEEPSQL_EMBEDDING_ENDPOINT "https://api.openai.com/v1"
       set_env_var DEEPSQL_EMBEDDING_API_KEY  "$MATRIX_OPENAI_KEY"

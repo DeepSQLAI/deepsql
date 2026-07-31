@@ -31,9 +31,21 @@ Exits non-zero if any target fails, so it can gate a release.
 | `DEEPSQL_TEST_NETWORK` | `deepsql_default` | Docker network the backend can resolve |
 | `DEEPSQL_TEST_DB_PASSWORD` | `matrixpw` | password for the throwaway containers |
 | `DEEPSQL_INIT_TIMEOUT` | `1800` | seconds to wait for brain init |
+| `DEEPSQL_ANSWER_DIR` | `$TMPDIR/deepsql-matrix-answers` | where full answers are written |
 
 Local containers are created and destroyed by the script, including on failure or
 Ctrl-C. Connections it registers are deleted the same way.
+
+Every answer is written to `DEEPSQL_ANSWER_DIR` in full, and a failing target
+prints the path. The matrix line truncates to 60 characters, which is not enough
+to tell a wrong answer from a differently formatted one — read the file before
+concluding anything from a red row.
+
+Numbers are compared with digit grouping removed, so `$8,092.00` and `8092.00`
+both satisfy an expected `8092`. Models differ on this and both spellings are
+correct; a matrix that failed one of them would be testing prose style. The
+normalisation is narrow — only a comma between a digit and exactly three digits
+is dropped — so a genuinely wrong number still fails.
 
 ## Testing a managed cloud database
 
@@ -72,6 +84,55 @@ Worth knowing before reading too much into a green matrix: `cloudProvider` and
 config-tuning prompt and never branch code, so "the same engine on another cloud"
 exercises the same paths. What actually differs between clouds is the list above —
 chiefly the privileges the account is granted.
+
+## The LLM axis
+
+`run-llm-matrix.sh` runs the whole engine matrix once per LLM provider, making
+provider a second axis. It rewrites the stack's `.env`, restarts the backend, runs
+`run-matrix.sh`, and restores the original configuration on exit — including on
+failure or Ctrl-C.
+
+```bash
+export MATRIX_OPENAI_KEY=...
+./run-llm-matrix.sh --llm openai --engines pg18,my84
+./run-llm-matrix.sh --llm anthropic,litellm
+```
+
+Keys are read from the environment only. They never appear in argv, where `ps`
+would show them, and never in a repo file.
+
+Verified end-to-end, every run answering with the seed's ground truth — `Product
+23` at `8092.00` ahead of `Product 28` and `Product 22`:
+
+| Provider | Reached via | Chat model | Engines | Result |
+|---|---|---|---|---|
+| Azure OpenAI | `*.cognitiveservices.azure.com` | gpt-5.4 | pg17, pg18, my80, my84 | pass |
+| OpenAI | `api.openai.com/v1` | gpt-5.4-nano | pg18, my84 | pass |
+| Anthropic | `api.anthropic.com/v1`, no gateway | claude-haiku-4-5 | pg18 | pass |
+| Anthropic | LiteLLM proxy | claude-haiku-4-5 | pg18 | pass |
+
+Engine coverage is not uniform across providers on purpose. The engine axis is the
+cheap one and gets the full sweep under the stack's normal provider; the other
+providers are checked on a representative target, because what they exercise is
+the LLM path, not the engine path.
+
+Two things this establishes. Anthropic needs no gateway and no provider of its
+own — it serves an OpenAI-compatible `/v1/chat/completions` with Bearer auth, so
+the shipped `openai` provider drives it on configuration alone. And a gateway
+changes nothing: Claude direct and Claude through LiteLLM produced the same
+answers, which is what makes the pair worth running together — a disagreement
+would have isolated the gateway.
+
+Embeddings are the one asymmetry. Anthropic publishes no embeddings API, so the
+`anthropic` profile pairs Claude chat with OpenAI embeddings. Chat and embeddings
+resolve as independent bundles, so this is a supported configuration rather than a
+workaround.
+
+Whatever the provider, embeddings must be 3072-wide. `rag_documents.embedding` is
+a single `vector(3072)` column shared by every connection, so a narrower model —
+`text-embedding-3-small` at 1536 — is rejected for all connections at once, and
+creating a fresh connection does not help. That is the safe failure: the dimension
+is enforced rather than silently degrading retrieval.
 
 ## The seed
 

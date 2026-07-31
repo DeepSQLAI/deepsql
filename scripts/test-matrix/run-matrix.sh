@@ -30,6 +30,11 @@ DOCKER_NETWORK="${DEEPSQL_TEST_NETWORK:-deepsql_default}"
 SEED_PASSWORD="${DEEPSQL_TEST_DB_PASSWORD:-matrixpw}"
 INIT_TIMEOUT_SECONDS="${DEEPSQL_INIT_TIMEOUT:-1800}"
 
+# Answers are kept on disk because the failure detail below is truncated, and a
+# truncated answer cannot distinguish a wrong number from a differently formatted
+# one. Whoever reads a red matrix needs the full text, not its first line.
+ANSWER_DIR="${DEEPSQL_ANSWER_DIR:-${TMPDIR:-/tmp}/deepsql-matrix-answers}"
+
 # Facts fixed by the seed files. Assertions compare against these, so changing a
 # seed means changing these too.
 readonly EXPECT_CUSTOMERS="300"
@@ -201,6 +206,26 @@ print(str(d.get("answer") or "").replace("\n", " ") if d.get("success") else "")
 ' 2>/dev/null
 }
 
+# "$8,092.00" -> "$8092.00". Leaves "80,92" alone: a comma qualifies only when it
+# separates a digit from exactly three digits, which is what digit grouping is.
+#
+# Pure bash on purpose. The obvious sed spelling of this is GNU's ":a;...;ta",
+# which BSD sed (macOS, where this script is mostly run) rejects — a label there
+# runs to end of line. It fails as a silently empty result rather than an error,
+# which would turn every target red for a reason that has nothing to do with the
+# database.
+# The match is only digits and a comma, so the unquoted replacement pattern below
+# carries no glob metacharacters. Quoting it instead — ${s/"$a"/"$b"} — inserts
+# literal quote marks under bash 3.2, which is what macOS still ships.
+ungroup_digits() {
+  local s="$1" whole lead rest
+  while [[ "$s" =~ ([0-9]),([0-9][0-9][0-9]) ]]; do
+    whole="${BASH_REMATCH[0]}"; lead="${BASH_REMATCH[1]}"; rest="${BASH_REMATCH[2]}"
+    s="${s/$whole/$lead$rest}"
+  done
+  printf '%s' "$s"
+}
+
 run_target() {
   local label="$1" type="$2" host="$3" port="$4" db="$5" user="$6" pass="$7"
   local status="PASS" detail="" conn_id="" privs="-"
@@ -223,22 +248,52 @@ run_target() {
   echo "[$label] asking the acceptance questions ..."
   local a1 a2
   a1=$(ask "$conn_id" "How many customers are there?")
-  if [[ "$a1" != *"$EXPECT_CUSTOMERS"* ]]; then
+  printf '%s\n' "$a1" > "$ANSWER_DIR/${label}-count.txt"
+
+  # Numbers are matched against a copy with digit grouping removed. Grouping is
+  # presentation and it varies by model: Claude renders the revenue as "$8,092.00"
+  # where GPT writes "8092.00". Both are the right number, and a matrix that fails
+  # one of them is testing prose style, not the product.
+  #
+  # Only a comma between a digit and exactly three digits is removed, so "8,092"
+  # normalises but a malformed "80,92" does not and still fails. The loop handles
+  # repeated grouping ("1,234,567"), where a single pass would leave the second
+  # comma behind.
+  local a1_plain a2_plain
+  a1_plain="$(ungroup_digits "$a1")"
+
+  if [[ "$a1_plain" != *"$EXPECT_CUSTOMERS"* ]]; then
     status="FAIL"; detail="count: expected $EXPECT_CUSTOMERS, got \"${a1:0:60}\""
   fi
 
   a2=$(ask "$conn_id" "What are the top 3 products by total revenue from order items? Show product name and revenue.")
-  if [[ "$a2" != *"$EXPECT_TOP_PRODUCT"* || "$a2" != *"$EXPECT_TOP_REVENUE"* ]]; then
-    status="FAIL"
-    detail="${detail:+$detail; }join: expected $EXPECT_TOP_PRODUCT/$EXPECT_TOP_REVENUE, got \"${a2:0:60}\""
+  printf '%s\n' "$a2" > "$ANSWER_DIR/${label}-join.txt"
+  a2_plain="$(ungroup_digits "$a2")"
+
+  # Report which half is missing. "expected X/Y" cannot say whether the agent picked
+  # the wrong product or the wrong number, and those are different bugs.
+  local missing=""
+  if [[ "$a2" != *"$EXPECT_TOP_PRODUCT"* ]]; then
+    missing="product $EXPECT_TOP_PRODUCT"
   fi
+  if [[ "$a2_plain" != *"$EXPECT_TOP_REVENUE"* ]]; then
+    missing="${missing:+$missing and }revenue $EXPECT_TOP_REVENUE"
+  fi
+  if [[ -n "$missing" ]]; then
+    status="FAIL"
+    detail="${detail:+$detail; }join: missing $missing; got \"${a2:0:60}\""
+  fi
+
+  [[ "$status" == "FAIL" ]] && echo "[$label] full answers: $ANSWER_DIR/${label}-*.txt"
 
   [[ "$status" == "FAIL" ]] && FAILURES=$((FAILURES + 1))
   RESULT_ROWS+=("$label|$status|$privs|$detail")
 }
 
+mkdir -p "$ANSWER_DIR"
 login
 echo "DeepSQL: $DEEPSQL_URL"
+echo "Answers: $ANSWER_DIR"
 
 selected="${ENGINES:-pg17,pg18,my80,my84}"
 if [[ -n "$ENGINES" || ${#EXTERNAL_TARGETS[@]} -eq 0 ]]; then
