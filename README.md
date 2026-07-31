@@ -1,5 +1,7 @@
 # DeepSQL
 
+![DeepSQL CLI showing suggested DBA, BI and Guardian prompts, connected databases, and brain initialization progress](docs/assets/deepsql-cli.png)
+
 **An AI database performance assistant you run yourself.** Point it at PostgreSQL or
 MySQL and ask questions in plain English — schema exploration, query generation, slow
 query analysis, index recommendations, generated dashboards. Bring your own LLM: OpenAI,
@@ -9,6 +11,9 @@ hardware. No vendor account is required and no model provider is hardcoded.
 Everything runs in your environment. Database credentials are encrypted in a local vault,
 and nothing leaves the machines you control except the prompts you send to the LLM
 endpoint you configured.
+
+📄 **[Read the whitepaper](https://deepsql.ai/whitepaper)** — the architecture and the
+reasoning behind it.
 
 ---
 
@@ -244,6 +249,7 @@ caching · nginx.
 
 ## Documentation
 
+- [Whitepaper](https://deepsql.ai/whitepaper) — architecture and design rationale
 - [`docs/README.md`](docs/README.md) — documentation index
 - [`AGENTS.md`](AGENTS.md) — codebase map
 - [`mcp/README.md`](mcp/README.md) — CLI and MCP server
