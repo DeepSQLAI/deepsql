@@ -111,6 +111,29 @@ DEEPSQL_CHAT_ENDPOINT=http://host.docker.internal:11434/v1
 DEEPSQL_CHAT_MODEL=llama3.1
 ```
 
+**LiteLLM proxy** — point at the proxy, authenticate with a virtual key, and use your own
+model alias. Chat, embeddings and brain initialisation have been verified end to end
+against a self-hosted LiteLLM:
+
+```env
+DEEPSQL_CHAT_PROVIDER=openai
+DEEPSQL_CHAT_API_KEY=sk-your-litellm-virtual-key
+DEEPSQL_CHAT_ENDPOINT=http://litellm:4000/v1
+DEEPSQL_CHAT_MODEL=your-alias
+
+DEEPSQL_EMBEDDING_PROVIDER=openai
+DEEPSQL_EMBEDDING_API_KEY=sk-your-litellm-virtual-key
+DEEPSQL_EMBEDDING_ENDPOINT=http://litellm:4000/v1
+DEEPSQL_EMBEDDING_MODEL=your-embedding-alias
+```
+
+One thing to know about alias naming: `_USE_RESPONSES_API` defaults to `auto`, which
+decides from the **model name**, not from what your endpoint actually implements. An alias
+beginning `gpt-5`, `o1`, `o3`, `o4` or `codex` selects the Responses API. If your gateway
+does not serve `/v1/responses`, either avoid those prefixes or set
+`DEEPSQL_CHAT_USE_RESPONSES_API=false`. Aliases that look nothing like an OpenAI model —
+the usual case — resolve to chat completions on their own.
+
 Optional tuning, same prefix, all defaulted: `_TEMPERATURE`, `_API_VERSION` (the Azure REST
 version), `_USE_RESPONSES_API` (`true` / `false` / `auto`).
 

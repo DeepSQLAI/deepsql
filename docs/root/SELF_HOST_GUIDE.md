@@ -278,6 +278,49 @@ listed at `LlmConfigResolver.java:31-33`: `api-key`, `endpoint`, `model`, `regio
 appear in `application.properties` but configure nothing in the chat path — the resolver
 does not consult them. Use an Azure endpoint through `DEEPSQL_CHAT_*` instead.
 
+#### Behind an LLM gateway (LiteLLM)
+
+A gateway is just another OpenAI-compatible endpoint. Point at the proxy, authenticate
+with a virtual key, and name the alias from its `config.yaml`:
+
+```env
+DEEPSQL_CHAT_PROVIDER=openai
+DEEPSQL_CHAT_ENDPOINT=http://litellm:4000/v1
+DEEPSQL_CHAT_API_KEY=sk-your-litellm-virtual-key
+DEEPSQL_CHAT_MODEL=your-alias
+
+DEEPSQL_EMBEDDING_PROVIDER=openai
+DEEPSQL_EMBEDDING_ENDPOINT=http://litellm:4000/v1
+DEEPSQL_EMBEDDING_API_KEY=sk-your-litellm-virtual-key
+DEEPSQL_EMBEDDING_MODEL=your-embedding-alias
+```
+
+Verified against a self-hosted LiteLLM: provider registration, chat with SQL generation,
+the `/api/llm/v1` gateway, and a full brain initialisation (every document embedded, no
+drops). Three things are worth knowing before you deploy it.
+
+**Keep the `/v1`.** The chat path decides its URL shape from the endpoint string: a base
+containing `/v1` or `/v2` is treated as OpenAI-style and gets `/chat/completions`, while
+anything else is treated as Azure-style and gets
+`/openai/deployments/<model>/chat/completions?api-version=…`
+([`ResponsesApiChatModel.resolveApiUrl`](../../backend/src/main/java/com/dbaagent/llm/openai/ResponsesApiChatModel.java)).
+LiteLLM happens to serve the Azure shape too, so omitting `/v1` still worked in testing —
+but that relies on the gateway's Azure emulation rather than on the path you configured,
+and a plain vLLM or Ollama in the same position returns 404.
+
+**Alias names steer `_USE_RESPONSES_API=auto`.** The heuristic reads the model name, not
+the endpoint's capabilities: an alias starting `gpt-5`, `o1`, `o3`, `o4` or `codex`, or an
+empty model, selects `/v1/responses`. Mirroring upstream model names in your gateway config
+can therefore route DeepSQL to an API the gateway does not serve. Aliases that do not look
+like OpenAI models resolve to chat completions on their own; otherwise set
+`DEEPSQL_CHAT_USE_RESPONSES_API=false`.
+
+**Embedding width is fixed at initialisation.** The pgvector column is created for the
+width of whichever embedding model ran first. Repointing the gateway's embedding alias at a
+model of a different width means re-running brain initialisation for every connection.
+Authentication needs no special handling: only `.azure.com` / `.azure-api.net` endpoints
+switch to the `api-key` header, so a gateway receives `Authorization: Bearer <virtual key>`.
+
 ### Vector store
 
 | Variable | Read by | Notes |
