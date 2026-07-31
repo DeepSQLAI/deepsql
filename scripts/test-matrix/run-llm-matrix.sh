@@ -24,7 +24,16 @@
 # Anthropic has no OpenAI-compatible endpoint and publishes no embeddings API, so
 # it is reached through LiteLLM: route a Claude model to a LiteLLM alias for chat
 # and point embeddings at a provider that has them. Chat and embeddings resolve
-# independently, so a split configuration is supported.
+# independently, so a split configuration is supported. For example, a LiteLLM
+# alias for Claude Haiku 4.5 paired with OpenAI embeddings:
+#
+#   MATRIX_LITELLM_CHAT_MODEL=claude-haiku
+#   MATRIX_LITELLM_EMBED_ENDPOINT=https://api.openai.com/v1
+#   MATRIX_LITELLM_EMBED_KEY=$MATRIX_OPENAI_KEY
+#
+# Name that alias something unlike an OpenAI model. An alias beginning gpt-5, o1,
+# o3, o4 or codex makes use-responses-api="auto" select /v1/responses, which a
+# gateway fronting Anthropic will not serve.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -108,7 +117,10 @@ apply_profile() {
       set_env_var DEEPSQL_CHAT_PROVIDER      openai
       set_env_var DEEPSQL_CHAT_ENDPOINT      "https://api.openai.com/v1"
       set_env_var DEEPSQL_CHAT_API_KEY       "$MATRIX_OPENAI_KEY"
-      set_env_var DEEPSQL_CHAT_MODEL         "${MATRIX_OPENAI_CHAT_MODEL:-gpt-4o}"
+      # gpt-5.4-nano is cheap and, because use-responses-api="auto" keys off the
+      # gpt-5 prefix, it also exercises the Responses API rather than chat
+      # completions. Override for the other path: MATRIX_OPENAI_CHAT_MODEL=gpt-4o.
+      set_env_var DEEPSQL_CHAT_MODEL         "${MATRIX_OPENAI_CHAT_MODEL:-gpt-5.4-nano}"
       set_env_var DEEPSQL_EMBEDDING_PROVIDER openai
       set_env_var DEEPSQL_EMBEDDING_ENDPOINT "https://api.openai.com/v1"
       set_env_var DEEPSQL_EMBEDDING_API_KEY  "$MATRIX_OPENAI_KEY"
@@ -134,9 +146,12 @@ apply_profile() {
       return 1 ;;
   esac
 
-  # An embedding model whose width differs from the vector column a connection was
-  # initialised with is rejected rather than silently degraded, so each profile
-  # gets freshly created connections — which is what run-matrix.sh does.
+  # Every profile must embed at the same width. rag_documents.embedding is
+  # vector(3072) — one column shared by all connections, not one per connection —
+  # so a narrower model is rejected by pgvector for every connection at once, and
+  # creating fresh connections does not help. That is the safe failure: the
+  # dimension is enforced. text-embedding-3-large is 3072; text-embedding-3-small
+  # is 1536 and will not insert. Changing width means migrating the column.
   echo "  applied profile '$profile'; restarting backend ..."
   restart_backend
 }
