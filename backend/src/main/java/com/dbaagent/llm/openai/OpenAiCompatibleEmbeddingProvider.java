@@ -15,6 +15,7 @@ import com.openai.models.embeddings.CreateEmbeddingResponse;
 import com.openai.models.embeddings.Embedding;
 import com.openai.models.embeddings.EmbeddingCreateParams;
 import com.openai.models.embeddings.EmbeddingModel;
+import com.openai.errors.OpenAIServiceException;
 
 import java.io.IOException;
 import java.nio.channels.UnresolvedAddressException;
@@ -24,9 +25,12 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -54,6 +58,25 @@ public class OpenAiCompatibleEmbeddingProvider implements LlmEmbeddingProvider {
 
     private static final String DEFAULT_MODEL = "text-embedding-3-large";
     private static final String DEFAULT_ENDPOINT = "https://api.openai.com/v1";
+
+    /**
+     * Header names carrying a retry delay in <em>seconds</em>. Both casings are listed
+     * because the SDK's {@code Headers.values} lookup is not documented as
+     * case-insensitive and the wire casing varies between OpenAI and Azure gateways.
+     *
+     * <p>{@code retry-after-ms} is excluded on purpose: it is millisecond-valued, and
+     * {@link #parseSeconds} would read it as seconds and sleep a thousandfold too long.
+     */
+    private static final List<String> RETRY_AFTER_HEADERS = List.of("Retry-After", "retry-after");
+
+    /**
+     * Matches the delay stated in an error body: "retry after 4 seconds",
+     * "try again in 1.5s". Anchored on the verb phrase rather than a bare number so it
+     * cannot pick up an unrelated figure elsewhere in the message.
+     */
+    private static final Pattern RETRY_AFTER_PROSE = Pattern.compile(
+            "(?:retry after|try again in)\\s+([0-9]+(?:\\.[0-9]+)?)\\s*(?:s\\b|sec|second)",
+            Pattern.CASE_INSENSITIVE);
 
     private static final LlmProviderDescriptor DESCRIPTOR = new LlmProviderDescriptor(
             "openai",
@@ -270,5 +293,87 @@ public class OpenAiCompatibleEmbeddingProvider implements LlmEmbeddingProvider {
             }
         }
         return LlmErrorCategory.UNKNOWN;
+    }
+
+    /**
+     * Prefers the {@code Retry-After} header, falling back to the delay the service
+     * states in prose.
+     *
+     * <p>The header is authoritative and standard. The prose fallback exists because
+     * Azure OpenAI states the number in the 429 body, and the body reaches us on
+     * paths where the header did not survive the SDK's error mapping. Both forms
+     * seen in the wild:
+     *
+     * <pre>
+     *   Azure:  "Please retry after 4 seconds."
+     *   OpenAI: "Please try again in 1.5s."
+     * </pre>
+     *
+     * <p>Deliberately NOT folded into {@link #classify}: that method returns a
+     * category shared by every provider, this returns a vendor-specific number.
+     */
+    @Override
+    public Optional<Duration> retryAfter(Throwable throwable) {
+        for (Throwable t = throwable; t != null; t = t.getCause()) {
+            if (t instanceof OpenAIServiceException serviceException) {
+                Optional<Duration> fromHeader = headerRetryAfter(serviceException);
+                if (fromHeader.isPresent()) {
+                    return fromHeader;
+                }
+            }
+            Optional<Duration> fromMessage = messageRetryAfter(t.getMessage());
+            if (fromMessage.isPresent()) {
+                return fromMessage;
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * RFC 9110 allows {@code Retry-After} to be delta-seconds or an HTTP date. Only
+     * the numeric form is honoured: the date form would require trusting the remote
+     * clock against ours, and no OpenAI-compatible service has been seen to send it.
+     */
+    private Optional<Duration> headerRetryAfter(OpenAIServiceException exception) {
+        for (String name : RETRY_AFTER_HEADERS) {
+            List<String> values;
+            try {
+                values = exception.headers().values(name);
+            } catch (RuntimeException ignored) {
+                // A malformed error response must never mask the original failure.
+                continue;
+            }
+            for (String value : values) {
+                Optional<Duration> parsed = parseSeconds(value);
+                if (parsed.isPresent()) {
+                    return parsed;
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    private Optional<Duration> messageRetryAfter(String message) {
+        if (message == null) {
+            return Optional.empty();
+        }
+        Matcher matcher = RETRY_AFTER_PROSE.matcher(message);
+        return matcher.find() ? parseSeconds(matcher.group(1)) : Optional.empty();
+    }
+
+    /** Rejects negatives and non-numbers; zero is a real answer ("retry immediately"). */
+    private Optional<Duration> parseSeconds(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            double seconds = Double.parseDouble(raw.trim());
+            if (seconds < 0 || !Double.isFinite(seconds)) {
+                return Optional.empty();
+            }
+            return Optional.of(Duration.ofMillis(Math.round(seconds * 1000)));
+        } catch (NumberFormatException e) {
+            return Optional.empty();
+        }
     }
 }

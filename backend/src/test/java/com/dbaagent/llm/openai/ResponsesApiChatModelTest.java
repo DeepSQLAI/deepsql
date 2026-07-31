@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Test;
 
 import java.net.http.HttpRequest;
 import java.time.Duration;
+import java.util.HashSet;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -172,5 +174,69 @@ class ResponsesApiChatModelTest {
         assertFalse(ResponsesApiChatModel.isRetryableStatus(401),
                 "a rejected credential must never be retried");
         assertFalse(ResponsesApiChatModel.isRetryableStatus(404));
+    }
+
+    // ------------------------------------------------------------------
+    // Retry backoff: exponential, jittered, floored by Retry-After, capped.
+    // ------------------------------------------------------------------
+
+    /**
+     * The agent calls the model several times in parallel. A burst limit rejects those
+     * calls together, so a deterministic backoff would wake them together and recreate
+     * the burst. Repeated draws for the same attempt must not all be identical.
+     */
+    @Test
+    void backoffIsRandomisedSoParallelCallersDoNotRetryInLockstep() {
+        Set<Long> observed = new HashSet<>();
+        for (int i = 0; i < 200; i++) {
+            observed.add(ResponsesApiChatModel.backoffMillis(0, 0));
+        }
+
+        assertTrue(observed.size() > 1,
+                "a deterministic backoff makes concurrent callers collide on every retry");
+    }
+
+    /** Jitter must not weaken the schedule: the wait still grows with each attempt. */
+    @Test
+    void backoffStaysWithinItsExponentialBandAndGrows() {
+        for (int i = 0; i < 200; i++) {
+            long first = ResponsesApiChatModel.backoffMillis(0, 0);
+            long fourth = ResponsesApiChatModel.backoffMillis(3, 0);
+
+            // attempt 0 -> 2000ms exponential, half of it fixed; attempt 3 -> 16000ms.
+            assertTrue(first >= 1000 && first <= 2000, "attempt 0 out of band: " + first);
+            assertTrue(fourth >= 8000 && fourth <= 16000, "attempt 3 out of band: " + fourth);
+            assertTrue(fourth > first, "backoff must still escalate across attempts");
+        }
+    }
+
+    /**
+     * {@code Retry-After} is a floor, not a replacement — retrying sooner than the
+     * service asked is what the rate limiter is counting.
+     */
+    @Test
+    void aRetryAfterInstructionRaisesTheWaitButNeverLowersIt() {
+        assertEquals(5000, ResponsesApiChatModel.backoffMillis(0, 5000),
+                "a longer Retry-After must win over our own schedule");
+
+        long withTinyHint = ResponsesApiChatModel.backoffMillis(3, 50);
+        assertTrue(withTinyHint >= 8000,
+                "a shorter Retry-After must not shrink our backoff, got " + withTinyHint);
+    }
+
+    /**
+     * The delay is a number from a remote server, and the request timeout is 8 minutes:
+     * uncapped, one header could hold a request thread and a browser tab open for it.
+     */
+    @Test
+    void anAbsurdRetryAfterIsCapped() {
+        assertEquals(30_000, ResponsesApiChatModel.backoffMillis(0, 3_600_000));
+    }
+
+    /** A negative or nonsense instruction falls back to our own schedule. */
+    @Test
+    void aNegativeRetryAfterIsIgnored() {
+        long backoff = ResponsesApiChatModel.backoffMillis(0, -5000);
+        assertTrue(backoff >= 1000 && backoff <= 2000, "got " + backoff);
     }
 }

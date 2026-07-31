@@ -9,8 +9,10 @@ import com.dbaagent.llm.api.LlmNotConfiguredException;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -209,6 +211,87 @@ class EmbeddingServiceTest {
                 .containsExactly(0.7);
 
         verify(provider, times(2)).embed(anyString(), any());
+    }
+
+    /**
+     * A rate limiter counts the requests made during its own cooldown, so retrying
+     * early extends the window. Azure replied "retry after 4 seconds" while the local
+     * schedule slept 750ms then 1500ms; all three attempts landed inside the cooldown
+     * and the document was dropped as "transient". The wait must be at least what the
+     * provider asked for.
+     */
+    @Test
+    void waitsAtLeastAsLongAsTheProviderAsked() {
+        var resolver = mock(LlmConfigResolver.class);
+        var registry = mock(LlmProviderRegistry.class);
+        var provider = mock(LlmEmbeddingProvider.class);
+
+        when(resolver.resolveEmbedding()).thenReturn(creds());
+        when(registry.embeddingProvider("openai")).thenReturn(provider);
+        when(provider.embed(anyString(), any()))
+                .thenThrow(new RuntimeException("429 rate limited"))
+                .thenReturn(List.of(0.5));
+        when(provider.classify(any())).thenReturn(LlmErrorCategory.RATE_LIMIT);
+        when(provider.retryAfter(any())).thenReturn(Optional.of(Duration.ofMillis(400)));
+
+        long startedAt = System.nanoTime();
+        // Own schedule is 0ms, so any wait observed here came from the provider's hint.
+        var result = serviceWithNoBackoff(resolver, registry, false).createEmbedding("hello");
+        long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
+
+        assertThat(result).containsExactly(0.5);
+        assertThat(elapsedMs).isGreaterThanOrEqualTo(400);
+    }
+
+    /**
+     * The hint is a number from a remote server. Uncapped, one header could park a
+     * brain-init worker thread for as long as it liked.
+     */
+    @Test
+    void capsAnAbsurdProviderRetryAfter() {
+        var resolver = mock(LlmConfigResolver.class);
+        var registry = mock(LlmProviderRegistry.class);
+        var provider = mock(LlmEmbeddingProvider.class);
+
+        when(resolver.resolveEmbedding()).thenReturn(creds());
+        when(registry.embeddingProvider("openai")).thenReturn(provider);
+        when(provider.embed(anyString(), any()))
+                .thenThrow(new RuntimeException("429 rate limited"))
+                .thenReturn(List.of(0.5));
+        when(provider.classify(any())).thenReturn(LlmErrorCategory.RATE_LIMIT);
+        when(provider.retryAfter(any())).thenReturn(Optional.of(Duration.ofHours(1)));
+
+        var service = new EmbeddingService(resolver, registry, 30_000, false, 0L,
+                Duration.ofMillis(50));
+
+        long startedAt = System.nanoTime();
+        assertThat(service.createEmbedding("hello")).containsExactly(0.5);
+        long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
+
+        assertThat(elapsedMs).isLessThan(30_000);
+    }
+
+    /**
+     * A provider that fails while describing its own failure must not replace the
+     * failure the caller actually needs to see.
+     */
+    @Test
+    void aThrowingRetryAfterDoesNotMaskTheOriginalError() {
+        var resolver = mock(LlmConfigResolver.class);
+        var registry = mock(LlmProviderRegistry.class);
+        var provider = mock(LlmEmbeddingProvider.class);
+
+        when(resolver.resolveEmbedding()).thenReturn(creds());
+        when(registry.embeddingProvider("openai")).thenReturn(provider);
+        when(provider.embed(anyString(), any())).thenThrow(new RuntimeException("429 rate limited"));
+        when(provider.classify(any())).thenReturn(LlmErrorCategory.RATE_LIMIT);
+        when(provider.retryAfter(any())).thenThrow(new IllegalStateException("header parse blew up"));
+
+        assertThatThrownBy(() ->
+                serviceWithNoBackoff(resolver, registry, false).createEmbedding("hello"))
+                .hasMessageContaining("429 rate limited");
+
+        verify(provider, times(3)).embed(anyString(), any());
     }
 
     /** AUTH is never retryable — hammering a rejected key three times helps nobody. */

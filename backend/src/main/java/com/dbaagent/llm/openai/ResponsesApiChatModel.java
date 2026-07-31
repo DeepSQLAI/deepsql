@@ -26,6 +26,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Spring AI ChatModel implementation for OpenAI and every OpenAI-compatible endpoint:
@@ -55,6 +56,25 @@ public class ResponsesApiChatModel implements ChatModel {
     private final ObjectMapper objectMapper;
     private static final int MAX_RETRIES = 3;
     private static final long INITIAL_BACKOFF_MS = 2000;
+
+    /**
+     * Upper bound on a backoff wait, including any {@code Retry-After} the service sends.
+     * The request timeout is 8 minutes, so a long sleep here holds a request thread and
+     * the user's browser open; 30s keeps a retry a hiccup rather than a hang.
+     */
+    private static final long MAX_BACKOFF_MS = 30_000;
+
+    /**
+     * Fraction of the computed backoff that is fixed; the rest is randomised.
+     *
+     * <p>The agent issues several model calls in parallel. When a burst limit rejects
+     * them together, a purely deterministic backoff wakes every one of them at the same
+     * instant and they collide again — the retries recreate the burst they are backing
+     * off from. Observed against an Azure deployment that served 8 sequential requests
+     * without complaint and rejected 6 concurrent ones. Randomising part of the wait
+     * spreads the retries out.
+     */
+    private static final double BACKOFF_JITTER_FRACTION = 0.5;
 
     public ResponsesApiChatModel(String endpoint, String apiKey, String model,
                                   String apiVersion, double temperature, boolean useResponsesApi) {
@@ -101,6 +121,47 @@ public class ResponsesApiChatModel implements ChatModel {
                 .build();
     }
 
+    /**
+     * How long to wait before the next attempt: exponential, part-randomised, floored by
+     * whatever the service asked for, and capped.
+     *
+     * <p>Package-private so the retry policy can be asserted without making real calls.
+     *
+     * @param attempt          zero-based attempt index that just failed
+     * @param retryAfterMillis the service's own instruction, or 0 when it gave none
+     */
+    static long backoffMillis(int attempt, long retryAfterMillis) {
+        long exponential = INITIAL_BACKOFF_MS * (1L << attempt);
+        long fixed = (long) (exponential * (1 - BACKOFF_JITTER_FRACTION));
+        long jittered = fixed + (long) (ThreadLocalRandom.current().nextDouble()
+                * (exponential - fixed));
+        // The service's instruction is a floor, not a replacement: it says "not before
+        // this", and our own schedule may already be waiting longer than that.
+        long wait = Math.max(jittered, Math.max(retryAfterMillis, 0));
+        return Math.min(wait, MAX_BACKOFF_MS);
+    }
+
+    /**
+     * The {@code Retry-After} delay in milliseconds, or 0 when absent or unparseable.
+     *
+     * <p>Only RFC 9110's delta-seconds form is read; the HTTP-date form would mean
+     * trusting the remote clock against ours. A malformed header degrades to "no
+     * instruction" rather than throwing — a bad header must not turn a retryable
+     * response into a hard failure.
+     */
+    private static long retryAfterMillis(HttpResponse<?> response) {
+        return response.headers().firstValue("retry-after")
+                .map(value -> {
+                    try {
+                        double seconds = Double.parseDouble(value.trim());
+                        return seconds >= 0 ? Math.round(seconds * 1000) : 0L;
+                    } catch (NumberFormatException e) {
+                        return 0L;
+                    }
+                })
+                .orElse(0L);
+    }
+
     static String resolveApiUrl(String endpoint, String model, String apiVersion, boolean useResponsesApi) {
         String base = endpoint.endsWith("/") ? endpoint.substring(0, endpoint.length() - 1) : endpoint;
         boolean isOpenAiCompatible = isOpenAiCompatibleEndpoint(base);
@@ -142,7 +203,7 @@ public class ResponsesApiChatModel implements ChatModel {
                 HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
                 if (isRetryableStatus(response.statusCode()) && attempt < MAX_RETRIES) {
-                    long backoff = INITIAL_BACKOFF_MS * (1L << attempt);
+                    long backoff = backoffMillis(attempt, retryAfterMillis(response));
                     log.warn("Chat provider returned {} (attempt {}/{}), retrying in {}ms",
                             response.statusCode(), attempt + 1, MAX_RETRIES, backoff);
                     Thread.sleep(backoff);
@@ -328,7 +389,7 @@ public class ResponsesApiChatModel implements ChatModel {
                         httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
 
                 if (isRetryableStatus(response.statusCode()) && attempt < MAX_RETRIES) {
-                    long backoff = INITIAL_BACKOFF_MS * (1L << attempt);
+                    long backoff = backoffMillis(attempt, retryAfterMillis(response));
                     log.warn("Chat provider stream returned {} (attempt {}/{}), retrying in {}ms",
                             response.statusCode(), attempt + 1, MAX_RETRIES, backoff);
                     response.body().close();

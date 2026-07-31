@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -32,11 +33,21 @@ public class EmbeddingService {
     private static final int MAX_RETRY_ATTEMPTS = 2;
     private static final long RETRY_BACKOFF_MS = 750L;
 
+    /**
+     * Ceiling on a provider-supplied {@code Retry-After}. Brain init embeds documents on
+     * a bounded worker pool, so a long sleep here stalls the whole stage; 30s is longer
+     * than any real rate-limit cooldown observed and short enough to stay a hiccup.
+     */
+    private static final Duration MAX_RETRY_AFTER = Duration.ofSeconds(30);
+
     private final LlmConfigResolver resolver;
     private final LlmProviderRegistry registry;
     private final int maxChars;
     private final boolean failOpen;
     private final long retryBackoffMs;
+
+    /** Ceiling applied to a provider-supplied {@code Retry-After}. See {@link #MAX_RETRY_AFTER}. */
+    private final Duration maxRetryAfter;
 
     /**
      * Memoised vector widths, keyed by the non-secret credential signature. Bounded in
@@ -58,11 +69,22 @@ public class EmbeddingService {
     /** Test seam: lets the retry tests run with no real sleeping. */
     EmbeddingService(LlmConfigResolver resolver, LlmProviderRegistry registry,
                      int maxChars, boolean failOpen, long retryBackoffMs) {
+        this(resolver, registry, maxChars, failOpen, retryBackoffMs, MAX_RETRY_AFTER);
+    }
+
+    /**
+     * Test seam: also lowers the {@code Retry-After} ceiling, so the cap can be asserted
+     * without a test that actually sleeps for it.
+     */
+    EmbeddingService(LlmConfigResolver resolver, LlmProviderRegistry registry,
+                     int maxChars, boolean failOpen, long retryBackoffMs,
+                     Duration maxRetryAfter) {
         this.resolver = resolver;
         this.registry = registry;
         this.maxChars = maxChars;
         this.failOpen = failOpen;
         this.retryBackoffMs = retryBackoffMs;
+        this.maxRetryAfter = maxRetryAfter;
     }
 
     /** text-embedding-3-large accepts 8192 tokens, roughly 4 chars per token. */
@@ -164,19 +186,47 @@ public class EmbeddingService {
             } catch (RuntimeException e) {
                 LlmErrorCategory category = provider.classify(e);
                 if (retries >= MAX_RETRY_ATTEMPTS || !category.isRetryable()
-                        || !backoff(retries, category, credentials)) {
+                        || !backoff(retries, category, credentials, retryAfterHint(provider, e))) {
                     return handleFailure(category, credentials, e, failOpenValue, mayFailOpen);
                 }
             }
         }
     }
 
-    /** Sleeps before the next attempt. Returns false if interrupted, so the caller stops. */
-    private boolean backoff(int retries, LlmErrorCategory category, LlmCredentials credentials) {
-        long delayMs = retryBackoffMs * (retries + 1);
-        log.warn("Embedding attempt {}/{} failed — provider={} category={} model={}; retrying in {}ms",
+    /**
+     * The provider's stated retry delay, or zero when it has no opinion.
+     *
+     * <p>A provider that throws while reporting an error must not replace the error:
+     * the original failure is what the caller needs to see, so any secondary failure
+     * here degrades to "no hint" rather than propagating.
+     */
+    private Duration retryAfterHint(LlmEmbeddingProvider provider, RuntimeException failure) {
+        try {
+            return provider.retryAfter(failure).orElse(Duration.ZERO);
+        } catch (RuntimeException ignored) {
+            return Duration.ZERO;
+        }
+    }
+
+    /**
+     * Sleeps before the next attempt. Returns false if interrupted, so the caller stops.
+     *
+     * <p>Waits for whichever is longer: our own escalating schedule, or the delay the
+     * provider asked for. Retrying before a rate limiter's cooldown expires does not
+     * merely waste the attempt — the attempt itself is counted, so an impatient client
+     * extends the very window it is waiting on. The provider's number is remote input,
+     * so it is capped by {@link #MAX_RETRY_AFTER}; without that cap a single header
+     * could park a brain-init worker thread indefinitely.
+     */
+    private boolean backoff(int retries, LlmErrorCategory category, LlmCredentials credentials,
+                            Duration providerHint) {
+        long ownScheduleMs = retryBackoffMs * (retries + 1);
+        long hintMs = Math.min(Math.max(providerHint.toMillis(), 0L), maxRetryAfter.toMillis());
+        long delayMs = Math.max(ownScheduleMs, hintMs);
+        log.warn("Embedding attempt {}/{} failed — provider={} category={} model={}; retrying in {}ms{}",
                 retries + 1, MAX_RETRY_ATTEMPTS + 1, credentials.providerId(), category,
-                credentials.getOrDefault("model", "<unset>"), delayMs);
+                credentials.getOrDefault("model", "<unset>"), delayMs,
+                hintMs > ownScheduleMs ? " (honouring provider Retry-After)" : "");
         if (delayMs <= 0) {
             return true;
         }

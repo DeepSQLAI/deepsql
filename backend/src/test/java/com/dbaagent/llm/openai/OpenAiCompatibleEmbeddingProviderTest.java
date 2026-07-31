@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Answers;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -294,5 +295,66 @@ class OpenAiCompatibleEmbeddingProviderTest {
                 .isEqualTo("https://api.openai.com/v1/");
         assertThat(OpenAiCompatibleEmbeddingProvider.normalizeBaseUrl("http://localhost:11434/v1/"))
                 .isEqualTo("http://localhost:11434/v1/");
+    }
+
+    // ------------------------------------------------------------------
+    // retryAfter — how long the service asked us to wait.
+    // ------------------------------------------------------------------
+
+    /** Verbatim from a live Azure OpenAI S0 429 during a brain-init run. */
+    @Test
+    void readsTheDelayAzureStatesInPlainProse() {
+        var provider = new OpenAiCompatibleEmbeddingProvider();
+
+        assertThat(provider.retryAfter(new RuntimeException(
+                "429: Your requests to text-embedding-3-large have exceeded the call rate "
+                        + "limit for your current AIServices S0 pricing tier. "
+                        + "Please retry after 4 seconds.")))
+                .contains(Duration.ofSeconds(4));
+    }
+
+    /** OpenAI words it differently and uses fractional seconds. */
+    @Test
+    void readsOpenAisFractionalSecondsWording() {
+        var provider = new OpenAiCompatibleEmbeddingProvider();
+
+        assertThat(provider.retryAfter(new RuntimeException(
+                "Rate limit reached. Please try again in 1.5s.")))
+                .contains(Duration.ofMillis(1500));
+    }
+
+    @Test
+    void findsTheDelayOnAWrappedCause() {
+        var provider = new OpenAiCompatibleEmbeddingProvider();
+
+        assertThat(provider.retryAfter(new IllegalStateException("embedding failed",
+                new RuntimeException("429 — please retry after 2 seconds"))))
+                .contains(Duration.ofSeconds(2));
+    }
+
+    /**
+     * No opinion is a valid answer: the caller then keeps its own schedule. Returning a
+     * bogus zero instead would silently collapse the backoff to nothing.
+     */
+    @Test
+    void returnsEmptyWhenTheErrorStatesNoDelay() {
+        var provider = new OpenAiCompatibleEmbeddingProvider();
+
+        assertThat(provider.retryAfter(new RuntimeException("500 internal server error")))
+                .isEmpty();
+        assertThat(provider.retryAfter(new RuntimeException((String) null))).isEmpty();
+    }
+
+    /**
+     * The pattern is anchored on the verb phrase so unrelated figures in a long error
+     * body cannot be mistaken for a delay.
+     */
+    @Test
+    void ignoresNumbersThatAreNotARetryDelay() {
+        var provider = new OpenAiCompatibleEmbeddingProvider();
+
+        assertThat(provider.retryAfter(new RuntimeException(
+                "429: quota of 240000 tokens per 60 seconds exceeded for deployment 3")))
+                .isEmpty();
     }
 }
