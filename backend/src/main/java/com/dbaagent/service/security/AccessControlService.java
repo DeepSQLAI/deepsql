@@ -23,6 +23,13 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 @RequiredArgsConstructor
 public class AccessControlService {
 
+    /**
+     * Identity attributed to actions taken while {@code security.auth.enabled} is false.
+     * Matches the owner fallback used when a connection is saved without a principal, so a
+     * dev-mode install does not end up with records split across two synthetic owners.
+     */
+    private static final String LOCAL_FALLBACK_USERNAME = "admin";
+
     @Value("${security.auth.enabled:true}")
     private boolean authEnabled;
 
@@ -91,15 +98,31 @@ public class AccessControlService {
         assertCanUseChatEditor(connectionId);
     }
 
+    /**
+     * As {@link #assertChatBelongsToConnection}, but tolerates a chat that does not
+     * exist yet.
+     *
+     * <p>Clients generate a chat id when the user opens a conversation and send it with
+     * the first message, before anything is persisted. Treating that as "Chat not found"
+     * rejected the opening message of every new conversation — which is what this
+     * variant existed to prevent, except its body was identical to the strict one, so
+     * the name promised leniency the code never implemented.
+     *
+     * <p>The existence check must come first, and must not be folded into
+     * {@code findAccessibleChatIfPresent}: that method looks chats up by id AND owner,
+     * so it returns empty both for "no such chat" and for "someone else's chat".
+     * Collapsing the two would turn this into a probe — pass another user's chat id, get
+     * an empty result, sail through. So: absent means there is nothing to protect and we
+     * allow; present means the strict rules apply, unchanged.
+     */
     public void assertChatBelongsToConnectionIfPresent(String chatId, String connectionId) {
         if (chatId == null || chatId.isBlank()) {
             return;
         }
-        Chat chat = findAccessibleChat(chatId);
-        if (!connectionId.equals(chat.getConnectionId())) {
-            throw new ResponseStatusException(FORBIDDEN, "Chat does not belong to the selected connection");
+        if (!chatRepository.existsById(chatId)) {
+            return;
         }
-        assertCanUseChatEditor(connectionId);
+        assertChatBelongsToConnection(chatId, connectionId);
     }
 
     public void assertCanAccessFeedback(String feedbackId) {
@@ -126,9 +149,28 @@ public class AccessControlService {
         return authentication.getName();
     }
 
+    /**
+     * The caller's username, or the local fallback identity when authentication is off.
+     *
+     * <p>Every other check in this class honours {@code security.auth.enabled} — with auth
+     * off, {@link #resolveCurrentUserAccess} hands back ADMIN and {@link #isCurrentUserAdmin}
+     * returns true. This method did not, so it threw 403 "Access denied" at all 17 of its
+     * call sites the moment anyone actually ran with auth disabled, {@code ChatController}
+     * included: the documented dev-mode bypass switched chat off instead of opening it.
+     * A bypass has to be coherent or it is not a bypass.
+     *
+     * <p>{@code "admin"} matches the owner fallback already used when a connection is saved
+     * without a principal, so records created in dev mode carry one consistent owner.
+     *
+     * <p>With auth enabled — every real deployment — behaviour is unchanged: no principal
+     * means 403.
+     */
     public String requireCurrentUsername() {
         String username = getCurrentUsername();
         if (username == null || username.isBlank()) {
+            if (!authEnabled) {
+                return LOCAL_FALLBACK_USERNAME;
+            }
             throw new ResponseStatusException(FORBIDDEN, "Access denied");
         }
         return username;

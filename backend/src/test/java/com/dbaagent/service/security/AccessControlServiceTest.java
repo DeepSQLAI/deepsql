@@ -97,6 +97,98 @@ class AccessControlServiceTest {
         assertDoesNotThrow(() -> accessControlService.assertCanAccessConnection("conn-1"));
     }
 
+    /**
+     * The dev-mode bypass has to be coherent. Every other check here honours
+     * security.auth.enabled, so this one throwing 403 meant turning auth off turned chat
+     * off — the opposite of what the flag advertises.
+     */
+    @Test
+    void withAuthDisabledTheCurrentUsernameFallsBackInsteadOfThrowing() {
+        ReflectionTestUtils.setField(accessControlService, "authEnabled", false);
+        SecurityContextHolder.clearContext();
+
+        assertEquals("admin", accessControlService.requireCurrentUsername());
+    }
+
+    /** With auth on — every real deployment — an anonymous caller is still refused. */
+    @Test
+    void withAuthEnabledAnAnonymousCallerIsStillRefused() {
+        SecurityContextHolder.clearContext();
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+            () -> accessControlService.requireCurrentUsername());
+        assertEquals(403, ex.getStatusCode().value());
+    }
+
+    /** A real principal always wins over the fallback, however the flag is set. */
+    @Test
+    void aRealPrincipalIsUsedEvenWithAuthDisabled() {
+        ReflectionTestUtils.setField(accessControlService, "authEnabled", false);
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken("alice", null, List.of())
+        );
+
+        assertEquals("alice", accessControlService.requireCurrentUsername());
+    }
+
+    /**
+     * A client generates a chat id when the user opens a conversation and sends it with
+     * the first message. Rejecting that as "Chat not found" rejected the opening message
+     * of every new conversation.
+     */
+    @Test
+    void aChatIdThatDoesNotExistYetIsAllowedThrough() {
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken("alice", null, List.of())
+        );
+
+        when(chatRepository.existsById("brand-new-chat")).thenReturn(false);
+
+        assertDoesNotThrow(() ->
+            accessControlService.assertChatBelongsToConnectionIfPresent("brand-new-chat", "conn-1"));
+    }
+
+    /**
+     * The leniency above must not become a probe. {@code findAccessibleChatIfPresent}
+     * matches on id AND owner, so it returns empty for "someone else's chat" exactly as
+     * it does for "no such chat" — if the two were collapsed, passing another user's
+     * chat id would sail straight through.
+     */
+    @Test
+    void anotherUsersChatIsStillRejectedByTheLenientCheck() {
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken("alice", null, List.of())
+        );
+
+        when(chatRepository.existsById("chat-1")).thenReturn(true);
+        when(chatRepository.findByIdAndOwnerUsernameIgnoreCase("chat-1", "alice"))
+            .thenReturn(Optional.empty());
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+            () -> accessControlService.assertChatBelongsToConnectionIfPresent("chat-1", "conn-1"));
+        assertEquals(404, ex.getStatusCode().value());
+    }
+
+    /** An existing, owned chat still has to match the connection it is used with. */
+    @Test
+    void anExistingChatStillMustBelongToTheRequestedConnection() {
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken("alice", null, List.of())
+        );
+
+        Chat chat = new Chat();
+        chat.setId("chat-1");
+        chat.setConnectionId("conn-2");
+        chat.setOwnerUsername("alice");
+        when(chatRepository.existsById("chat-1")).thenReturn(true);
+        when(chatRepository.findByIdAndOwnerUsernameIgnoreCase("chat-1", "alice"))
+            .thenReturn(Optional.of(chat));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+            () -> accessControlService.assertChatBelongsToConnectionIfPresent("chat-1", "conn-1"));
+        assertEquals(403, ex.getStatusCode().value());
+    }
+
     @Test
     void chatMustBelongToRequestedConnection() {
         SecurityContextHolder.getContext().setAuthentication(
