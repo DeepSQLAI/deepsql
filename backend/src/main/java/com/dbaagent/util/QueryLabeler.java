@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
  * Signal priority (most distinctive first):
  *   1. Operation + primary table   — always present ("Room reservations …")
  *   2. First JOIN table            → "Room reservations + guests query"
- *   3. First meaningful WHERE col  → "Room reservations by hotel_id query"
+ *   3. First meaningful WHERE col  → "Room reservations by customer_id query"
  *   4. GROUP BY column             → "Room reservations by date aggregation"
  *   5. ORDER BY column             → "Room reservations ordered by created_at"
  *   6. Aggregate flag              → "Room reservations aggregation"
@@ -141,7 +141,7 @@ public final class QueryLabeler {
      *
      * Priority:
      *   JOIN table  → "+ guests"      (most structurally distinct)
-     *   WHERE col   → "by hotel_id"  (filters shape the result set)
+     *   WHERE col   → "by customer_id"  (filters shape the result set)
      *   GROUP BY    → "by date"      (for aggregations)
      *   ORDER BY    → "ordered by created_at"  (plain selects only)
      */
@@ -181,7 +181,7 @@ public final class QueryLabeler {
      * Slices the SQL at WHERE … (GROUP|ORDER|HAVING|LIMIT), then scans all
      * column comparisons within that fragment, skipping noise column names.
      * This handles multi-column predicates like:
-     *   WHERE tenant_id = ? AND hotel_id = ?   →  "hotel_id"  (tenant_id is noise)
+     *   WHERE tenant_id = ? AND customer_id = ?   →  "customer_id"  (tenant_id is noise)
      */
     private static String firstMeaningfulWhereCol(String sql) {
         Matcher whereStart = WHERE_START.matcher(sql);
@@ -258,7 +258,7 @@ public final class QueryLabeler {
 
     /**
      * Cleans a column name for display — strips quotes but preserves underscores
-     * so it stays recognisable as a column name ("hotel_id", not "Hotel id").
+     * so it stays recognisable as a column name ("customer_id", not "Hotel id").
      */
     private static String cleanCol(String col) {
         return col.replace("`", "").replace("\"", "").replace("'", "").trim();

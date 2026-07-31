@@ -95,7 +95,7 @@ class ApprovedWorkflowServiceTest {
         ApprovedAgentWorkflow workflow = new ApprovedAgentWorkflow();
         workflow.setConnectionId("conn-1");
         workflow.setIntent("CHURN_RISK");
-        workflow.setNormalizedQuestion("churn customers dropped hotels usage");
+        workflow.setNormalizedQuestion("churn customers dropped customers usage");
         workflow.setHelpfulCount(3);
 
         when(approvedAgentWorkflowRepository.findByConnectionIdAndIntentOrderByLastApprovedAtDesc("conn-1", "CHURN_RISK"))
@@ -104,7 +104,7 @@ class ApprovedWorkflowServiceTest {
         Optional<ApprovedWorkflowMatch> match = service.findBestMatch(
             "conn-1",
             AgentIntent.CHURN_RISK,
-            "Which hotels are about to churn because usage dropped recently?"
+            "Which customers are about to churn because usage dropped recently?"
         );
 
         assertTrue(match.isPresent());
@@ -187,7 +187,7 @@ class ApprovedWorkflowServiceTest {
         step.setStepKey("universal-chat");
         step.setToolName("universal_chat_tool");
         step.setParams(Map.of("routeType", "BI_QUERY"));
-        step.setExecutedSql("SELECT user_email, COUNT(*) FROM user_bookings GROUP BY user_email");
+        step.setExecutedSql("SELECT user_email, COUNT(*) FROM customer_orders GROUP BY user_email");
         trace.setSteps(List.of(step));
 
         AgentRun rootRun = new AgentRun();
@@ -214,9 +214,9 @@ class ApprovedWorkflowServiceTest {
         turnContext.setChatId("chat-1");
         turnContext.setAnchorQuestion("find recurring guests in the last one week");
         turnContext.setCurrentQuestion("don't do * 1000 for milli seconds conversion.");
-        turnContext.setChainSummary("Recurring guests over a one week window using user_bookings.");
+        turnContext.setChainSummary("Recurring guests over a one week window using customer_orders.");
         turnContext.setResolvedContextJson("""
-            {"tables":["user_bookings"],"metric":"recurring guests","timeframe":"last one week"}
+            {"tables":["customer_orders"],"metric":"recurring guests","timeframe":"last one week"}
             """);
         when(chatTurnContextRepository.findByAssistantMessageId("assistant-1")).thenReturn(Optional.of(turnContext));
         when(approvedAgentWorkflowRepository.findByConnectionIdAndIntentAndQuestionSignature(
@@ -234,11 +234,11 @@ class ApprovedWorkflowServiceTest {
         assertEquals("ctx-1", saved.get().getSourceContextId());
         assertEquals("find recurring guests in the last one week", saved.get().getAnchorQuestion());
         assertTrue(saved.get().getChainSummary().contains("Recurring guests"));
-        assertTrue(saved.get().getResolvedContextJson().contains("user_bookings"));
+        assertTrue(saved.get().getResolvedContextJson().contains("customer_orders"));
         assertTrue(saved.get().getNormalizedQuestion().contains("recurring"));
         assertTrue(saved.get().getStepParamsJson().contains("\"approvedQuestion\":\"find recurring guests in the last one week\""));
         assertTrue(saved.get().getStepParamsJson().contains("\"approvedChainSummary\""));
-        assertTrue(saved.get().getStepParamsJson().contains("\"approvedSql\":\"SELECT user_email, COUNT(*) FROM user_bookings GROUP BY user_email\""));
+        assertTrue(saved.get().getStepParamsJson().contains("\"approvedSql\":\"SELECT user_email, COUNT(*) FROM customer_orders GROUP BY user_email\""));
         verify(approvedAgentWorkflowRepository, times(1)).save(any(ApprovedAgentWorkflow.class));
     }
 }

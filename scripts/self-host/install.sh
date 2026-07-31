@@ -28,15 +28,6 @@ require_env_value() {
   fi
 }
 
-ensure_local_image() {
-  local image_ref="$1"
-  if ! docker image inspect "$image_ref" >/dev/null 2>&1; then
-    echo "Error: Docker image '$image_ref' is not present locally." >&2
-    echo "Either load the image first or set DEEPSQL_SKIP_IMAGE_PULL=false." >&2
-    exit 1
-  fi
-}
-
 generate_secret() {
   local name="$1"
   local cmd="$2"
@@ -110,18 +101,6 @@ sed_inplace() {
     sed -i '' "$@"
   else
     sed -i "$@"
-  fi
-}
-
-check_registry_access() {
-  if [[ "${DEEPSQL_SKIP_IMAGE_PULL:-false}" == "true" ]]; then
-    return 0
-  fi
-  local test_image="${DEEPSQL_BACKEND_IMAGE}"
-  if ! docker manifest inspect "$test_image" >/dev/null 2>&1; then
-    echo "Error: cannot access Docker images from the registry." >&2
-    echo "Run:  echo '<YOUR_TOKEN>' | docker login ghcr.io -u <USERNAME> --password-stdin" >&2
-    exit 1
   fi
 }
 
@@ -261,16 +240,11 @@ bootstrap_admin() {
   fi
 }
 
-pull_application_images() {
-  if [[ "${DEEPSQL_SKIP_IMAGE_PULL:-false}" == "true" ]]; then
-    ensure_local_image "${DEEPSQL_BACKEND_IMAGE}"
-    ensure_local_image "${DEEPSQL_FRONTEND_IMAGE}"
-    echo "Skipping image pull because DEEPSQL_SKIP_IMAGE_PULL=true."
-    return 0
-  fi
-
-  echo "Pulling DeepSQL application images..."
-  compose pull backend frontend
+build_application_images() {
+  echo "Building the DeepSQL backend and frontend from source..."
+  echo "The first build compiles the Java backend and bundles the frontend; expect"
+  echo "several minutes. Subsequent runs reuse the Docker layer cache and are quick."
+  compose build backend frontend
 }
 
 require_command docker
@@ -320,7 +294,6 @@ prompt_optional_env_value DEEPSQL_COMPANY_NAME "Company / organization name (opt
 : "${DEEPSQL_BACKEND_PORT:=8080}"
 : "${DEEPSQL_POSTGRES_PORT:=5432}"
 : "${DEEPSQL_VALKEY_PORT:=6379}"
-: "${DEEPSQL_SKIP_IMAGE_PULL:=false}"
 : "${CORS_ALLOWED_ORIGINS:=http://localhost:${DEEPSQL_FRONTEND_PORT}}"
 
 if [[ "${VECTOR_STORE_TYPE:-pgvector}" == "pgvector" && -z "${SPRING_AUTOCONFIGURE_EXCLUDE:-}" ]]; then
@@ -332,15 +305,12 @@ export DEEPSQL_FRONTEND_PORT
 export DEEPSQL_BACKEND_PORT
 export DEEPSQL_POSTGRES_PORT
 export DEEPSQL_VALKEY_PORT
-export DEEPSQL_SKIP_IMAGE_PULL
 export CORS_ALLOWED_ORIGINS
 export SPRING_AUTOCONFIGURE_EXCLUDE
 export SECURITY_ADMIN_BOOTSTRAP_ENABLED=true
 
 sed_inplace "s|^SECURITY_ADMIN_BOOTSTRAP_ENABLED=.*|SECURITY_ADMIN_BOOTSTRAP_ENABLED=true|" "$ENV_FILE"
 
-require_env_value DEEPSQL_BACKEND_IMAGE
-require_env_value DEEPSQL_FRONTEND_IMAGE
 require_env_value SECURITY_JWT_SECRET
 require_env_value ENCRYPTION_KEY
 require_env_value ENCRYPTION_KEY_ID
@@ -386,9 +356,8 @@ if [[ "${VECTOR_STORE_TYPE:-pgvector}" == "azure" || "${AZURE_SEARCH_ENABLED:-fa
   require_env_value AZURE_SEARCH_INDEX_NAME
 fi
 
-check_registry_access
 echo "Starting DeepSQL self-hosted stack with project '$PROJECT_NAME'..."
-pull_application_images
+build_application_images
 compose up -d
 
 ensure_scheduler_table
@@ -410,8 +379,8 @@ echo "DeepSQL self-hosted stack is ready."
 echo "Frontend: http://localhost:${DEEPSQL_FRONTEND_PORT}"
 echo "Backend:  http://localhost:${DEEPSQL_BACKEND_PORT}/api"
 echo "Project:  $PROJECT_NAME"
-echo "Backend image:  ${DEEPSQL_BACKEND_IMAGE}"
-echo "Frontend image: ${DEEPSQL_FRONTEND_IMAGE}"
+echo "Images:   built from source in this checkout (backend/Dockerfile, ./Dockerfile)."
+echo "          After pulling new code, re-run this script to rebuild."
 echo
 
 echo "Useful commands:"

@@ -111,10 +111,10 @@ class SqlLiteralSubstitutionTest {
     @Test
     void substituteLiterals_aiRewriteWithDifferentStructure() {
         // AI rewrite restructured the query but kept same number of conditions
-        String parameterized = "SELECT b.id FROM bookings b USE INDEX(idx_hotel) WHERE b.hotel_id = ? AND b.status = ?";
-        String source = "SELECT * FROM bookings WHERE hotel_id = 42 AND status = 'active'";
+        String parameterized = "SELECT b.id FROM bookings b USE INDEX(idx_hotel) WHERE b.customer_id = ? AND b.status = ?";
+        String source = "SELECT * FROM bookings WHERE customer_id = 42 AND status = 'active'";
         String result = SqlLiteralSubstitution.substituteLiterals(parameterized, source);
-        assertThat(result).isEqualTo("SELECT b.id FROM bookings b USE INDEX(idx_hotel) WHERE b.hotel_id = 42 AND b.status = 'active'");
+        assertThat(result).isEqualTo("SELECT b.id FROM bookings b USE INDEX(idx_hotel) WHERE b.customer_id = 42 AND b.status = 'active'");
     }
 
     @Test
@@ -159,19 +159,19 @@ class SqlLiteralSubstitutionTest {
         // ORIGINAL candidate (from sampleQuery) has real values
         String originalSql = "SELECT r.id, r.checkin_date, r.checkout_date, r.guest_name " +
             "FROM reservations r " +
-            "WHERE r.hotel_id = 12345 AND r.status = 'CONFIRMED' AND r.checkin_date >= '2026-01-01'";
+            "WHERE r.customer_id = 12345 AND r.status = 'CONFIRMED' AND r.checkin_date >= '2026-01-01'";
 
         // AI_REWRITE candidate still has placeholders (applySampleLiterals failed at creation)
         String aiRewriteSql = "SELECT r.id, r.checkin_date, r.checkout_date, r.guest_name " +
             "FROM reservations r USE INDEX(idx_hotel_status_checkin) " +
-            "WHERE r.hotel_id = ? AND r.status = ? AND r.checkin_date >= ?";
+            "WHERE r.customer_id = ? AND r.status = ? AND r.checkin_date >= ?";
 
         String result = SqlLiteralSubstitution.substituteLiterals(aiRewriteSql, originalSql);
 
         assertThat(result).isEqualTo(
             "SELECT r.id, r.checkin_date, r.checkout_date, r.guest_name " +
             "FROM reservations r USE INDEX(idx_hotel_status_checkin) " +
-            "WHERE r.hotel_id = 12345 AND r.status = 'CONFIRMED' AND r.checkin_date >= '2026-01-01'"
+            "WHERE r.customer_id = 12345 AND r.status = 'CONFIRMED' AND r.checkin_date >= '2026-01-01'"
         );
         assertThat(SqlLiteralSubstitution.hasPlaceholders(result)).isFalse();
     }

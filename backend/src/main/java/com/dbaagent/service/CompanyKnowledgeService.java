@@ -291,8 +291,8 @@ public class CompanyKnowledgeService {
     /**
      * Tolerant focus-vs-linked-table comparison: a focus token matches the linked
      * table either by canonical equality, or when the linked table is a schema-qualified
-     * suffix of the focus (e.g., focus {@code HOTEL_PRICING} matches linked
-     * {@code idb_database.HOTEL_PRICING}). Mirrors the SQL anchor logic in
+     * suffix of the focus (e.g., focus {@code PRODUCT_PRICING} matches linked
+     * {@code analytics_db.PRODUCT_PRICING}). Mirrors the SQL anchor logic in
      * {@link CompanyKnowledgeEntryRepository#findByLinkedTablesAny} so the in-memory
      * re-ranker stays consistent with the link-floor recall pass.
      */

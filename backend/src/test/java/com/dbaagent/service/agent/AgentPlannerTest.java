@@ -49,7 +49,7 @@ class AgentPlannerTest {
     void plan_genericBiPrompt_buildsUniversalWorkflow() {
         AgentPlan plan = planner.plan(
             new AgentDecision(true, AgentIntent.UNIVERSAL_CHAT, "BI_QUERY"),
-            "give me top 5 hotels by bookings volume in the last 3 days",
+            "give me top 5 customers by bookings volume in the last 3 days",
             null
         );
 
@@ -87,7 +87,7 @@ class AgentPlannerTest {
     void plan_joinedProjectionPrompt_keepsSingleDataTask() {
         AgentPlan plan = planner.plan(
             new AgentDecision(true, AgentIntent.UNIVERSAL_CHAT, "BI_QUERY"),
-            "Show booking taxes along with the booking amounts from USER_BOOKINGS",
+            "Show booking taxes along with the booking amounts from CUSTOMER_ORDERS",
             null
         );
 

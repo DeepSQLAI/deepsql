@@ -129,18 +129,18 @@ class UniversalChatToolTest {
     void resolveCandidateTables_prefersEventLogTableForUsageDropPrompt() {
         SchemaMetadata schema = usageDropSchema();
         ResolvedContext resolvedContext = new ResolvedContext(
-            List.of("USER_BOOKINGS", "HOTEL"),
+            List.of("CUSTOMER_ORDERS", "CUSTOMERS"),
             Map.of(),
             List.of(),
             List.of(),
             ResolvedContext.Confidence.MEDIUM
         );
 
-        when(semanticModelService.findRelevantTables(eq("conn-1"), eq("what are the hotels most likely churn? means they had usage one month ago, but usage steeply dropped recently."), anySet()))
+        when(semanticModelService.findRelevantTables(eq("conn-1"), eq("what are the customers most likely churn? means they had usage one month ago, but usage steeply dropped recently."), anySet()))
             .thenReturn(List.of(
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .businessDescription("Booking facts per reservation")
                     .timeColumns(List.of("booking_made_on"))
@@ -150,7 +150,7 @@ class UniversalChatToolTest {
                     .connectionId("conn-1")
                     .tableName("USER_LOGS")
                     .tableRole("EVENT_LOG")
-                    .businessDescription("Usage activity events for hotels and users")
+                    .businessDescription("Usage activity events for customers and users")
                     .timeColumns(List.of("event_occurred_at"))
                     .filterColumns(List.of(Map.of("column", "action_type")))
                     .build()
@@ -160,7 +160,7 @@ class UniversalChatToolTest {
             tool,
             "resolveCandidateTables",
             "conn-1",
-            "what are the hotels most likely churn? means they had usage one month ago, but usage steeply dropped recently.",
+            "what are the customers most likely churn? means they had usage one month ago, but usage steeply dropped recently.",
             schema,
             resolvedContext
         );
@@ -173,19 +173,19 @@ class UniversalChatToolTest {
     void resolveTemporalContext_prefersEventLogTimestampForUsageDropPrompt() {
         SchemaMetadata schema = usageDropSchema();
 
-        when(semanticModelService.findRelevantTables(eq("conn-1"), eq("what are the hotels most likely churn? means they had usage one month ago, but usage steeply dropped recently."), anySet()))
+        when(semanticModelService.findRelevantTables(eq("conn-1"), eq("what are the customers most likely churn? means they had usage one month ago, but usage steeply dropped recently."), anySet()))
             .thenReturn(List.of(
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
                     .tableName("USER_LOGS")
                     .tableRole("EVENT_LOG")
-                    .businessDescription("Usage activity events for hotels and users")
+                    .businessDescription("Usage activity events for customers and users")
                     .timeColumns(List.of("event_occurred_at", "created_at"))
                     .filterColumns(List.of(Map.of("column", "action_type")))
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .businessDescription("Booking facts per reservation")
                     .timeColumns(List.of("booking_made_on"))
@@ -197,7 +197,7 @@ class UniversalChatToolTest {
             tool,
             "resolveTemporalContext",
             "conn-1",
-            "what are the hotels most likely churn? means they had usage one month ago, but usage steeply dropped recently.",
+            "what are the customers most likely churn? means they had usage one month ago, but usage steeply dropped recently.",
             null,
             schema,
             ResolvedContext.empty()
@@ -218,11 +218,11 @@ class UniversalChatToolTest {
         schema.setDbType("mysql");
         schema.setTables(List.of(
             table("NR_BOOKING", col("booking_count")),
-            table("USER_BOOKINGS", col("id"), col("booking_amount"))
+            table("CUSTOMER_ORDERS", col("id"), col("booking_amount"))
         ));
 
         ResolvedContext resolvedContext = new ResolvedContext(
-            List.of("USER_BOOKINGS"),
+            List.of("CUSTOMER_ORDERS"),
             Map.of(),
             List.of(),
             List.of(),
@@ -239,7 +239,7 @@ class UniversalChatToolTest {
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .businessDescription("Source of truth booking facts")
                     .build()
@@ -255,7 +255,7 @@ class UniversalChatToolTest {
         );
 
         assertThat(candidates).isNotEmpty();
-        assertThat(candidates.getFirst().getName()).isEqualTo("USER_BOOKINGS");
+        assertThat(candidates.getFirst().getName()).isEqualTo("CUSTOMER_ORDERS");
     }
 
     @Test
@@ -264,22 +264,22 @@ class UniversalChatToolTest {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
         schema.setTables(List.of(
-            table("NR_BOOKING", col("hotel_id"), col("total_booking_amount")),
-            table("USER_BOOKINGS", col("id"), col("hotel_id"), col("booking_amount"), col("booking_made_on")),
-            table("HOTEL", col("id"), col("name"))
+            table("NR_BOOKING", col("customer_id"), col("total_booking_amount")),
+            table("CUSTOMER_ORDERS", col("id"), col("customer_id"), col("booking_amount"), col("booking_made_on")),
+            table("CUSTOMERS", col("id"), col("name"))
         ));
 
-        when(semanticModelService.findRelevantTables(eq("conn-1"), eq("What is the total booking amount per hotel?"), anySet()))
+        when(semanticModelService.findRelevantTables(eq("conn-1"), eq("What is the total booking amount per customer?"), anySet()))
             .thenReturn(List.of(
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
                     .tableName("NR_BOOKING")
                     .tableRole("FACT")
-                    .businessDescription("Booking summary per hotel")
+                    .businessDescription("Booking summary per customer")
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .businessDescription("Source of truth booking facts")
                     .build()
@@ -289,13 +289,13 @@ class UniversalChatToolTest {
             tool,
             "resolveCandidateTables",
             "conn-1",
-            "What is the total booking amount per hotel?",
+            "What is the total booking amount per customer?",
             schema,
             ResolvedContext.empty()
         );
 
         assertThat(candidates).isNotEmpty();
-        assertThat(candidates.getFirst().getName()).isEqualTo("USER_BOOKINGS");
+        assertThat(candidates.getFirst().getName()).isEqualTo("CUSTOMER_ORDERS");
     }
 
     @Test
@@ -304,9 +304,9 @@ class UniversalChatToolTest {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
         schema.setTables(List.of(
-            table("NR_BOOKING", col("hotel_id"), col("total_booking_amount")),
-            table("USER_BOOKINGS", col("id"), col("hotel_id"), col("booking_amount"), col("booking_made_on")),
-            table("HOTEL", col("id"), col("name"))
+            table("NR_BOOKING", col("customer_id"), col("total_booking_amount")),
+            table("CUSTOMER_ORDERS", col("id"), col("customer_id"), col("booking_amount"), col("booking_made_on")),
+            table("CUSTOMERS", col("id"), col("name"))
         ));
 
         when(semanticModelService.getSemanticTables(eq("conn-1"), anyList()))
@@ -315,11 +315,11 @@ class UniversalChatToolTest {
                     .connectionId("conn-1")
                     .tableName("NR_BOOKING")
                     .tableRole("FACT")
-                    .businessDescription("Booking summary per hotel")
+                    .businessDescription("Booking summary per customer")
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .businessDescription("Source of truth booking facts")
                     .build()
@@ -330,23 +330,23 @@ class UniversalChatToolTest {
             tool,
             "resolveSemanticEntity",
             "conn-1",
-            "What is the total booking amount per hotel?",
+            "What is the total booking amount per customer?",
             schema,
             new ResolvedContext(
-                List.of("USER_BOOKINGS", "HOTEL", "NR_BOOKING"),
+                List.of("CUSTOMER_ORDERS", "CUSTOMERS", "NR_BOOKING"),
                 Map.of(),
                 List.of(),
-                List.of("NR_BOOKING.hotel_id = HOTEL.id"),
+                List.of("NR_BOOKING.customer_id = CUSTOMERS.id"),
                 ResolvedContext.Confidence.HIGH
             ),
             Set.of(),
-            "USER_BOOKINGS"
+            "CUSTOMER_ORDERS"
         );
 
         assertThat(semanticEntity).isPresent();
         Object chosenEntity = semanticEntity.orElseThrow();
         TableMetadata chosenTable = ReflectionTestUtils.invokeMethod(chosenEntity, "table");
-        assertThat(chosenTable.getName()).isEqualTo("USER_BOOKINGS");
+        assertThat(chosenTable.getName()).isEqualTo("CUSTOMER_ORDERS");
     }
 
     @Test
@@ -356,7 +356,7 @@ class UniversalChatToolTest {
         schema.setDbType("mysql");
         schema.setTables(List.of(
             table("NR_BOOKING", col("status"), col("booking_made_on")),
-            table("USER_BOOKINGS", col("id"), col("booking_status"), col("booking_made_on"))
+            table("CUSTOMER_ORDERS", col("id"), col("booking_status"), col("booking_made_on"))
         ));
 
         when(semanticModelService.getSemanticTables(eq("conn-1"), anyList()))
@@ -369,7 +369,7 @@ class UniversalChatToolTest {
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .businessDescription("Core booking facts with booking lifecycle attributes")
                     .build()
@@ -389,13 +389,13 @@ class UniversalChatToolTest {
                 ResolvedContext.Confidence.MEDIUM
             ),
             Set.of(),
-            "USER_BOOKINGS"
+            "CUSTOMER_ORDERS"
         );
 
         assertThat(semanticEntity).isPresent();
         Object chosenEntity = semanticEntity.orElseThrow();
         TableMetadata chosenTable = ReflectionTestUtils.invokeMethod(chosenEntity, "table");
-        assertThat(chosenTable.getName()).isEqualTo("USER_BOOKINGS");
+        assertThat(chosenTable.getName()).isEqualTo("CUSTOMER_ORDERS");
     }
 
     @Test
@@ -403,25 +403,25 @@ class UniversalChatToolTest {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
         schema.setTables(List.of(
-            table("NR_BOOKING", col("hotel_id"), col("total_booking_amount")),
-            table("USER_BOOKINGS", col("id"), col("hotel_id"), col("booking_amount")),
-            table("HOTEL", col("id"), col("name"))
+            table("NR_BOOKING", col("customer_id"), col("total_booking_amount")),
+            table("CUSTOMER_ORDERS", col("id"), col("customer_id"), col("booking_amount")),
+            table("CUSTOMERS", col("id"), col("name"))
         ));
 
         Object decision = ReflectionTestUtils.invokeMethod(
             tool,
             "resolveSourceOfTruthDecision",
             "conn-1",
-            "What is the total booking amount per hotel?",
+            "What is the total booking amount per customer?",
             schema,
             new ResolvedContext(
-                List.of("USER_BOOKINGS", "HOTEL", "NR_BOOKING"),
+                List.of("CUSTOMER_ORDERS", "CUSTOMERS", "NR_BOOKING"),
                 Map.of(
-                    "USER_BOOKINGS", List.of("hotel_id", "booking_amount"),
-                    "HOTEL", List.of("id", "name")
+                    "CUSTOMER_ORDERS", List.of("customer_id", "booking_amount"),
+                    "CUSTOMERS", List.of("id", "name")
                 ),
                 List.of(),
-                List.of("NR_BOOKING.hotel_id = HOTEL.id"),
+                List.of("NR_BOOKING.customer_id = CUSTOMERS.id"),
                 ResolvedContext.Confidence.HIGH
             ),
             Set.of()
@@ -430,8 +430,8 @@ class UniversalChatToolTest {
         String chosenTable = ReflectionTestUtils.invokeMethod(decision, "tableName");
         String directive = ReflectionTestUtils.invokeMethod(decision, "directive");
 
-        assertThat(chosenTable).isEqualTo("USER_BOOKINGS");
-        assertThat(directive).contains("USER_BOOKINGS");
+        assertThat(chosenTable).isEqualTo("CUSTOMER_ORDERS");
+        assertThat(directive).contains("CUSTOMER_ORDERS");
         assertThat(directive).contains("raw fact table");
     }
 
@@ -441,7 +441,7 @@ class UniversalChatToolTest {
         schema.setDbType("mysql");
         schema.setTables(List.of(
             table("NR_BOOKING", col("booking_source"), col("booking_count")),
-            table("USER_BOOKINGS", col("id"), col("booking_source"), col("booking_amount"))
+            table("CUSTOMER_ORDERS", col("id"), col("booking_source"), col("booking_amount"))
         ));
 
         when(semanticModelService.findRelevantTables(eq("conn-1"), eq("How many bookings per booking source?"), anySet()))
@@ -454,7 +454,7 @@ class UniversalChatToolTest {
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .businessDescription("Booking facts per reservation")
                     .build()
@@ -477,7 +477,7 @@ class UniversalChatToolTest {
         );
 
         String chosenTable = ReflectionTestUtils.invokeMethod(decision, "tableName");
-        assertThat(chosenTable).isEqualTo("USER_BOOKINGS");
+        assertThat(chosenTable).isEqualTo("CUSTOMER_ORDERS");
     }
 
     @Test
@@ -486,7 +486,7 @@ class UniversalChatToolTest {
         schema.setDbType("mysql");
         schema.setTables(List.of(
             table("NR_BOOKING", col("status"), col("booking_made_on")),
-            table("USER_BOOKINGS", col("id"), col("booking_status"), col("booking_made_on"))
+            table("CUSTOMER_ORDERS", col("id"), col("booking_status"), col("booking_made_on"))
         ));
 
         when(semanticModelService.findRelevantTables(eq("conn-1"), eq("How many bookings per booking status in the last 30 days?"), anySet()))
@@ -499,7 +499,7 @@ class UniversalChatToolTest {
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .businessDescription("Booking facts per reservation")
                     .build()
@@ -513,7 +513,7 @@ class UniversalChatToolTest {
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .build()
             ));
@@ -535,7 +535,7 @@ class UniversalChatToolTest {
         );
 
         String chosenTable = ReflectionTestUtils.invokeMethod(decision, "tableName");
-        assertThat(chosenTable).isEqualTo("USER_BOOKINGS");
+        assertThat(chosenTable).isEqualTo("CUSTOMER_ORDERS");
     }
 
     @Test
@@ -543,9 +543,9 @@ class UniversalChatToolTest {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
         schema.setTables(List.of(
-            table("NR_BOOKING", col("hotel_id"), col("contact_email"), col("total_booking_amount"), col("booking_made_on")),
-            table("USER_BOOKINGS", col("id"), col("booking_amount"), col("booking_made_on"), col("user_name"), col("user_email")),
-            table("HOTEL", col("id"), col("name"))
+            table("NR_BOOKING", col("customer_id"), col("contact_email"), col("total_booking_amount"), col("booking_made_on")),
+            table("CUSTOMER_ORDERS", col("id"), col("booking_amount"), col("booking_made_on"), col("user_name"), col("user_email")),
+            table("CUSTOMERS", col("id"), col("name"))
         ));
 
         when(semanticModelService.findRelevantTables(eq("conn-1"), eq("Show top 10 customers by total booking amount in the last 30 days with their names and emails."), anySet()))
@@ -558,7 +558,7 @@ class UniversalChatToolTest {
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .businessDescription("Booking facts with user identity columns")
                     .build()
@@ -572,7 +572,7 @@ class UniversalChatToolTest {
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .build()
             ));
@@ -584,11 +584,11 @@ class UniversalChatToolTest {
             "Show top 10 customers by total booking amount in the last 30 days with their names and emails.",
             schema,
             new ResolvedContext(
-                List.of("NR_BOOKING", "HOTEL", "USER_BOOKINGS"),
+                List.of("NR_BOOKING", "CUSTOMERS", "CUSTOMER_ORDERS"),
                 Map.of(
                     "NR_BOOKING", List.of("contact_email", "total_booking_amount", "booking_made_on"),
-                    "HOTEL", List.of("name"),
-                    "USER_BOOKINGS", List.of("booking_amount", "user_name", "user_email", "booking_made_on")
+                    "CUSTOMERS", List.of("name"),
+                    "CUSTOMER_ORDERS", List.of("booking_amount", "user_name", "user_email", "booking_made_on")
                 ),
                 List.of(),
                 List.of(),
@@ -598,7 +598,7 @@ class UniversalChatToolTest {
         );
 
         String chosenTable = ReflectionTestUtils.invokeMethod(decision, "tableName");
-        assertThat(chosenTable).isEqualTo("USER_BOOKINGS");
+        assertThat(chosenTable).isEqualTo("CUSTOMER_ORDERS");
     }
 
     @Test
@@ -607,7 +607,7 @@ class UniversalChatToolTest {
         schema.setDbType("mysql");
         schema.setTables(List.of(
             table("NR_BOOKING", col("status"), col("source"), col("booking_made_on")),
-            table("USER_BOOKINGS", col("id"), col("booking_status"), col("booking_source"), col("booking_made_on"))
+            table("CUSTOMER_ORDERS", col("id"), col("booking_status"), col("booking_source"), col("booking_made_on"))
         ));
 
         when(semanticModelService.findRelevantTables(eq("conn-1"), eq("How many bookings per booking source?"), anySet()))
@@ -620,7 +620,7 @@ class UniversalChatToolTest {
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .businessDescription("Core booking facts with booking lifecycle attributes")
                     .build()
@@ -634,7 +634,7 @@ class UniversalChatToolTest {
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .build()
             ));
@@ -656,7 +656,7 @@ class UniversalChatToolTest {
         );
 
         String chosenTable = ReflectionTestUtils.invokeMethod(decision, "tableName");
-        assertThat(chosenTable).isEqualTo("USER_BOOKINGS");
+        assertThat(chosenTable).isEqualTo("CUSTOMER_ORDERS");
     }
 
     @Test
@@ -669,7 +669,7 @@ class UniversalChatToolTest {
                 col("source"),
                 col("booking_made_on"),
                 col("total_booking_amount")),
-            table("USER_BOOKINGS",
+            table("CUSTOMER_ORDERS",
                 col("id"),
                 col("booking_status"),
                 col("booking_source"),
@@ -687,7 +687,7 @@ class UniversalChatToolTest {
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .businessDescription("Core booking facts with booking lifecycle attributes")
                     .build()
@@ -701,7 +701,7 @@ class UniversalChatToolTest {
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .build()
             ));
@@ -723,7 +723,7 @@ class UniversalChatToolTest {
         );
 
         String chosenTable = ReflectionTestUtils.invokeMethod(decision, "tableName");
-        assertThat(chosenTable).isEqualTo("USER_BOOKINGS");
+        assertThat(chosenTable).isEqualTo("CUSTOMER_ORDERS");
     }
 
     @Test
@@ -732,19 +732,19 @@ class UniversalChatToolTest {
         schema.setDbType("mysql");
         schema.setTables(List.of(
             table("NR_BOOKING",
-                col("hotel_id"),
+                col("customer_id"),
                 col("contact_person"),
                 col("contact_email"),
                 col("total_booking_amount"),
                 col("booking_made_on")),
-            table("USER_BOOKINGS",
+            table("CUSTOMER_ORDERS",
                 col("id"),
-                col("hotel_id"),
+                col("customer_id"),
                 col("booking_amount"),
                 col("booking_made_on"),
                 col("user_name"),
                 col("user_email")),
-            table("HOTEL", col("id"), col("name"))
+            table("CUSTOMERS", col("id"), col("name"))
         ));
 
         when(semanticModelService.findRelevantTables(eq("conn-1"), eq("Show top 10 customers by total booking amount in the last 30 days with their names and emails."), anySet()))
@@ -757,7 +757,7 @@ class UniversalChatToolTest {
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .businessDescription("Booking facts with user identity columns")
                     .build()
@@ -771,7 +771,7 @@ class UniversalChatToolTest {
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .build()
             ));
@@ -783,20 +783,20 @@ class UniversalChatToolTest {
             "Show top 10 customers by total booking amount in the last 30 days with their names and emails.",
             schema,
             new ResolvedContext(
-                List.of("NR_BOOKING", "HOTEL"),
+                List.of("NR_BOOKING", "CUSTOMERS"),
                 Map.of(
                     "NR_BOOKING", List.of("contact_email", "total_booking_amount", "booking_made_on"),
-                    "HOTEL", List.of("name")
+                    "CUSTOMERS", List.of("name")
                 ),
                 List.of(),
-                List.of("NR_BOOKING.hotel_id = HOTEL.id"),
+                List.of("NR_BOOKING.customer_id = CUSTOMERS.id"),
                 ResolvedContext.Confidence.HIGH
             ),
             Set.of()
         );
 
         String chosenTable = ReflectionTestUtils.invokeMethod(decision, "tableName");
-        assertThat(chosenTable).isEqualTo("USER_BOOKINGS");
+        assertThat(chosenTable).isEqualTo("CUSTOMER_ORDERS");
     }
 
     @Test
@@ -817,12 +817,12 @@ class UniversalChatToolTest {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
         schema.setTables(List.of(
-            table("SERVICE_AMOUNT", col("hotel_id"), col("amount"), col("type")),
-            table("HOTEL_SERVICES", col("hotel_id"), col("service_amount"), col("service_description")),
-            table("HOTEL", col("id"), col("name"))
+            table("SERVICE_AMOUNT", col("customer_id"), col("amount"), col("type")),
+            table("PRODUCT_SERVICES", col("customer_id"), col("service_amount"), col("service_description")),
+            table("CUSTOMERS", col("id"), col("name"))
         ));
 
-        when(semanticModelService.findRelevantTables(eq("conn-1"), eq("Show hotel services with their amounts"), anySet()))
+        when(semanticModelService.findRelevantTables(eq("conn-1"), eq("Show customer services with their amounts"), anySet()))
             .thenReturn(List.of(
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
@@ -836,13 +836,13 @@ class UniversalChatToolTest {
             tool,
             "resolveCandidateTables",
             "conn-1",
-            "Show hotel services with their amounts",
+            "Show customer services with their amounts",
             schema,
             ResolvedContext.empty()
         );
 
         assertThat(candidates).isNotEmpty();
-        assertThat(candidates.getFirst().getName()).isEqualTo("HOTEL_SERVICES");
+        assertThat(candidates.getFirst().getName()).isEqualTo("PRODUCT_SERVICES");
     }
 
     @Test
@@ -850,7 +850,7 @@ class UniversalChatToolTest {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
         schema.setTables(List.of(
-            table("USER_BOOKINGS",
+            table("CUSTOMER_ORDERS",
                 col("id"),
                 col("booking_made_on", "bigint"),
                 col("last_updated", "timestamp"),
@@ -862,7 +862,7 @@ class UniversalChatToolTest {
             .thenReturn(List.of(
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("USER_BOOKINGS")
+                    .tableName("CUSTOMER_ORDERS")
                     .tableRole("FACT")
                     .businessDescription("Booking facts per reservation")
                     .timeColumns(List.of("last_updated", "booking_made_on", "actual_checkin"))
@@ -880,7 +880,7 @@ class UniversalChatToolTest {
             "How many bookings were made per month?",
             null,
             schema,
-            new ResolvedContext(List.of("USER_BOOKINGS"), Map.of(), List.of(), List.of(), ResolvedContext.Confidence.HIGH)
+            new ResolvedContext(List.of("CUSTOMER_ORDERS"), Map.of(), List.of(), List.of(), ResolvedContext.Confidence.HIGH)
         );
 
         assertNotNull(temporalResolution);
@@ -888,15 +888,15 @@ class UniversalChatToolTest {
         String directive = ReflectionTestUtils.invokeMethod(temporalResolution, "directive");
 
         assertEquals(Boolean.FALSE, needsClarification);
-        assertThat(directive).contains("USER_BOOKINGS.booking_made_on");
-        assertThat(directive).doesNotContain("USER_BOOKINGS.last_updated");
+        assertThat(directive).contains("CUSTOMER_ORDERS.booking_made_on");
+        assertThat(directive).doesNotContain("CUSTOMER_ORDERS.last_updated");
     }
 
     @Test
     void execute_destructivePrompt_refusesWithoutSql() {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
-        schema.setTables(List.of(table("USER_BOOKINGS", col("id"), col("booking_made_on"))));
+        schema.setTables(List.of(table("CUSTOMER_ORDERS", col("id"), col("booking_made_on"))));
 
         AgentPlanStep step = new AgentPlanStep("universal-chat", "Resolve", "universal_chat_tool",
             Map.of("routeType", "GENERAL", "dataRequest", true));
@@ -923,7 +923,7 @@ class UniversalChatToolTest {
     void execute_fullQueryFollowUp_reusesPriorSqlFromVaultContextWithoutLiveFallback() {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
-        schema.setTables(List.of(table("USER_BOOKINGS", col("id"), col("booking_made_on"))));
+        schema.setTables(List.of(table("CUSTOMER_ORDERS", col("id"), col("booking_made_on"))));
 
         AgentPlanStep step = new AgentPlanStep("universal-chat", "Show full query", "universal_chat_tool",
             Map.of("routeType", "BI_QUERY", "dataRequest", true));
@@ -939,7 +939,7 @@ class UniversalChatToolTest {
             null,
             List.of(new AgentExecutionContext.ConversationTurn(
                 "assistant",
-                "### Your Slowest Query\n\n**Query:**\n```sql\nSELECT * FROM USER_BOOKINGS WHERE hotel_id = 42\n```"
+                "### Your Slowest Query\n\n**Query:**\n```sql\nSELECT * FROM CUSTOMER_ORDERS WHERE customer_id = 42\n```"
             )),
             0.92
         );
@@ -970,9 +970,9 @@ class UniversalChatToolTest {
         AgentToolResult toolResult = tool.execute(step, context);
 
         assertThat(toolResult.observation().summary()).contains("Returned the prior full SQL text");
-        assertThat((String) context.getMemory("universalMessage")).contains("SELECT * FROM USER_BOOKINGS WHERE hotel_id = 42");
+        assertThat((String) context.getMemory("universalMessage")).contains("SELECT * FROM CUSTOMER_ORDERS WHERE customer_id = 42");
         AnswerContract answerContract = context.getMemory("verifiedAnswerContract");
-        assertThat(answerContract.executedSql()).isEqualTo("SELECT * FROM USER_BOOKINGS WHERE hotel_id = 42");
+        assertThat(answerContract.executedSql()).isEqualTo("SELECT * FROM CUSTOMER_ORDERS WHERE customer_id = 42");
         verifyNoInteractions(queryExecutorService);
     }
 
@@ -982,7 +982,7 @@ class UniversalChatToolTest {
         schema.setDbType("mysql");
         schema.setTables(List.of(
             table("ACCOUNTS", col("id"), col("account_billing_interval_months")),
-            table("HOTEL_PRICING", col("amount"))
+            table("PRODUCT_PRICING", col("amount"))
         ));
 
         RetrievedContextResult retrievedContext = new RetrievedContextResult(
@@ -994,17 +994,17 @@ class UniversalChatToolTest {
                     .connectionId("conn-1")
                     .title("MRR calculation")
                     .entryType(CompanyKnowledgeEntry.EntryType.BUSINESS_RULE)
-                    .content("Use HOTEL_PRICING.amount / ACCOUNTS.account_billing_interval_months")
+                    .content("Use PRODUCT_PRICING.amount / ACCOUNTS.account_billing_interval_months")
                     .linkedTables(List.of("ACCOUNTS"))
                     .linkedColumns(List.of("ACCOUNTS.account_billing_interval_months"))
-                    .mentionedTables(List.of("HOTEL_PRICING", "ACCOUNTS"))
-                    .mentionedColumns(List.of("ACCOUNTS.account_billing_interval_months", "HOTEL_PRICING.amount"))
-                    .unlinkedMentions(List.of("HOTEL_PRICING", "HOTEL_PRICING.amount"))
+                    .mentionedTables(List.of("PRODUCT_PRICING", "ACCOUNTS"))
+                    .mentionedColumns(List.of("ACCOUNTS.account_billing_interval_months", "PRODUCT_PRICING.amount"))
+                    .unlinkedMentions(List.of("PRODUCT_PRICING", "PRODUCT_PRICING.amount"))
                     .coverageStatus("PARTIAL")
                     .joinCoverageStatus("MISSING")
                     .build()
             ),
-            Set.of("ACCOUNTS", "HOTEL_PRICING"),
+            Set.of("ACCOUNTS", "PRODUCT_PRICING"),
             RetrievalIntent.BUSINESS_MEANING,
             20,
             1,
@@ -1015,7 +1015,7 @@ class UniversalChatToolTest {
         );
 
         when(chatRetrievalContextService.buildContext(eq("conn-1"), anyString(), any())).thenReturn(retrievedContext);
-        mockMessageResponse("Which validated join path should define MRR between ACCOUNTS and HOTEL_PRICING?");
+        mockMessageResponse("Which validated join path should define MRR between ACCOUNTS and PRODUCT_PRICING?");
 
         AgentPlanStep step = new AgentPlanStep("universal-chat", "Resolve", "universal_chat_tool",
             Map.of("routeType", "BI_QUERY", "dataRequest", true));
@@ -1034,7 +1034,7 @@ class UniversalChatToolTest {
 
         assertThat(toolResult.observation().summary()).contains("Answered without SQL using bounded schema-aware reasoning");
         assertThat((String) context.getMemory("universalMessage"))
-            .contains("Which validated join path should define MRR between ACCOUNTS and HOTEL_PRICING?");
+            .contains("Which validated join path should define MRR between ACCOUNTS and PRODUCT_PRICING?");
         assertNull(toolResult.executedSql());
         verify(chatClient).prompt();
         verify(sqlExecutionPipeline).extractAllSqlFromResponse(anyString());
@@ -1047,29 +1047,29 @@ class UniversalChatToolTest {
         schema.setDbType("mysql");
         schema.setTables(List.of(
             table("ACCOUNTS", col("id"), col("account_billing_interval_months"), col("account_status")),
-            table("HOTEL_PRICING", col("account_id"), col("amount"))
+            table("PRODUCT_PRICING", col("account_id"), col("amount"))
         ));
 
         RetrievedContextResult retrievedContext = new RetrievedContextResult(
             "",
-            "MRR note: use HOTEL_PRICING.amount / ACCOUNTS.account_billing_interval_months. For active properties use ACCOUNTS.Property_status.",
+            "MRR note: use PRODUCT_PRICING.amount / ACCOUNTS.account_billing_interval_months. For active properties use ACCOUNTS.Property_status.",
             "coverage=CONFLICTING joins=VERIFIED invalid=ACCOUNTS.Property_status",
             List.of(
                 CompanyKnowledgeEntry.builder()
                     .connectionId("conn-1")
                     .title("MRR calculation")
                     .entryType(CompanyKnowledgeEntry.EntryType.BUSINESS_RULE)
-                    .content("Use HOTEL_PRICING.amount / ACCOUNTS.account_billing_interval_months. For active properties use ACCOUNTS.Property_status.")
-                    .linkedTables(List.of("ACCOUNTS", "HOTEL_PRICING"))
-                    .linkedColumns(List.of("ACCOUNTS.account_billing_interval_months", "HOTEL_PRICING.amount"))
-                    .mentionedTables(List.of("ACCOUNTS", "HOTEL_PRICING"))
-                    .mentionedColumns(List.of("ACCOUNTS.account_billing_interval_months", "HOTEL_PRICING.amount"))
+                    .content("Use PRODUCT_PRICING.amount / ACCOUNTS.account_billing_interval_months. For active properties use ACCOUNTS.Property_status.")
+                    .linkedTables(List.of("ACCOUNTS", "PRODUCT_PRICING"))
+                    .linkedColumns(List.of("ACCOUNTS.account_billing_interval_months", "PRODUCT_PRICING.amount"))
+                    .mentionedTables(List.of("ACCOUNTS", "PRODUCT_PRICING"))
+                    .mentionedColumns(List.of("ACCOUNTS.account_billing_interval_months", "PRODUCT_PRICING.amount"))
                     .invalidMentions(List.of("ACCOUNTS.Property_status"))
                     .coverageStatus("CONFLICTING")
                     .joinCoverageStatus("VERIFIED")
                     .build()
             ),
-            Set.of("ACCOUNTS", "HOTEL_PRICING"),
+            Set.of("ACCOUNTS", "PRODUCT_PRICING"),
             RetrievalIntent.BUSINESS_MEANING,
             20,
             1,
@@ -1124,8 +1124,8 @@ class UniversalChatToolTest {
         );
         AgentExecutionContext context = new AgentExecutionContext(
             "conn-1",
-            "how many active hotels we have?",
-            "how many active hotels we have?",
+            "how many active customers we have?",
+            "how many active customers we have?",
             "chat-1",
             List.of(),
             ResolvedConversationContext.empty(),
@@ -1139,13 +1139,13 @@ class UniversalChatToolTest {
             "storeMessage",
             context,
             "task-1",
-            "Calculate active hotels",
+            "Calculate active customers",
             AgentTaskKind.DATA_QUERY,
             List.of(),
             "COMPLETED",
-            "There are 42 active hotels.",
+            "There are 42 active customers.",
             null,
-            List.of("SELECT COUNT(*) FROM HOTEL"),
+            List.of("SELECT COUNT(*) FROM CUSTOMERS"),
             0.9d,
             "Generated, validated, and executed SQL successfully",
             Map.of("generatedSql", true)
@@ -1178,8 +1178,8 @@ class UniversalChatToolTest {
         );
         AgentExecutionContext context = new AgentExecutionContext(
             "conn-1",
-            "how many active hotels we have?",
-            "how many active hotels we have?",
+            "how many active customers we have?",
+            "how many active customers we have?",
             "chat-1",
             List.of(),
             ResolvedConversationContext.empty(),
@@ -1193,7 +1193,7 @@ class UniversalChatToolTest {
             "storeMessage",
             context,
             "task-1",
-            "Calculate active hotels",
+            "Calculate active customers",
             AgentTaskKind.DATA_QUERY,
             List.of(),
             "CLARIFICATION",
@@ -1220,7 +1220,7 @@ class UniversalChatToolTest {
     void resolveCandidateTables_prefersPopulatedBookingFactTableOverCaseConflictAndMetadataTables() {
         SchemaMetadata schema = bookingRevenueSchema();
         ResolvedContext resolvedContext = new ResolvedContext(
-            List.of("DEMAND_TREND_HOTEL", "HOTEL_REFERRALS", "HOTEL"),
+            List.of("DEMAND_TREND_HOTEL", "HOTEL_REFERRALS", "CUSTOMERS"),
             Map.of(),
             List.of(),
             List.of(),
@@ -1231,22 +1231,22 @@ class UniversalChatToolTest {
             tool,
             "resolveCandidateTables",
             "conn-1",
-            "what is the google hotel ads revenue for March month?",
+            "what is the google customer ads revenue for March month?",
             schema,
             resolvedContext
         );
 
         assertNotNull(candidates);
         assertFalse(candidates.isEmpty());
-        assertEquals("USER_BOOKINGS", candidates.getFirst().getName());
-        assertTrue(candidates.stream().map(TableMetadata::getName).noneMatch("user_bookings"::equals));
+        assertEquals("CUSTOMER_ORDERS", candidates.getFirst().getName());
+        assertTrue(candidates.stream().map(TableMetadata::getName).noneMatch("customer_orders"::equals));
     }
 
     @Test
     void resolveTemporalContext_prefersBookingMadeOnForGoogleHotelAdsRevenue() {
         SchemaMetadata schema = bookingRevenueSchema();
         ResolvedContext resolvedContext = new ResolvedContext(
-            List.of("DEMAND_TREND_HOTEL", "HOTEL_REFERRALS", "HOTEL"),
+            List.of("DEMAND_TREND_HOTEL", "HOTEL_REFERRALS", "CUSTOMERS"),
             Map.of(),
             List.of(),
             List.of(),
@@ -1257,7 +1257,7 @@ class UniversalChatToolTest {
             tool,
             "resolveTemporalContext",
             "conn-1",
-            "what is the google hotel ads revenue for March month?",
+            "what is the google customer ads revenue for March month?",
             null,
             schema,
             resolvedContext
@@ -1269,7 +1269,7 @@ class UniversalChatToolTest {
 
         assertEquals(Boolean.FALSE, needsClarification);
         assertNotNull(directive);
-        assertTrue(directive.contains("USER_BOOKINGS.booking_made_on"));
+        assertTrue(directive.contains("CUSTOMER_ORDERS.booking_made_on"));
     }
 
     @Test
@@ -1277,31 +1277,31 @@ class UniversalChatToolTest {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
         schema.setTables(List.of(
-            table("hotel", 0L, col("id"), col("created_at")),
-            table("HOTEL", 1_500L, col("id"), col("subscription_start_date"), col("last_updated")),
-            table("HOTEL_SERVICES", 50_000L, col("hotel_id"), col("last_updated")),
-            table("USER_BOOKINGS", 9_419_333L, col("hotel_id"), col("booking_made_on")),
-            table("USER_CANCELLATIONS", 82_000L, col("hotel_id"), col("cancel_date"), col("last_updated"))
+            table("customer", 0L, col("id"), col("created_at")),
+            table("CUSTOMERS", 1_500L, col("id"), col("subscription_start_date"), col("last_updated")),
+            table("PRODUCT_SERVICES", 50_000L, col("customer_id"), col("last_updated")),
+            table("CUSTOMER_ORDERS", 9_419_333L, col("customer_id"), col("booking_made_on")),
+            table("ORDER_CANCELLATIONS", 82_000L, col("customer_id"), col("cancel_date"), col("last_updated"))
         ));
         ResolvedContext resolvedContext = new ResolvedContext(
-            List.of("HOTEL_SERVICES", "USER_BOOKINGS"),
+            List.of("PRODUCT_SERVICES", "CUSTOMER_ORDERS"),
             Map.of(),
             List.of(),
             List.of(),
             ResolvedContext.Confidence.MEDIUM
         );
-        when(semanticModelService.findRelevantTables(eq("conn-1"), eq("how many hotels are onboarded in the last 3 days?"), anySet()))
+        when(semanticModelService.findRelevantTables(eq("conn-1"), eq("how many customers are onboarded in the last 3 days?"), anySet()))
             .thenReturn(List.of(
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("HOTEL")
-                    .businessDescription("Core hotel entity. subscription_start_date marks when a hotel subscription or contract starts.")
+                    .tableName("CUSTOMERS")
+                    .businessDescription("Core customer entity. subscription_start_date marks when a customer subscription or contract starts.")
                     .timeColumns(List.of("subscription_start_date", "last_updated"))
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("HOTEL_SERVICES")
-                    .businessDescription("Operational service configuration for each hotel")
+                    .tableName("PRODUCT_SERVICES")
+                    .businessDescription("Operational service configuration for each customer")
                     .timeColumns(List.of("last_updated"))
                     .build()
             ));
@@ -1310,7 +1310,7 @@ class UniversalChatToolTest {
             tool,
             "resolveTemporalContext",
             "conn-1",
-            "how many hotels are onboarded in the last 3 days?",
+            "how many customers are onboarded in the last 3 days?",
             null,
             schema,
             resolvedContext
@@ -1322,8 +1322,8 @@ class UniversalChatToolTest {
 
         assertEquals(Boolean.FALSE, needsClarification);
         assertThat(directive)
-            .contains("Treat `HOTEL` as the primary business entity")
-            .contains("HOTEL.subscription_start_date");
+            .contains("Treat `CUSTOMERS` as the primary business entity")
+            .contains("CUSTOMERS.subscription_start_date");
     }
 
     @Test
@@ -1331,23 +1331,23 @@ class UniversalChatToolTest {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
         schema.setTables(List.of(
-            table("HOTEL", 1_500L, col("id"), col("onboarding_status"), col("subscription_start_date")),
-            table("HOTEL_PRICING", 5_000L, col("hotel_id"), col("property_status")),
-            table("HOTEL_SERVICES", 50_000L, col("hotel_id"), col("service_status"))
+            table("CUSTOMERS", 1_500L, col("id"), col("onboarding_status"), col("subscription_start_date")),
+            table("PRODUCT_PRICING", 5_000L, col("customer_id"), col("property_status")),
+            table("PRODUCT_SERVICES", 50_000L, col("customer_id"), col("service_status"))
         ));
 
-        when(semanticModelService.findRelevantTables(eq("conn-1"), eq("how many active hotels we have?"), anySet()))
+        when(semanticModelService.findRelevantTables(eq("conn-1"), eq("how many active customers we have?"), anySet()))
             .thenReturn(List.of(
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("HOTEL")
-                    .businessDescription("Core hotel entity. onboarding_status tracks whether the property is active or inactive.")
+                    .tableName("CUSTOMERS")
+                    .businessDescription("Core customer entity. onboarding_status tracks whether the property is active or inactive.")
                     .filterColumns(List.of(Map.of("column", "onboarding_status", "businessTerms", "active, inactive")))
                     .build(),
                 SemanticTableModel.builder()
                     .connectionId("conn-1")
-                    .tableName("HOTEL_PRICING")
-                    .businessDescription("Pricing state for each hotel")
+                    .tableName("PRODUCT_PRICING")
+                    .businessDescription("Pricing state for each customer")
                     .filterColumns(List.of(Map.of("column", "property_status")))
                     .build()
             ));
@@ -1356,7 +1356,7 @@ class UniversalChatToolTest {
             tool,
             "resolveSemanticEntity",
             "conn-1",
-            "how many active hotels we have?",
+            "how many active customers we have?",
             schema,
             ResolvedContext.empty()
         );
@@ -1364,7 +1364,7 @@ class UniversalChatToolTest {
         Object filterResolution = ReflectionTestUtils.invokeMethod(
             tool,
             "resolveEntityFilterContext",
-            "how many active hotels we have?",
+            "how many active customers we have?",
             semanticEntity
         );
 
@@ -1374,8 +1374,8 @@ class UniversalChatToolTest {
 
         assertEquals(Boolean.FALSE, needsClarification);
         assertThat(directive)
-            .contains("Treat `HOTEL` as the primary business entity")
-            .contains("HOTEL.onboarding_status");
+            .contains("Treat `CUSTOMERS` as the primary business entity")
+            .contains("CUSTOMERS.onboarding_status");
     }
 
     private TableMetadata table(String name, ColumnMetadata... columns) {
@@ -1399,17 +1399,17 @@ class UniversalChatToolTest {
         schema.setDbType("mysql");
         schema.setTables(List.of(
             table("USER_LOGS", 4_500_000L,
-                new ColumnMetadata("hotel_id", "varchar", 255L, true, false, null, 1),
+                new ColumnMetadata("customer_id", "varchar", 255L, true, false, null, 1),
                 new ColumnMetadata("event_occurred_at", "timestamp", null, true, false, null, 2),
                 new ColumnMetadata("action_type", "varchar", 255L, true, false, null, 3),
                 new ColumnMetadata("user_id", "varchar", 255L, true, false, null, 4)
             ),
-            table("USER_BOOKINGS", 9_419_333L,
-                new ColumnMetadata("hotel_id", "varchar", 255L, true, false, null, 1),
+            table("CUSTOMER_ORDERS", 9_419_333L,
+                new ColumnMetadata("customer_id", "varchar", 255L, true, false, null, 1),
                 new ColumnMetadata("booking_amount", "decimal", null, true, false, null, 2),
                 new ColumnMetadata("booking_made_on", "bigint", null, true, false, null, 3)
             ),
-            table("HOTEL", 1_500L,
+            table("CUSTOMERS", 1_500L,
                 new ColumnMetadata("id", "varchar", 255L, true, false, null, 1),
                 new ColumnMetadata("subscription_start_date", "timestamp", null, true, false, null, 2)
             )
@@ -1421,26 +1421,26 @@ class UniversalChatToolTest {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
         schema.setTables(List.of(
-            table("user_bookings", 0L,
-                col("hotel_id"),
+            table("customer_orders", 0L,
+                col("customer_id"),
                 col("created_at")
             ),
-            table("USER_BOOKINGS", 9_419_333L,
-                col("hotel_id"),
+            table("CUSTOMER_ORDERS", 9_419_333L,
+                col("customer_id"),
                 col("booking_amount"),
                 col("booking_source"),
                 col("booking_made_on")
             ),
             table("HOTEL_REFERRALS", 50_000L,
-                col("hotel_id"),
+                col("customer_id"),
                 col("referral_created_at"),
                 col("referral_source")
             ),
             table("DEMAND_TREND_HOTEL", 150_000L,
-                col("hotel_id"),
+                col("customer_id"),
                 col("created_at")
             ),
-            table("HOTEL", 1_500L,
+            table("CUSTOMERS", 1_500L,
                 col("id"),
                 col("subscription_start_date")
             )

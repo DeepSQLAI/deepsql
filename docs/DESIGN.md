@@ -501,7 +501,7 @@ queries. Start asking your database." → button: "Try DeepSQL."
 - Wordmark + tagline (top-left).
 - Three columns max: Product / Docs / Company.
 - Compliance row: SOC 2 status, security page link, privacy, terms.
-- Copyright: `© 2026 DeepSQL (a Stayflexi project)` until the entity
+- Copyright: `© 2026 DeepSQL` until the entity
   is separated; update when that changes.
 
 ---

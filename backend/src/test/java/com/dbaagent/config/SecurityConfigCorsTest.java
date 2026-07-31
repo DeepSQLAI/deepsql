@@ -17,7 +17,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties = {
         "security.auth.enabled=true",
-        "cors.allowed.origins=http://localhost:13000,https://app.deepsql.ai"
+        "cors.allowed.origins=http://localhost:13000,https://app.example.com"
 })
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)

@@ -208,7 +208,7 @@ function SourceCard({ source, connectionId, onDelete, externalActiveJobId }) {
             className={styles.focusEditor}
             value={focusDraft}
             onChange={(e) => setFocusDraft(e.target.value)}
-            placeholder="What matters most for business context? e.g. bookings, payments, cancellations; disambiguate USER_BOOKINGS vs NR_BOOKING"
+            placeholder="What matters most for business context? e.g. bookings, payments, cancellations; disambiguate CUSTOMER_ORDERS vs NR_BOOKING"
           />
         ) : (
           <div className={styles.focusBody}>
@@ -391,7 +391,7 @@ export default function CodeSourcesTab({ connectionId }) {
           className={styles.focusEditor}
           value={focusDraft}
           onChange={(e) => setFocusDraft(e.target.value)}
-          placeholder="What matters most for business context? e.g. bookings, payments, cancellations; disambiguate USER_BOOKINGS vs NR_BOOKING. The brain&apos;s known ambiguity will be appended automatically."
+          placeholder="What matters most for business context? e.g. bookings, payments, cancellations; disambiguate CUSTOMER_ORDERS vs NR_BOOKING. The brain&apos;s known ambiguity will be appended automatically."
         />
       </label>
 

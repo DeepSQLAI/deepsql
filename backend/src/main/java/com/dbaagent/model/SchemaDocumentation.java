@@ -35,7 +35,7 @@ public class SchemaDocumentation {
     private DocumentationType objectType; // TABLE, COLUMN, BUSINESS_TERM
 
     @Column(nullable = false)
-    private String objectName; // e.g., "USER_BOOKINGS" or "order_date"
+    private String objectName; // e.g., "ORDER_ITEMS" or "order_date"
 
     @Column
     private String parentObject; // For columns, the table name

@@ -67,8 +67,8 @@ class SlowQueryInsightsServiceTest {
         analysis.setTopSlowQueries(List.of(
             buildSlowQuery(
                 "q-1",
-                "SELECT * FROM bookings WHERE hotel_id = ?",
-                "SELECT * FROM bookings WHERE hotel_id = 42",
+                "SELECT * FROM bookings WHERE customer_id = ?",
+                "SELECT * FROM bookings WHERE customer_id = 42",
                 SlowQuery.Severity.CRITICAL,
                 850.0,
                 30L,
@@ -98,13 +98,13 @@ class SlowQueryInsightsServiceTest {
         KeyCustomerInfo skewItem = KeyCustomerInfo.builder()
             .id("kc-1")
             .tableName("bookings")
-            .columnName("hotel_id")
+            .columnName("customer_id")
             .displayValue("42")
             .slowQueryCount(1)
             .criticalCount(1)
             .highCount(0)
             .matchingQueryIds(List.of("q-1"))
-            .worstQueryPreview("SELECT * FROM bookings WHERE hotel_id = ?")
+            .worstQueryPreview("SELECT * FROM bookings WHERE customer_id = ?")
             .build();
         KeyCustomerResult keyCustomerResult = KeyCustomerResult.builder()
             .connectionId("conn-1")

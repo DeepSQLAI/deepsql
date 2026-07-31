@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
  * Per-connection configuration for slow-query analytics.
  *
  * Each connection identifies a customer/tenant by a single consistent column
- * ({@code tenantColumn}, e.g. {@code hotel_id}). The optional lookup fields let
+ * ({@code tenantColumn}, e.g. {@code customer_id}). The optional lookup fields let
  * DeepSQL resolve a tenant id to a human-readable name by running a cheap
  * {@code SELECT <nameCol> FROM <table> WHERE <idCol> = ?} against the target
  * database.
@@ -30,11 +30,11 @@ public class ConnectionAnalyticsConfig {
     @Column(name = "connection_id")
     private String connectionId;
 
-    /** The column that identifies a customer/tenant, e.g. {@code hotel_id}. */
+    /** The column that identifies a customer/tenant, e.g. {@code customer_id}. */
     @Column(name = "tenant_column", length = 128)
     private String tenantColumn;
 
-    /** Table to resolve a tenant id to a name, e.g. {@code hotels}. */
+    /** Table to resolve a tenant id to a name, e.g. {@code customers}. */
     @Column(name = "customer_lookup_table", length = 256)
     private String customerLookupTable;
 

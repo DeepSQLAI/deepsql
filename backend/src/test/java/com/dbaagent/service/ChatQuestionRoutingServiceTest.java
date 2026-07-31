@@ -26,7 +26,7 @@ class ChatQuestionRoutingServiceTest {
 
     @Test
     void classify_relationships_routesToBrainMetadata() {
-        var route = service.classify("How are USER_BOOKINGS and GUEST_MAPPING related?");
+        var route = service.classify("How are CUSTOMER_ORDERS and CONTACT_MAPPING related?");
 
         assertEquals(ChatQuestionRoutingService.RouteType.BRAIN_METADATA, route.type());
         assertEquals(ChatQuestionRoutingService.BrainTopic.RELATIONSHIPS, route.brainTopic());
@@ -125,7 +125,7 @@ class ChatQuestionRoutingServiceTest {
 
     @Test
     void metadataOnlySql_rejectsApplicationTableQuery() {
-        String sql = "SELECT COUNT(*) FROM user_bookings WHERE booking_status = 'CONFIRMED'";
+        String sql = "SELECT COUNT(*) FROM customer_orders WHERE booking_status = 'CONFIRMED'";
 
         assertFalse(service.isMetadataOnlySql(sql, "mysql"));
     }

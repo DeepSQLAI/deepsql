@@ -312,8 +312,7 @@ public class QueryOptimizationService {
             String aiResponse = chatClient.prompt()
                 .messages(messages)
                 .options(org.springframework.ai.chat.prompt.ChatOptions.builder()
-                    .temperature(0.15)
-                    .build())
+                    .temperature(0.15))
                 .call()
                 .content();
 
@@ -516,7 +515,7 @@ public class QueryOptimizationService {
 
                COMMON MISTAKE TO AVOID (this is the #1 way these rewrites go
                wrong): do NOT create a broad intermediate CTE — e.g. one filtered
-               by date alone while still spanning every tenant/hotel/type — and
+               by date alone while still spanning every tenant/customer/type — and
                then join other large tables to it. That intermediate is not
                narrow, so the dependent joins stay huge. Always drive dependent
                lookups from the SMALLEST already-computed set (the one with the
@@ -1563,7 +1562,7 @@ public class QueryOptimizationService {
                 .messages(List.of(
                     new SystemMessage("You are a query rewrite generator. Output only SQL code blocks, nothing else."),
                     new UserMessage(p.toString())))
-                .options(org.springframework.ai.chat.prompt.ChatOptions.builder().temperature(0.2).build())
+                .options(org.springframework.ai.chat.prompt.ChatOptions.builder().temperature(0.2))
                 .call()
                 .content();
             return extractSqlBlocks(resp);
@@ -3013,8 +3012,7 @@ public class QueryOptimizationService {
             String aiResponse = chatClient.prompt()
                 .messages(messages)
                 .options(org.springframework.ai.chat.prompt.ChatOptions.builder()
-                    .temperature(0.1)
-                    .build())
+                    .temperature(0.1))
                 .call()
                 .content();
 

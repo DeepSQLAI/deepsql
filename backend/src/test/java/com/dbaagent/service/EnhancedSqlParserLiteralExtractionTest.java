@@ -22,10 +22,10 @@ class EnhancedSqlParserLiteralExtractionTest {
     @Test
     void extractsSelectWhereEquals() {
         List<ColumnLiteralPair> result = service.extractWhereClauseLiterals(
-            "SELECT * FROM bookings WHERE hotel_id = 42");
+            "SELECT * FROM bookings WHERE customer_id = 42");
 
         assertEquals(1, result.size());
-        assertEquals("hotel_id", result.get(0).getColumnName());
+        assertEquals("customer_id", result.get(0).getColumnName());
         assertEquals("42", result.get(0).getValue());
         assertEquals("=", result.get(0).getOperation());
     }
@@ -43,7 +43,7 @@ class EnhancedSqlParserLiteralExtractionTest {
     @Test
     void extractsSelectWhereMultipleConditions() {
         List<ColumnLiteralPair> result = service.extractWhereClauseLiterals(
-            "SELECT * FROM bookings WHERE hotel_id = 42 AND status = 'confirmed'");
+            "SELECT * FROM bookings WHERE customer_id = 42 AND status = 'confirmed'");
 
         assertEquals(2, result.size());
     }
@@ -51,7 +51,7 @@ class EnhancedSqlParserLiteralExtractionTest {
     @Test
     void extractsSelectWhereIn() {
         List<ColumnLiteralPair> result = service.extractWhereClauseLiterals(
-            "SELECT * FROM bookings WHERE hotel_id IN (1, 2, 3)");
+            "SELECT * FROM bookings WHERE customer_id IN (1, 2, 3)");
 
         assertEquals(3, result.size());
         assertTrue(result.stream().allMatch(p -> "IN".equals(p.getOperation())));
@@ -60,11 +60,11 @@ class EnhancedSqlParserLiteralExtractionTest {
     @Test
     void extractsSelectWithAlias() {
         List<ColumnLiteralPair> result = service.extractWhereClauseLiterals(
-            "SELECT * FROM bookings b WHERE b.hotel_id = 42");
+            "SELECT * FROM bookings b WHERE b.customer_id = 42");
 
         assertEquals(1, result.size());
         assertEquals("bookings", result.get(0).getTableName());
-        assertEquals("hotel_id", result.get(0).getColumnName());
+        assertEquals("customer_id", result.get(0).getColumnName());
     }
 
     // ==================== UPDATE ====================
@@ -72,10 +72,10 @@ class EnhancedSqlParserLiteralExtractionTest {
     @Test
     void extractsUpdateWhereEquals() {
         List<ColumnLiteralPair> result = service.extractWhereClauseLiterals(
-            "UPDATE bookings SET status = 'cancelled' WHERE hotel_id = 42");
+            "UPDATE bookings SET status = 'cancelled' WHERE customer_id = 42");
 
         assertEquals(1, result.size());
-        assertEquals("hotel_id", result.get(0).getColumnName());
+        assertEquals("customer_id", result.get(0).getColumnName());
         assertEquals("42", result.get(0).getValue());
         assertEquals("=", result.get(0).getOperation());
     }
@@ -91,10 +91,10 @@ class EnhancedSqlParserLiteralExtractionTest {
     @Test
     void extractsUpdateWithAlias() {
         List<ColumnLiteralPair> result = service.extractWhereClauseLiterals(
-            "UPDATE bookings b SET b.status = 'done' WHERE b.hotel_id = 42");
+            "UPDATE bookings b SET b.status = 'done' WHERE b.customer_id = 42");
 
         assertFalse(result.isEmpty());
-        assertEquals("hotel_id", result.get(0).getColumnName());
+        assertEquals("customer_id", result.get(0).getColumnName());
         assertEquals("42", result.get(0).getValue());
     }
 
@@ -103,10 +103,10 @@ class EnhancedSqlParserLiteralExtractionTest {
     @Test
     void extractsDeleteWhereEquals() {
         List<ColumnLiteralPair> result = service.extractWhereClauseLiterals(
-            "DELETE FROM bookings WHERE hotel_id = 42");
+            "DELETE FROM bookings WHERE customer_id = 42");
 
         assertEquals(1, result.size());
-        assertEquals("hotel_id", result.get(0).getColumnName());
+        assertEquals("customer_id", result.get(0).getColumnName());
         assertEquals("42", result.get(0).getValue());
     }
 
@@ -125,7 +125,7 @@ class EnhancedSqlParserLiteralExtractionTest {
     @Test
     void skipsParameterizedWithQuestionMark() {
         List<ColumnLiteralPair> result = service.extractWhereClauseLiterals(
-            "SELECT * FROM bookings WHERE hotel_id = ?");
+            "SELECT * FROM bookings WHERE customer_id = ?");
 
         assertTrue(result.isEmpty());
     }
@@ -133,7 +133,7 @@ class EnhancedSqlParserLiteralExtractionTest {
     @Test
     void skipsParameterizedWithDollarSign() {
         List<ColumnLiteralPair> result = service.extractWhereClauseLiterals(
-            "SELECT * FROM bookings WHERE hotel_id = $1");
+            "SELECT * FROM bookings WHERE customer_id = $1");
 
         assertTrue(result.isEmpty());
     }
@@ -154,11 +154,11 @@ class EnhancedSqlParserLiteralExtractionTest {
     void handlesMalformedSqlViaRegexFallback() {
         // Malformed SQL should fall back to regex
         List<ColumnLiteralPair> result = service.extractWhereClauseLiterals(
-            "SELEC * FROM bookings WHERE hotel_id = 42");
+            "SELEC * FROM bookings WHERE customer_id = 42");
 
         // Regex fallback should still find the literal
         assertEquals(1, result.size());
-        assertEquals("hotel_id", result.get(0).getColumnName());
+        assertEquals("customer_id", result.get(0).getColumnName());
         assertEquals("42", result.get(0).getValue());
     }
 }

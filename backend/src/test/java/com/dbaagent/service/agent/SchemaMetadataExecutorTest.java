@@ -68,19 +68,19 @@ class SchemaMetadataExecutorTest {
     @Test
     void execute_latestTablesAdded_fallsBackToSnapshotDiffWhenChangeHistoryIsEmpty() {
         SchemaMetadata schema = new SchemaMetadata();
-        schema.setDatabaseName("idb_database");
+        schema.setDatabaseName("analytics_db");
 
         SchemaSnapshot previous = SchemaSnapshot.builder()
             .id("snap-1")
             .connectionId("conn-1")
             .capturedAt(LocalDateTime.of(2026, 4, 10, 2, 30))
-            .schemaJson("{\"tables\":{\"HOTEL\":{},\"HOTEL_PRICING\":{}}}")
+            .schemaJson("{\"tables\":{\"CUSTOMERS\":{},\"PRODUCT_PRICING\":{}}}")
             .build();
         SchemaSnapshot latest = SchemaSnapshot.builder()
             .id("snap-2")
             .connectionId("conn-1")
             .capturedAt(LocalDateTime.of(2026, 4, 11, 2, 30))
-            .schemaJson("{\"tables\":{\"HOTEL\":{},\"HOTEL_PRICING\":{},\"HOTEL_AUDIT\":{}}}")
+            .schemaJson("{\"tables\":{\"CUSTOMERS\":{},\"PRODUCT_PRICING\":{},\"HOTEL_AUDIT\":{}}}")
             .build();
 
         SchemaChange tableAdded = SchemaChange.builder()
@@ -131,13 +131,13 @@ class SchemaMetadataExecutorTest {
     @Test
     void execute_latestColumnsAdded_returnsVerifiedInsufficiencyWhenNotEnoughSnapshotsExist() {
         SchemaMetadata schema = new SchemaMetadata();
-        schema.setDatabaseName("idb_database");
+        schema.setDatabaseName("analytics_db");
 
         SchemaSnapshot latest = SchemaSnapshot.builder()
             .id("snap-2")
             .connectionId("conn-1")
             .capturedAt(LocalDateTime.of(2026, 4, 11, 2, 30))
-            .schemaJson("{\"tables\":{\"HOTEL\":{}}}")
+            .schemaJson("{\"tables\":{\"CUSTOMERS\":{}}}")
             .build();
 
         when(schemaChangeRepository.findTop50ByConnectionIdOrderByDetectedAtDesc("conn-1")).thenReturn(List.of());
@@ -175,7 +175,7 @@ class SchemaMetadataExecutorTest {
     @Test
     void execute_schemaChangesWithinLastThreeDays_aggregatesAcrossSnapshotWindow() {
         SchemaMetadata schema = new SchemaMetadata();
-        schema.setDatabaseName("idb_database");
+        schema.setDatabaseName("analytics_db");
 
         LocalDateTime now = LocalDateTime.now();
         SchemaSnapshot olderBaseline = SchemaSnapshot.builder()
@@ -260,7 +260,7 @@ class SchemaMetadataExecutorTest {
     @Test
     void execute_columnsAddedWithinLastThreeDays_usesSnapshotWindowInsteadOfLatestPairOnly() {
         SchemaMetadata schema = new SchemaMetadata();
-        schema.setDatabaseName("idb_database");
+        schema.setDatabaseName("analytics_db");
 
         LocalDateTime now = LocalDateTime.now();
         SchemaSnapshot olderBaseline = SchemaSnapshot.builder()
@@ -336,7 +336,7 @@ class SchemaMetadataExecutorTest {
     @Test
     void execute_columnsAddedWithinLastThreeDays_includesColumnsFromNewlyAddedTables() {
         SchemaMetadata schema = new SchemaMetadata();
-        schema.setDatabaseName("idb_database");
+        schema.setDatabaseName("analytics_db");
 
         LocalDateTime now = LocalDateTime.now();
         SchemaSnapshot olderBaseline = SchemaSnapshot.builder()
@@ -410,7 +410,7 @@ class SchemaMetadataExecutorTest {
     @Test
     void execute_tableCountAndLargestTables_answersBothParts() {
         SchemaMetadata schema = new SchemaMetadata();
-        schema.setDatabaseName("idb_database");
+        schema.setDatabaseName("analytics_db");
         schema.setTotalTables(3L);
         schema.setTables(List.of(
             new TableMetadata("SMALL_TABLE", null, "table", 10L, 128L, List.of(), List.of()),
@@ -460,7 +460,7 @@ class SchemaMetadataExecutorTest {
     @Test
     void execute_pairScopedRelationshipQuestion_returnsOnlyDirectPairEvidence() {
         SchemaMetadata schema = new SchemaMetadata();
-        schema.setDatabaseName("idb_database");
+        schema.setDatabaseName("analytics_db");
         schema.setTables(List.of(
             new TableMetadata("ORDERS", null, "table", 100L, 0L, List.of(), List.of()),
             new TableMetadata("ORDER_DETAIL", null, "table", 400L, 0L, List.of(), List.of())
@@ -531,7 +531,7 @@ class SchemaMetadataExecutorTest {
     @Test
     void execute_explanatoryPairRelationshipQuestion_returnsInterpretationNotJustRawMetadata() {
         SchemaMetadata schema = new SchemaMetadata();
-        schema.setDatabaseName("idb_database");
+        schema.setDatabaseName("analytics_db");
         schema.setTables(List.of(
             new TableMetadata("ORDERS", null, "table", 100L, 0L, List.of(), List.of()),
             new TableMetadata("ORDER_DETAIL", null, "table", 400L, 0L, List.of(), List.of())
@@ -595,7 +595,7 @@ class SchemaMetadataExecutorTest {
     @Test
     void execute_pairScopedRelationshipQuestion_returnsVerifiedInsufficiencyWhenOnlyOneSidedMatchesExist() {
         SchemaMetadata schema = new SchemaMetadata();
-        schema.setDatabaseName("idb_database");
+        schema.setDatabaseName("analytics_db");
         schema.setTables(List.of(
             new TableMetadata("ORDERS", null, "table", 100L, 0L, List.of(), List.of()),
             new TableMetadata("ORDER_DETAIL", null, "table", 400L, 0L, List.of(), List.of())

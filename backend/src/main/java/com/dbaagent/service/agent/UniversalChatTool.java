@@ -3730,8 +3730,8 @@ public class UniversalChatTool extends AbstractSqlAgentTool {
 
     private boolean questionMentionsPropertyEntity(String lowerQuestion) {
         return lowerQuestion != null && (
-            lowerQuestion.contains(" hotel ")
-                || lowerQuestion.contains(" hotels ")
+            lowerQuestion.contains(" customer ")
+                || lowerQuestion.contains(" customers ")
                 || lowerQuestion.contains(" property ")
                 || lowerQuestion.contains(" properties ")
                 || lowerQuestion.contains(" account ")
@@ -3752,7 +3752,7 @@ public class UniversalChatTool extends AbstractSqlAgentTool {
 
     private boolean looksLikePropertyEntity(String identifier) {
         String normalized = identifier == null ? "" : identifier.toLowerCase(Locale.ROOT);
-        return normalized.contains("hotel")
+        return normalized.contains("customer")
             || normalized.contains("property")
             || normalized.contains("account");
     }
@@ -4212,12 +4212,12 @@ public class UniversalChatTool extends AbstractSqlAgentTool {
         }
         String q = question.toLowerCase(Locale.ROOT);
         if (q.matches(".*(top|bottom|least|most|highest|lowest|worst|best|slowest|fastest)\\s+\\d+.*")) return true;
-        if (q.matches(".*(show me|list|give me|find|fetch|retrieve|get me|display|return)\\s+.*\\b(accounts?|users?|customers?|orders?|records?|rows?|entries?|data|results?|transactions?|bookings?|hotels?|properties?).*")) return true;
+        if (q.matches(".*(show me|list|give me|find|fetch|retrieve|get me|display|return)\\s+.*\\b(accounts?|users?|customers?|orders?|records?|rows?|entries?|data|results?|transactions?|bookings?|customers?|properties?).*")) return true;
         if (q.matches(".*which\\s+\\w+\\s+(are|have|do|did|has|were|is).*")) return true;
         if (q.matches(".*(how many|count of|number of)\\s+.*(rows?|records?|accounts?|users?|customers?|orders?|bookings?|sessions?|transactions?).*")) return true;
         if (q.matches(".*(report|summary|breakdown|overview|analysis)\\s+(of|on|for).*\\b(last|past|since|in the).*\\b(days?|weeks?|months?|years?).*")) return true;
         if (q.matches(".*in the (last|past)\\s+\\d+\\s+(days?|weeks?|months?).*") &&
-            q.matches(".*(accounts?|users?|customers?|orders?|bookings?|queries?|transactions?|sessions?|hotels?|properties?).*")) return true;
+            q.matches(".*(accounts?|users?|customers?|orders?|bookings?|queries?|transactions?|sessions?|customers?|properties?).*")) return true;
         if (q.matches(".*(what|which|show|list|give me).*(fees?|taxes|refunds?|cancellations?|services?|details?|amounts?|methods?).*")) return true;
         return false;
     }

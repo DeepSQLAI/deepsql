@@ -95,7 +95,7 @@ public class CodeSuggestionApplier {
             parentObject = target.substring(0, dot);
             objectName = target.substring(dot + 1);
             // Match SchemaDescriptionService's convention: parent_object is
-            // database-qualified (e.g. "idb_database.HOTEL_SERVICES") so the
+            // database-qualified (e.g. "analytics_db.ORDER_ITEMS") so the
             // upsert lookup unifies with AI_GENERATED rows for the same column
             // instead of orphaning a separate row per source.
             String dbName = resolveDatabaseName(suggestion.getConnectionId());
@@ -174,7 +174,7 @@ public class CodeSuggestionApplier {
         suggestion.setAppliedEntryId(saved.getId());
     }
 
-    /** Returns the connection's database name (e.g. "idb_database") or null. */
+    /** Returns the connection's database name (e.g. "analytics_db") or null. */
     private String resolveDatabaseName(String connectionId) {
         try {
             var schema = schemaScannerService.scanSchema(connectionId);

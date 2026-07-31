@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
  * recovered from a source that keeps them — here, the slow query log. Each
  * literal-bearing query is written to {@code slow_query_sample} with the
  * tenant id pulled from the connection's configured tenant column (e.g.
- * {@code hotel_id}). The tenant id is later resolved to a human-readable name
+ * {@code customer_id}). The tenant id is later resolved to a human-readable name
  * by a cheap lookup against the customer's own database.
  *
  * <p><b>v1 coverage caveat.</b> The slow-log parser aggregates by query digest

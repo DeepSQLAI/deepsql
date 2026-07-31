@@ -230,4 +230,6 @@ For production, services should be:
 - Using environment-specific configuration files
 - Monitored with health checks and logging
 
-See [PRODUCTION-SETUP.md](./root/PRODUCTION-SETUP.md) for production deployment details.
+See [SELF_HOST_GUIDE.md](./root/SELF_HOST_GUIDE.md) for the Docker Compose stack:
+host sizing, the production environment reference, TLS and reverse-proxy setup,
+health checks, upgrades, and backup and restore.

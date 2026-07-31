@@ -236,7 +236,7 @@ Both tabs are fully integrated with the existing backend APIs and ready for prod
 **Request:**
 ```json
 {
-  "connectionId": "4dd73a02-4ab6-4ace-ab2b-98caea7d6000",
+  "connectionId": "00000000-0000-0000-0000-000000000000",
   "query": "SELECT * FROM users WHERE id = 1",
   "useAnalyze": false
 }
@@ -350,7 +350,7 @@ SELECT * FROM PAYMENT_TRANSFERS WHERE booking_id = 123
 
 ### Slow Query Analysis (from SLOW_QUERY_TEST_RESULTS.md)
 
-**Test Database:** MySQL (idb_database)
+**Test Database:** MySQL
 **Threshold:** 50ms
 **Limit:** 5
 

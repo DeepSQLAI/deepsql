@@ -18,8 +18,8 @@ class SchedulingPropertiesSanityTest {
     }
 
     @Test
-    void azprodApplicationPropertiesDoNotDisableScheduling() throws IOException {
-        Properties props = load("application-azprod.properties");
+    void prodApplicationPropertiesDoNotDisableScheduling() throws IOException {
+        Properties props = load("application-prod.properties");
         assertThat(props.getProperty("spring.task.scheduling.enabled")).isNotEqualTo("false");
     }
 

@@ -22,7 +22,7 @@ VENV_PY="$AGENT_DIR/.venv/bin/python"
 # Load repo .env for Azure creds if not already in the environment.
 if [[ -f "$REPO_ROOT/.env" ]]; then set -a; . "$REPO_ROOT/.env"; set +a; fi
 : "${AZURE_OPENAI_KEY:?Set AZURE_OPENAI_KEY (or add it to repo .env)}"
-AZURE_ENDPOINT_HOST="$(printf '%s' "${AZURE_OPENAI_ENDPOINT:-https://dba-agent-3-resource.cognitiveservices.azure.com/}" | sed -E 's#https?://##; s#/.*##; s#\.cognitiveservices\.azure\.com#.openai.azure.com#')"
+AZURE_ENDPOINT_HOST="$(printf '%s' "${AZURE_OPENAI_ENDPOINT:-https://your-resource.cognitiveservices.azure.com/}" | sed -E 's#https?://##; s#/.*##; s#\.cognitiveservices\.azure\.com#.openai.azure.com#')"
 BASE_URL="https://${AZURE_ENDPOINT_HOST}/openai/v1"
 
 [[ -x "$VENV_PY" ]] || { echo "Agent venv not found at $VENV_PY — install the agent runtime first."; exit 1; }

@@ -84,13 +84,13 @@ class UserDataAccessPolicyServiceTest {
         QueryResult redacted = service.redactResult(
             "conn-1",
             new QueryResult(
-                List.of("hotel_name", "email", "phone_number"),
+                List.of("customer_name", "email", "phone_number"),
                 List.of(List.of("Hotel One", "a@example.com", "1234567890")),
                 1,
                 1L,
                 false,
                 12L,
-                "SELECT hotel_name, email, phone_number FROM customer_profiles"
+                "SELECT customer_name, email, phone_number FROM customer_profiles"
             ),
             new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
         );

@@ -88,7 +88,7 @@ class TrainingServiceTest {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
         schema.setTables(List.of(
-            table("HOTEL",
+            table("CUSTOMERS",
                 column("id", "bigint"),
                 column("subscription_start_date", "timestamp")
             )
@@ -99,9 +99,9 @@ class TrainingServiceTest {
                 .id("doc-1")
                 .connectionId("conn-1")
                 .objectType(SchemaDocumentation.DocumentationType.TABLE)
-                .objectName("HOTEL")
-                .description("Core hotel entity. subscription_start_date marks when the hotel contract starts.")
-                .businessTerms("hotel, onboarded hotel")
+                .objectName("CUSTOMERS")
+                .description("Core customer entity. subscription_start_date marks when the customer contract starts.")
+                .businessTerms("customer, onboarded customer")
                 .createdAt(LocalDateTime.now())
                 .build()
         ));
@@ -164,7 +164,7 @@ class TrainingServiceTest {
     void trainWithSchema_reusesUnchangedSchemaEmbeddingOnLocalPgvector() throws Exception {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
-        schema.setTables(List.of(table("HOTEL", column("id", "bigint"))));
+        schema.setTables(List.of(table("CUSTOMERS", column("id", "bigint"))));
         when(schemaScannerService.scanSchema("conn-1")).thenReturn(schema);
         when(schemaDocRepository.findByConnectionId("conn-1")).thenReturn(List.of());
         when(columnProfileRepository.findByConnectionId("conn-1")).thenReturn(List.of());
@@ -174,8 +174,8 @@ class TrainingServiceTest {
         when(vectorSearchService.resolveTableName(any(), any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(cacheManager.getCache("ragRetrieval")).thenReturn(null);
 
-        String docId = deterministicId("conn-1::SCHEMA_DDL::HOTEL");
-        String hash = sha256("Table: HOTEL\nColumns:\n  - id (bigint)\n");
+        String docId = deterministicId("conn-1::SCHEMA_DDL::CUSTOMERS");
+        String hash = sha256("Table: CUSTOMERS\nColumns:\n  - id (bigint)\n");
         Map<String, RagDocumentStateService.RagDocumentState> existingStates = new HashMap<>();
         existingStates.put(docId, new RagDocumentStateService.RagDocumentState(hash, true));
         when(ragDocumentStateService.findDocumentStates(any())).thenReturn(existingStates);
@@ -200,7 +200,7 @@ class TrainingServiceTest {
     void trainWithSchema_backfillsMissingEmbeddingForUnchangedSchemaDoc() throws Exception {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
-        schema.setTables(List.of(table("HOTEL", column("id", "bigint"))));
+        schema.setTables(List.of(table("CUSTOMERS", column("id", "bigint"))));
         when(schemaScannerService.scanSchema("conn-1")).thenReturn(schema);
         when(schemaDocRepository.findByConnectionId("conn-1")).thenReturn(List.of());
         when(columnProfileRepository.findByConnectionId("conn-1")).thenReturn(List.of());
@@ -210,8 +210,8 @@ class TrainingServiceTest {
         when(vectorSearchService.resolveTableName(any(), any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(cacheManager.getCache("ragRetrieval")).thenReturn(null);
 
-        String docId = deterministicId("conn-1::SCHEMA_DDL::HOTEL");
-        String hash = sha256("Table: HOTEL\nColumns:\n  - id (bigint)\n");
+        String docId = deterministicId("conn-1::SCHEMA_DDL::CUSTOMERS");
+        String hash = sha256("Table: CUSTOMERS\nColumns:\n  - id (bigint)\n");
         when(ragDocumentStateService.findDocumentStates(any()))
             .thenReturn(Map.of(docId, new RagDocumentStateService.RagDocumentState(hash, false)));
         when(embeddingService.createEmbedding(anyString())).thenReturn(List.of(0.11d, 0.22d, 0.33d));
@@ -225,7 +225,7 @@ class TrainingServiceTest {
     void trainWithSchema_fallsBackToPerDocumentIndexingWhenBatchIndexFails() throws Exception {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
-        schema.setTables(List.of(table("HOTEL", column("id", "bigint"))));
+        schema.setTables(List.of(table("CUSTOMERS", column("id", "bigint"))));
         when(schemaScannerService.scanSchema("conn-1")).thenReturn(schema);
         when(schemaDocRepository.findByConnectionId("conn-1")).thenReturn(List.of());
         when(columnProfileRepository.findByConnectionId("conn-1")).thenReturn(List.of());

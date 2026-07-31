@@ -193,22 +193,22 @@ class IndexBackfillServiceTest {
         @Test
         void mysql_documentation_alwaysStrippedToBare() throws Exception {
             String metadata = new ObjectMapper().writeValueAsString(
-                    Map.of("objectType", "TABLE", "objectName", "mydb.hotel_services"));
+                    Map.of("objectType", "TABLE", "objectName", "mydb.product_services"));
 
             var doc = TrainingDataSearchDocument.builder()
                     .id("doc9")
                     .type("DOCUMENTATION")
-                    .objectName("mydb.hotel_services")
+                    .objectName("mydb.product_services")
                     .metadata(metadata)
                     .dbType("mysql")
                     .build();
 
-            when(azureSearchService.resolveTableName("mydb.hotel_services", null, "TABLE", "mysql"))
-                    .thenReturn("hotel_services");
+            when(azureSearchService.resolveTableName("mydb.product_services", null, "TABLE", "mysql"))
+                    .thenReturn("product_services");
 
             String result = service.resolveTableNameForDocument(doc);
 
-            assertThat(result).isEqualTo("hotel_services");
+            assertThat(result).isEqualTo("product_services");
         }
 
         @Test

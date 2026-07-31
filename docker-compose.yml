@@ -1,14 +1,14 @@
 # ── DeepSQL Self-Hosted Stack ─────────────────────────────────────────────────
-# Customer quick start:
+# Quick start:
 #   1. cp .env.example .env
 #   2. fill in required values in .env
-#   3. ./scripts/self-host/install.sh
+#   3. docker compose up -d --build     (or ./scripts/self-host/install.sh)
 #
-# DeepSQL provides the frontend/backend image references in .env.
+# There are no prebuilt DeepSQL images and no container registry: `backend` and
+# `frontend` are built from this checkout (backend/Dockerfile and ./Dockerfile).
+# The first build compiles the Java backend and takes several minutes.
 #
-# Recommended self-host mode:
-#   - Keep Azure OpenAI pointed at DeepSQL-managed credentials for usage metering
-#   - Use pgvector locally for RAG storage:
+# Recommended self-host mode — pgvector locally for RAG storage:
 #       VECTOR_STORE_TYPE=pgvector
 #       AZURE_SEARCH_ENABLED=false
 
@@ -41,7 +41,7 @@ services:
 
   # ── Cache (Valkey / Redis-compatible) ────────────────────────────────────────
   valkey:
-    image: valkey/valkey:9.0.3
+    image: valkey/valkey:9.1.1
     restart: unless-stopped
     ports:
       - "${DEEPSQL_VALKEY_PORT:-6379}:6379"
@@ -55,7 +55,8 @@ services:
 
   # ── Backend (Spring Boot) ─────────────────────────────────────────────────────
   backend:
-    image: ${DEEPSQL_BACKEND_IMAGE}
+    build:
+      context: ./backend
     restart: unless-stopped
     depends_on:
       postgres:
@@ -102,7 +103,11 @@ services:
 
   # ── Frontend (React + nginx) ──────────────────────────────────────────────────
   frontend:
-    image: ${DEEPSQL_FRONTEND_IMAGE}
+    build:
+      context: .
+      # VITE_API_URL is deliberately left unset: the nginx config in this image
+      # proxies /api to the backend service, so the bundle uses a relative path.
+      # Set it only if you serve the frontend from a different origin.
     restart: unless-stopped
     depends_on:
       backend:

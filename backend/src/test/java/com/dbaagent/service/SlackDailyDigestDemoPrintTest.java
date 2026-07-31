@@ -102,7 +102,7 @@ class SlackDailyDigestDemoPrintTest {
             .id("evt-1").connectionId(connectionId)
             .eventTimestamp(LocalDateTime.now().withHour(2).withMinute(14))
             .eventType(DatabaseEvent.EventType.SCHEMA_CHANGE)
-            .eventName("ALTER TABLE user_bookings ADD COLUMN deleted_at TIMESTAMP")
+            .eventName("ALTER TABLE customer_orders ADD COLUMN deleted_at TIMESTAMP")
             .initiatedBy("app_admin").build();
         DatabaseEvent ddl2 = DatabaseEvent.builder()
             .id("evt-2").connectionId(connectionId)
@@ -114,7 +114,7 @@ class SlackDailyDigestDemoPrintTest {
         ConnectionAccessGrant grant = new ConnectionAccessGrant();
         grant.setUsername("alice");
         grant.setAccessLevel(ConnectionAccessLevel.FULL_CONTENT);
-        grant.setGrantedBy("admin@stayflexi.com");
+        grant.setGrantedBy("admin@example.com");
         grant.setCreatedAt(LocalDateTime.now().minusHours(2));
 
         AuthLoginChallenge fail1 = new AuthLoginChallenge();
@@ -158,7 +158,7 @@ class SlackDailyDigestDemoPrintTest {
             "unusedIndexes", List.of(
                 Map.of("indexName", "idx_users_email_legacy", "tableName", "users", "indexSizeBytes", 7L * (1L << 30)),
                 Map.of("indexName", "idx_orders_status_old", "tableName", "orders", "indexSizeBytes", 6L * (1L << 30)),
-                Map.of("indexName", "idx_bookings_dt_v1", "tableName", "user_bookings", "indexSizeBytes", 5L * (1L << 30))
+                Map.of("indexName", "idx_bookings_dt_v1", "tableName", "customer_orders", "indexSizeBytes", 5L * (1L << 30))
             )
         ));
 
@@ -168,7 +168,7 @@ class SlackDailyDigestDemoPrintTest {
         bloated1.setBloatPercent(45.0);
         bloated1.setSizeBytes(20L * (1L << 30));
         TableStatsHistory bloated2 = new TableStatsHistory();
-        bloated2.setTableName("isha_logs_utility");
+        bloated2.setTableName("legacy_logs_utility");
         bloated2.setBloatBytes(15L * (1L << 30));
         bloated2.setBloatPercent(28.0);
         bloated2.setSizeBytes(72L * (1L << 30));

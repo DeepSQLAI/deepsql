@@ -13,7 +13,7 @@ import java.util.UUID;
  * Customer dimension — one row per distinct tenant value seen on a connection.
  *
  * {@code customerId} is the raw literal pulled from the configured tenant
- * column (e.g. {@code hotel_id}). {@code customerName} is resolved lazily via
+ * column (e.g. {@code customer_id}). {@code customerName} is resolved lazily via
  * a lookup against the target database (see
  * {@link ConnectionAnalyticsConfig}) and cached here so we do not re-query the
  * customer's database every analysis cycle.
@@ -44,7 +44,7 @@ public class SlowQueryCustomer {
     @Column(name = "customer_name", length = 512)
     private String customerName;
 
-    /** Which column the id came from (e.g. {@code hotel_id}). */
+    /** Which column the id came from (e.g. {@code customer_id}). */
     @Column(name = "tenant_column", length = 128)
     private String tenantColumn;
 

@@ -227,28 +227,28 @@ class ChatPromptIntegrationTest extends BaseIntegrationTest {
     @Test
     @DisplayName("Brain routing: relationship question should use stored metadata, not SQL")
     void testRelationshipsUseMetadataRoute() throws Exception {
-        ChatTestResult result = sendChatRequest("How are USER_BOOKINGS and GUEST_MAPPING related?");
+        ChatTestResult result = sendChatRequest("How are CUSTOMER_ORDERS and CONTACT_MAPPING related?");
 
         assertSuccessResponse(result);
         assertNoSqlGenerated(result, "Relationship metadata route");
-        assertContainsKeywords(result.response.getMessage(), "user_bookings", "guest_mapping");
+        assertContainsKeywords(result.response.getMessage(), "customer_orders", "contact_mapping");
 
-        printTestResult("How are USER_BOOKINGS and GUEST_MAPPING related?", result);
+        printTestResult("How are CUSTOMER_ORDERS and CONTACT_MAPPING related?", result);
     }
 
     @Test
     @DisplayName("BI routing: revenue question should generate SQL on business tables")
     void testBiQuestionGeneratesSql() throws Exception {
-        ChatTestResult result = sendChatRequest("Show total booking revenue by hotel for the last 30 days");
+        ChatTestResult result = sendChatRequest("Show total booking revenue by customer for the last 30 days");
 
         assertSuccessResponse(result);
         assertTrue(result.durationMs < LLM_THRESHOLD_MS,
                 "BI question should complete in <" + LLM_THRESHOLD_MS + "ms, took " + result.durationMs + "ms");
         assertNotNull(result.response.getSql(), "BI question should generate SQL");
         assertFalse(result.response.getSql().isBlank(), "BI question should generate non-empty SQL");
-        assertContainsKeywords(result.response.getSql(), "user_bookings", "sum", "group by");
+        assertContainsKeywords(result.response.getSql(), "customer_orders", "sum", "group by");
 
-        printTestResult("Show total booking revenue by hotel for the last 30 days", result);
+        printTestResult("Show total booking revenue by customer for the last 30 days", result);
     }
 
     // ==================== SLOW QUERY QUESTIONS (FAST-PATH) ====================

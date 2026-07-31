@@ -58,8 +58,8 @@ class AgentPromptClassifierTest {
     @Test
     void classify_genericBiPrompt_usesUniversalAgentIntent() {
         AgentDecision decision = classifier.classify(
-            "give me top 5 hotels by bookings volume in the last 3 days",
-            routingService.classify("give me top 5 hotels by bookings volume in the last 3 days")
+            "give me top 5 customers by bookings volume in the last 3 days",
+            routingService.classify("give me top 5 customers by bookings volume in the last 3 days")
         );
 
         assertTrue(decision.useAgenticFlow());

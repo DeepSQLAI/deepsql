@@ -21,9 +21,9 @@ class SchedulingConfigProfileTest {
     }
 
     @Test
-    void schedulingIsEnabledForAzprodProfile() {
+    void schedulingIsEnabledForProdProfile() {
         contextRunner
-            .withInitializer(ctx -> ctx.getEnvironment().setActiveProfiles("azprod"))
+            .withInitializer(ctx -> ctx.getEnvironment().setActiveProfiles("prod"))
             .run(context -> {
                 assertThat(context).hasSingleBean(SchedulingConfig.class);
                 assertThat(context.containsBean(TaskManagementConfigUtils.SCHEDULED_ANNOTATION_PROCESSOR_BEAN_NAME))

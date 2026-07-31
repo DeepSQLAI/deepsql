@@ -56,7 +56,7 @@ class AgentRunServiceTest {
         AgentToolResult result = new AgentToolResult(
             new AgentObservation("revenue_snapshot", "Collected revenue grouped by currency", Map.of("currencies", List.of("INR", "USD"))),
             null,
-            "SELECT currency, SUM(amount) FROM ACCOUNT_LEDGER",
+            "SELECT currency, SUM(amount) FROM PAYMENT_LEDGER",
             0.93
         );
 
@@ -67,7 +67,7 @@ class AgentRunServiceTest {
         assertEquals("run-1", stepCaptor.getValue().getRunId());
         assertEquals(0, stepCaptor.getValue().getStepIndex());
         assertTrue(stepCaptor.getValue().getParamsJson().contains("CURRENCY"));
-        assertEquals("SELECT currency, SUM(amount) FROM ACCOUNT_LEDGER", stepCaptor.getValue().getExecutedSql());
+        assertEquals("SELECT currency, SUM(amount) FROM PAYMENT_LEDGER", stepCaptor.getValue().getExecutedSql());
 
         ArgumentCaptor<AgentObservationEntity> observationCaptor = ArgumentCaptor.forClass(AgentObservationEntity.class);
         verify(agentObservationRepository).save(observationCaptor.capture());

@@ -42,8 +42,8 @@ class BusinessRuleMemoryServiceTest {
     void learnFromFeedbackExtractsJoinAndPredicateGuardrails() {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setTables(List.of(
-            new TableMetadata("HOTEL", "public", "table", null, null, List.of(), List.of()),
-            new TableMetadata("HOTEL_PRICING", "public", "table", null, null, List.of(), List.of()),
+            new TableMetadata("CUSTOMERS", "public", "table", null, null, List.of(), List.of()),
+            new TableMetadata("PRODUCT_PRICING", "public", "table", null, null, List.of(), List.of()),
             new TableMetadata("ACCOUNTS", "public", "table", null, null, List.of(), List.of()),
             new TableMetadata("ACCOUNTS_LEDGER", "public", "table", null, null, List.of(), List.of())
         ));
@@ -53,7 +53,7 @@ class BusinessRuleMemoryServiceTest {
         when(brainRuleRepository.save(any(BrainRule.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
 
-        String feedback = "It should join ACCOUNTS and ACCOUNTS_LEDGER on group_id and type=CREDIT and mode=SUBSCRIPTION instead of HOTEL and HOTEL_PRICING";
+        String feedback = "It should join ACCOUNTS and ACCOUNTS_LEDGER on group_id and type=CREDIT and mode=SUBSCRIPTION instead of CUSTOMERS and PRODUCT_PRICING";
 
         int learned = service.learnFromFeedback(
             "conn-1",
@@ -80,7 +80,7 @@ class BusinessRuleMemoryServiceTest {
         ));
         assertTrue(savedRules.stream().anyMatch(r ->
             BusinessRuleMemoryService.RULE_PROHIBITED_TABLE.equals(r.getRuleType()) &&
-                "hotel".equalsIgnoreCase(r.getTableName())
+                "customers".equalsIgnoreCase(r.getTableName())
         ));
         assertTrue(savedRules.stream().anyMatch(r ->
             BusinessRuleMemoryService.RULE_REQUIRED_PREDICATE.equals(r.getRuleType()) &&
@@ -113,7 +113,7 @@ class BusinessRuleMemoryServiceTest {
             ),
             new BusinessRuleMemoryService.SqlGuardrail(
                 BusinessRuleMemoryService.GuardrailType.PROHIBITED_TABLE,
-                "hotel",
+                "customer",
                 null,
                 null,
                 "rule",
@@ -145,11 +145,11 @@ class BusinessRuleMemoryServiceTest {
             )
         );
 
-        String incorrectSql = "SELECT SUM(hp.amount) FROM hotel h JOIN hotel_pricing hp ON h.id = hp.hotel_id";
+        String incorrectSql = "SELECT SUM(hp.amount) FROM customer h JOIN product_pricing hp ON h.id = hp.customer_id";
         BusinessRuleMemoryService.SqlGuardrailEvaluation incorrectEval = service.evaluateSql(incorrectSql, guardrails);
         assertFalse(incorrectEval.passed());
         assertTrue(incorrectEval.summary().toLowerCase().contains("missing required table 'accounts'"));
-        assertTrue(incorrectEval.summary().toLowerCase().contains("prohibited table 'hotel'"));
+        assertTrue(incorrectEval.summary().toLowerCase().contains("prohibited table 'customer'"));
 
         String correctedSql = "SELECT SUM(al.amount) AS subscription_revenue " +
             "FROM accounts a JOIN accounts_ledger al ON a.group_id = al.group_id " +

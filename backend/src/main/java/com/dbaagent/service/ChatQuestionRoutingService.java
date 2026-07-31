@@ -222,7 +222,7 @@ public class ChatQuestionRoutingService {
         if (normalized == null || normalized.isBlank() || !normalized.contains("performance")) {
             return false;
         }
-        return normalized.matches(".*\\b(payment|payments|gateway|refund|refunds|revenue|booking|bookings|customer|customers|hotel|hotels|account|accounts|billing|transaction|transactions)\\b.*");
+        return normalized.matches(".*\\b(payment|payments|gateway|refund|refunds|revenue|booking|bookings|customer|customers|customer|customers|account|accounts|billing|transaction|transactions)\\b.*");
     }
 
     private boolean looksLikeExactSchemaQuestion(String normalized) {

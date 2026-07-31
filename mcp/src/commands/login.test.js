@@ -83,12 +83,12 @@ test("login with no --url and one saved profile uses it AND announces it on stde
 
 test("login with no --url and multiple profiles refuses to guess — lists them and requires --url", () => {
   // This is the scenario that bit the user: they logged into our hosted
-  // demo (deepsql.stayflexi.com) AND their self-hosted instance, and bare
+  // demo (deepsql.example.com) AND their self-hosted instance, and bare
   // `deepsql login` kept defaulting to whichever was logged in first.
   // After this fix, the CLI lists both and requires --url.
   withStubbedStore(
     {
-      "https://deepsql.stayflexi.com/": { token: "t1" },
+      "https://deepsql.example.com/": { token: "t1" },
       "https://customer.example.com/":  { token: "t2" },
     },
     (resolve) => {
@@ -102,7 +102,7 @@ test("login with no --url and multiple profiles refuses to guess — lists them 
       assert.match(thrown.message, /Multiple saved DeepSQL profiles/);
       assert.match(thrown.message, /Pass --url <host> to choose one/);
       // Both URLs must be listed so the user can pick.
-      assert.match(thrown.message, /https:\/\/deepsql\.stayflexi\.com\//);
+      assert.match(thrown.message, /https:\/\/deepsql\.example\.com\//);
       assert.match(thrown.message, /https:\/\/customer\.example\.com\//);
       // And we point them at config set-default for pinning.
       assert.match(thrown.message, /deepsql config set-default/);

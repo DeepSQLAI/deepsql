@@ -47,14 +47,14 @@ class ConversationContextAwarenessTest {
             "chat-1",
             "show me all the properties that are onboarded in the last 3 days and are active",
             "show me all the properties that are onboarded in the last 3 days and are active",
-            "Active onboarded hotel properties from HOTEL for the last 3 days.",
+            "Active onboarded customer properties from CUSTOMERS for the last 3 days.",
             """
-                {"tables":["hotel"],"entities":["property"],"filters":["active"],"timeframe":"last 3 days"}
+                {"tables":["customer"],"entities":["property"],"filters":["active"],"timeframe":"last 3 days"}
                 """,
             """
-                [{"displayLabel":"Hotel Alpha","entityType":"property","table":"hotel"},{"displayLabel":"Hotel Beta","entityType":"property","table":"hotel"}]
+                [{"displayLabel":"Hotel Alpha","entityType":"property","table":"customer"},{"displayLabel":"Hotel Beta","entityType":"property","table":"customer"}]
                 """,
-            "hotel property onboarded active last 3 days selected properties",
+            "customer property onboarded active last 3 days selected properties",
             "BI_QUERY",
             "RESOLVED"
         );
@@ -97,14 +97,14 @@ class ConversationContextAwarenessTest {
             "ctx-clarify",
             null,
             "chat-2",
-            "how many hotels are onboarded in the last 3 days?",
-            "how many hotels are onboarded in the last 3 days?",
+            "how many customers are onboarded in the last 3 days?",
+            "how many customers are onboarded in the last 3 days?",
             "Need one clarification: use subscription_start_date for onboarding.",
             """
-                {"tables":["hotel"],"entities":["hotel"],"timeframe":"last 3 days","chosenTemporalColumn":"subscription_start_date"}
+                {"tables":["customer"],"entities":["customer"],"timeframe":"last 3 days","chosenTemporalColumn":"subscription_start_date"}
                 """,
             "[]",
-            "hotel onboarding last 3 days subscription_start_date clarification",
+            "customer onboarding last 3 days subscription_start_date clarification",
             "BI_QUERY",
             "CLARIFICATION"
         );
@@ -117,7 +117,7 @@ class ConversationContextAwarenessTest {
             "user bookings table",
             "I encountered an error executing the query.",
             """
-                {"tables":["user_bookings"]}
+                {"tables":["customer_orders"]}
                 """,
             "[]",
             "failed booking query",
@@ -147,12 +147,12 @@ class ConversationContextAwarenessTest {
             "chat-3",
             "what is the booking volume for these properties?",
             "what is the booking volume for these properties?",
-            "Booking volume for the selected hotels.",
+            "Booking volume for the selected customers.",
             """
-                {"tables":["user_bookings"],"entities":["booking"],"metric":"booking volume"}
+                {"tables":["customer_orders"],"entities":["booking"],"metric":"booking volume"}
                 """,
             """
-                [{"displayLabel":"Hotel Alpha","entityType":"property","table":"hotel"}]
+                [{"displayLabel":"Hotel Alpha","entityType":"property","table":"customer"}]
                 """,
             "booking volume selected properties",
             "BI_QUERY",
@@ -179,19 +179,19 @@ class ConversationContextAwarenessTest {
             "BI_QUERY",
             "RESOLVED",
             "show me all the properties that are onboarded in the last 3 days and are active",
-            "Active onboarded properties selected from HOTEL using subscription_start_date.",
+            "Active onboarded properties selected from CUSTOMERS using subscription_start_date.",
             java.util.Map.of(
-                "tables", List.of("hotel"),
+                "tables", List.of("customer"),
                 "filters", List.of("active"),
                 "timeframe", "last 3 days",
                 "chosenTemporalColumn", "subscription_start_date"
             ),
             List.of(
-                java.util.Map.of("displayLabel", "Hotel Alpha", "table", "hotel"),
-                java.util.Map.of("displayLabel", "Hotel Beta", "table", "hotel")
+                java.util.Map.of("displayLabel", "Hotel Alpha", "table", "customer"),
+                java.util.Map.of("displayLabel", "Hotel Beta", "table", "customer")
             ),
             java.util.Map.of("rowCount", 2),
-            "SELECT id, property_name FROM hotel WHERE active = 1",
+            "SELECT id, property_name FROM customer WHERE active = 1",
             List.of(),
             0.77d
         );
@@ -202,7 +202,7 @@ class ConversationContextAwarenessTest {
         );
 
         assertTrue(effectiveQuestion.contains("Resolved related conversation context"));
-        assertTrue(effectiveQuestion.contains("Active onboarded properties selected from HOTEL"));
+        assertTrue(effectiveQuestion.contains("Active onboarded properties selected from CUSTOMERS"));
         assertTrue(effectiveQuestion.contains("Hotel Alpha"));
         assertTrue(effectiveQuestion.contains("subscription_start_date"));
         assertTrue(effectiveQuestion.contains("Current user request: what is the booking volume for these properties?"));

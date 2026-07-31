@@ -920,7 +920,7 @@ public class SchemaClassificationService {
             }
         }
 
-        // Handle prefixed columns like "pm_hotel" -> "hotel"
+        // Handle prefixed columns like "pm_hotel" -> "customer"
         if (baseName.contains("_")) {
             // Try the part after the last underscore
             int lastUnderscore = baseName.lastIndexOf('_');

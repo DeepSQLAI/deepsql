@@ -29,7 +29,7 @@ public final class SqlIdentifierCaseAligner {
 
     private static Map<String, String> buildTableCaseMap(SchemaMetadata schemaMetadata) {
         Map<String, String> tableCaseMap = new HashMap<>();
-        // Track row counts to resolve case-conflicting table names (e.g., USER_BOOKINGS vs user_bookings).
+        // Track row counts to resolve case-conflicting table names (e.g., ORDER_ITEMS vs order_items).
         // When lower_case_table_names=0, MySQL treats these as separate tables. Prefer the one with data.
         Map<String, Long> tableRowCounts = new HashMap<>();
 

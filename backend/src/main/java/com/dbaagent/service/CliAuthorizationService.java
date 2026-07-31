@@ -73,9 +73,9 @@ public class CliAuthorizationService {
      * Critical for self-hosted deploys: this URL is returned to the CLI
      * verbatim as `authorize_url`, the CLI opens it in the user's browser,
      * and the user's authentication state lands on whatever host it points
-     * at. If APP_BASE_URL is unset and we silently default to our hosted
-     * domain, the customer's CLI session opens our login page — the exact
-     * symptom reported on 2026-05-13.
+     * at. A wrong value therefore hands a login session to the wrong origin,
+     * which is why the default is localhost and why it is logged at startup:
+     * the misconfiguration should be visible before anyone runs `deepsql login`.
      */
     @jakarta.annotation.PostConstruct
     void logResolvedBaseUrl() {

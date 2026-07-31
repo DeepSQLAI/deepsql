@@ -169,7 +169,7 @@ class SqlStatementSplitterTest {
     void splitSetPreamble_mixedSetAndSelect_withSemicolonInBody() {
         String sql = "SET @report_date := DATE('2026-02-17');\n" +
             "SET @utc_start := UNIX_TIMESTAMP(CONVERT_TZ(@report_date, '+05:30', '+00:00'));\n" +
-            "SELECT b.hotel_id FROM bookings b WHERE b.created > @utc_start";
+            "SELECT b.customer_id FROM bookings b WHERE b.created > @utc_start";
         String[] result = SqlStatementSplitter.splitSetPreamble(sql);
         assertThat(result).hasSize(3);
         assertThat(result[0]).startsWith("SET @report_date");

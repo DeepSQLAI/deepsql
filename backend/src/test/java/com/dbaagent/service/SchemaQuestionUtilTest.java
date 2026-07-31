@@ -17,7 +17,7 @@ class SchemaQuestionUtilTest {
     void resolveExactSchemaTable_prefersExactTableMentionOverGenericSuffixMatches() {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setTables(List.of(
-            new TableMetadata("ROOM_RESERVATIONS", null, "table", 5000L, 0L, List.of(
+            new TableMetadata("ORDER_LINE_ITEMS", null, "table", 5000L, 0L, List.of(
                 new ColumnMetadata("id", "bigint", null, false, true, null, 1)
             ), List.of()),
             new TableMetadata("MASTER_LOGIN_ACCESS_KEYS", null, "table", 20L, 0L, List.of(
@@ -33,16 +33,16 @@ class SchemaQuestionUtilTest {
 
         TableMetadata resolved = SchemaQuestionUtil.resolveExactSchemaTable(
             schema,
-            "Show me all key columns in ROOM_RESERVATIONS table"
+            "Show me all key columns in ORDER_LINE_ITEMS table"
         );
 
-        assertEquals("ROOM_RESERVATIONS", resolved.getName());
+        assertEquals("ORDER_LINE_ITEMS", resolved.getName());
     }
 
     @Test
     void looksLikeExactTableKeyColumnQuestion_detectsScopedKeyColumnPrompts() {
         assertTrue(SchemaQuestionUtil.looksLikeExactTableKeyColumnQuestion(
-            "Show me all key columns in ROOM_RESERVATIONS table"
+            "Show me all key columns in ORDER_LINE_ITEMS table"
         ));
     }
 

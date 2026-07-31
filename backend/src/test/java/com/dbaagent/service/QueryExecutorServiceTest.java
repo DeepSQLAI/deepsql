@@ -65,7 +65,7 @@ class QueryExecutorServiceTest {
         DatabaseObject accounts = new DatabaseObject(
             "ACCOUNTS",
             "table",
-            "idb_database",
+            "analytics_db",
             List.of(new ColumnInfo("account_id", "bigint", false, true, null)),
             42L,
             null
@@ -116,14 +116,14 @@ class QueryExecutorServiceTest {
             .thenReturn(new QueryExecutionPolicyService.PolicyDecision(List.of(), true, "UPDATE"));
         when(connectionService.getConnection("conn-1", request)).thenReturn(connection);
         when(connection.createStatement()).thenReturn(statement);
-        when(statement.execute("UPDATE hotels SET property_status = 'ACTIVE' WHERE hotel_id = 9"))
+        when(statement.execute("UPDATE customers SET property_status = 'ACTIVE' WHERE customer_id = 9"))
             .thenThrow(new SQLException("UPDATE command denied to user", "42000"));
 
         QueryExecutionPolicyException exception = assertThrows(
             QueryExecutionPolicyException.class,
             () -> queryExecutorService.executeQuery(
                 "conn-1",
-                new QueryRequest("UPDATE hotels SET property_status = 'ACTIVE' WHERE hotel_id = 9", null, null),
+                new QueryRequest("UPDATE customers SET property_status = 'ACTIVE' WHERE customer_id = 9", null, null),
                 QueryExecutionContext.editor("admin", true, true)
             )
         );

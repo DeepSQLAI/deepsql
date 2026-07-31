@@ -131,8 +131,8 @@ class PerformanceExecutorTest {
         );
         when(performanceActionAggregatorService.getTopActions("conn-1", 5)).thenReturn(List.of(
             PerformanceAction.builder()
-                .title("Add composite index for USER_BOOKINGS lookups")
-                .targetObject("USER_BOOKINGS")
+                .title("Add composite index for CUSTOMER_ORDERS lookups")
+                .targetObject("CUSTOMER_ORDERS")
                 .category(PerformanceAction.ActionCategory.INDEX)
                 .source(PerformanceAction.ActionSource.INDEX_ADVISOR)
                 .impactScore(92)
@@ -140,7 +140,7 @@ class PerformanceExecutorTest {
                 .roi(460.0)
                 .description("Frequent booking lookups scan too many rows.")
                 .queriesAffected(18L)
-                .sqlStatement("CREATE INDEX idx_user_bookings_status_created_at ON USER_BOOKINGS(status, created_at)")
+                .sqlStatement("CREATE INDEX idx_customer_orders_status_created_at ON CUSTOMER_ORDERS(status, created_at)")
                 .build()
         ));
 
@@ -158,7 +158,7 @@ class PerformanceExecutorTest {
         assertFalse(result.get().renderedMessage().contains("ROI **"));
         assertFalse(result.get().renderedMessage().contains("impact 92/100"));
         assertFalse(result.get().renderedMessage().contains("effort 20/100"));
-        assertTrue(result.get().renderedMessage().contains("USER_BOOKINGS"));
+        assertTrue(result.get().renderedMessage().contains("CUSTOMER_ORDERS"));
         assertEquals("performance_action_recommendations", result.get().evidence().answerType());
     }
 
@@ -303,7 +303,7 @@ class PerformanceExecutorTest {
             PlanExecution.builder()
                 .connectionId("conn-1")
                 .queryFingerprint("fp-1")
-                .normalizedQuery("select * from bookings where hotel_id = ? and created_at >= ?")
+                .normalizedQuery("select * from bookings where customer_id = ? and created_at >= ?")
                 .estimatedRows(120L)
                 .actualRows(12400L)
                 .cardinalityErrorRatio(103.3)
@@ -342,7 +342,7 @@ class PerformanceExecutorTest {
         );
         when(activeQueryRepository.findLatestSnapshot("conn-1")).thenReturn(List.of(
             ActiveQuery.builder()
-                .queryText("select * from user_bookings where status = 'PENDING'")
+                .queryText("select * from customer_orders where status = 'PENDING'")
                 .state("active")
                 .waitEventType("Lock")
                 .waitEvent("row lock")
@@ -385,7 +385,7 @@ class PerformanceExecutorTest {
         );
         when(performanceInsightsService.getTableUsage("conn-1")).thenReturn(List.of(
             TableUsageDTO.builder()
-                .tableName("idb_database.USER_BOOKINGS")
+                .tableName("analytics_db.CUSTOMER_ORDERS")
                 .usageScore(91)
                 .rowsRead(120000L)
                 .rowsWritten(1200L)
@@ -405,7 +405,7 @@ class PerformanceExecutorTest {
 
         assertTrue(result.isPresent());
         assertEquals("table_usage_heatmap", result.get().evidence().answerType());
-        assertTrue(result.get().renderedMessage().contains("USER_BOOKINGS"));
+        assertTrue(result.get().renderedMessage().contains("CUSTOMER_ORDERS"));
     }
 
     @Test
@@ -476,9 +476,9 @@ class PerformanceExecutorTest {
             false
         );
         SlowQuery slowQuery = SlowQuery.builder()
-            .queryText("SELECT * FROM USER_BOOKINGS WHERE hotel_id = ? ORDER BY created_at DESC")
-            .sampleQuery("SELECT * FROM USER_BOOKINGS WHERE hotel_id = 42 ORDER BY created_at DESC")
-            .normalizedQuery("select * from user_bookings where hotel_id = ? order by created_at desc")
+            .queryText("SELECT * FROM CUSTOMER_ORDERS WHERE customer_id = ? ORDER BY created_at DESC")
+            .sampleQuery("SELECT * FROM CUSTOMER_ORDERS WHERE customer_id = 42 ORDER BY created_at DESC")
+            .normalizedQuery("select * from customer_orders where customer_id = ? order by created_at desc")
             .build();
         SlowQueryAnalysis analysis = new SlowQueryAnalysis();
         analysis.setTopSlowQueries(List.of(slowQuery));
@@ -500,8 +500,8 @@ class PerformanceExecutorTest {
         );
 
         assertTrue(result.isPresent());
-        assertEquals("SELECT * FROM USER_BOOKINGS WHERE hotel_id = 42 ORDER BY created_at DESC", result.get().answerContract().executedSql());
-        assertEquals("SELECT * FROM USER_BOOKINGS WHERE hotel_id = 42 ORDER BY created_at DESC", result.get().evidence().sourceQuery());
+        assertEquals("SELECT * FROM CUSTOMER_ORDERS WHERE customer_id = 42 ORDER BY created_at DESC", result.get().answerContract().executedSql());
+        assertEquals("SELECT * FROM CUSTOMER_ORDERS WHERE customer_id = 42 ORDER BY created_at DESC", result.get().evidence().sourceQuery());
     }
 
     @Test
@@ -537,7 +537,7 @@ class PerformanceExecutorTest {
                 .topQueries("""
                     [
                       {"queryText":"INSERT INTO revenue_by_booking_source_aggregation VALUES (...)","totalTime":3528254738.02,"avgTime":5.59,"callCount":630684769},
-                      {"queryText":"SELECT * FROM USER_BOOKINGS WHERE hotel_id = ?","totalTime":764661036.81,"avgTime":209.18,"callCount":3655480}
+                      {"queryText":"SELECT * FROM CUSTOMER_ORDERS WHERE customer_id = ?","totalTime":764661036.81,"avgTime":209.18,"callCount":3655480}
                     ]
                     """)
                 .build());
@@ -571,15 +571,15 @@ class PerformanceExecutorTest {
             true,
             false
         );
-        String digestSql = "SELECT * FROM USER_BOOKINGS WHERE hotel_id = ? ORDER BY created_at DESC";
-        String sampleSql = "SELECT * FROM USER_BOOKINGS WHERE hotel_id = 42 ORDER BY created_at DESC";
+        String digestSql = "SELECT * FROM CUSTOMER_ORDERS WHERE customer_id = ? ORDER BY created_at DESC";
+        String sampleSql = "SELECT * FROM CUSTOMER_ORDERS WHERE customer_id = 42 ORDER BY created_at DESC";
         ResolvedConversationContext context = new ResolvedConversationContext(
             "ctx-1",
             "BRAIN_METADATA",
             "COMPLETED",
             "what are the top 3 slow queries?",
             "Previous answer ranked the slow queries.",
-            Map.of("tables", List.of("USER_BOOKINGS")),
+            Map.of("tables", List.of("CUSTOMER_ORDERS")),
             List.of(),
             Map.of(),
             digestSql,
@@ -589,7 +589,7 @@ class PerformanceExecutorTest {
         SlowQuery slowQuery = SlowQuery.builder()
             .queryText(digestSql)
             .sampleQuery(sampleSql)
-            .normalizedQuery("select * from user_bookings where hotel_id = ? order by created_at desc")
+            .normalizedQuery("select * from customer_orders where customer_id = ? order by created_at desc")
             .rowsExamined(75299861L)
             .rowsSent(20885L)
             .build();
@@ -675,7 +675,7 @@ class PerformanceExecutorTest {
             true,
             false
         );
-        String sql = "SELECT * FROM CM_LOGS_NEW WHERE hotel_id = 42 ORDER BY update_time DESC";
+        String sql = "SELECT * FROM CM_LOGS_NEW WHERE customer_id = 42 ORDER BY update_time DESC";
         ResolvedConversationContext context = new ResolvedConversationContext(
             "ctx-1",
             "BRAIN_METADATA",
@@ -696,7 +696,7 @@ class PerformanceExecutorTest {
             .rowsSent(20885L)
             .hasIndex(false)
             .affectedTables(List.of("CM_LOGS_NEW"))
-            .suggestions(List.of("Add an index that supports hotel_id and the update_time ordering."))
+            .suggestions(List.of("Add an index that supports customer_id and the update_time ordering."))
             .build();
         SlowQueryAnalysis analysis = new SlowQueryAnalysis();
         analysis.setTopSlowQueries(List.of(matchedSlowQuery));
@@ -739,14 +739,14 @@ class PerformanceExecutorTest {
             false
         );
         SlowQuery first = SlowQuery.builder()
-            .queryText("SELECT * FROM USER_BOOKINGS WHERE hotel_id = 42 ORDER BY created_at DESC")
-            .normalizedQuery("select * from user_bookings where hotel_id = ? order by created_at desc")
+            .queryText("SELECT * FROM CUSTOMER_ORDERS WHERE customer_id = 42 ORDER BY created_at DESC")
+            .normalizedQuery("select * from customer_orders where customer_id = ? order by created_at desc")
             .avgExecutionTimeMs(123250.0)
             .rowsExamined(75299861L)
             .rowsSent(20885L)
             .build();
         SlowQuery second = SlowQuery.builder()
-            .queryText("SELECT payment_type, SUM(td_amount) FROM ACCOUNT_LEDGER GROUP BY payment_type")
+            .queryText("SELECT payment_type, SUM(td_amount) FROM PAYMENT_LEDGER GROUP BY payment_type")
             .normalizedQuery("select payment_type, sum(td_amount) from account_ledger group by payment_type")
             .avgExecutionTimeMs(33110.0)
             .rowsExamined(2L)
@@ -773,8 +773,8 @@ class PerformanceExecutorTest {
         );
 
         assertTrue(result.isPresent());
-        assertEquals("SELECT * FROM USER_BOOKINGS WHERE hotel_id = 42 ORDER BY created_at DESC", result.get().answerContract().executedSql());
-        assertEquals("SELECT * FROM USER_BOOKINGS WHERE hotel_id = 42 ORDER BY created_at DESC", result.get().evidence().sourceQuery());
+        assertEquals("SELECT * FROM CUSTOMER_ORDERS WHERE customer_id = 42 ORDER BY created_at DESC", result.get().answerContract().executedSql());
+        assertEquals("SELECT * FROM CUSTOMER_ORDERS WHERE customer_id = 42 ORDER BY created_at DESC", result.get().evidence().sourceQuery());
         assertTrue(result.get().renderedMessage().contains("Top 2 slow queries right now"));
     }
 
@@ -794,8 +794,8 @@ class PerformanceExecutorTest {
         when(keyColumnAnalysisRepository.findByConnectionIdOrderByImportanceScoreDesc("conn-1"))
             .thenReturn(List.of(KeyColumnAnalysis.builder()
                 .connectionId("conn-1")
-                .tableName("USER_BOOKINGS")
-                .columnName("hotel_id")
+                .tableName("CUSTOMER_ORDERS")
+                .columnName("customer_id")
                 .importanceScore(BigDecimal.valueOf(95))
                 .enhancedImportanceScore(BigDecimal.valueOf(122))
                 .joinCount(94)
@@ -810,13 +810,13 @@ class PerformanceExecutorTest {
         when(columnAntiPatternRepository.findByConnectionIdAndStatusOrderBySeverityDescDetectedAtDesc("conn-1", ColumnAntiPattern.Status.ACTIVE))
             .thenReturn(List.of(ColumnAntiPattern.builder()
                 .connectionId("conn-1")
-                .tableName("USER_BOOKINGS")
-                .columnName("hotel_id")
+                .tableName("CUSTOMER_ORDERS")
+                .columnName("customer_id")
                 .patternType("UNINDEXED_FILTER")
                 .severity(ColumnAntiPattern.Severity.CRITICAL)
                 .title("Unindexed filter column")
-                .description("hotel_id appears in high-pressure predicates.")
-                .recommendation("Create or validate a selective index on USER_BOOKINGS.hotel_id.")
+                .description("customer_id appears in high-pressure predicates.")
+                .recommendation("Create or validate a selective index on CUSTOMER_ORDERS.customer_id.")
                 .detectedAt(LocalDateTime.now())
                 .createdAt(LocalDateTime.now())
                 .build()));
@@ -829,9 +829,9 @@ class PerformanceExecutorTest {
             .category(PerformanceAction.ActionCategory.INDEX)
             .source(PerformanceAction.ActionSource.KEY_COLUMN_ANALYSIS)
             .status(PerformanceAction.ActionStatus.PENDING)
-            .title("Add index for USER_BOOKINGS.hotel_id")
-            .targetObject("USER_BOOKINGS")
-            .targetSecondary("hotel_id")
+            .title("Add index for CUSTOMER_ORDERS.customer_id")
+            .targetObject("CUSTOMER_ORDERS")
+            .targetSecondary("customer_id")
             .impactScore(90)
             .effortScore(15)
             .roi(600.0)
@@ -862,7 +862,7 @@ class PerformanceExecutorTest {
         );
         Optional<VerifiedAnswer> tableScopedVariant = performanceExecutor.execute(
             promptIntent,
-            "what are the most impactful columns in user bookings table?",
+            "what are the most impactful columns in customer orders table?",
             "conn-1",
             null,
             ResolvedConversationContext.empty()
@@ -871,16 +871,16 @@ class PerformanceExecutorTest {
         assertTrue(result.isPresent());
         assertTrue(result.get().verificationReport().passed());
         assertEquals(EvidenceBundle.Source.PERFORMANCE_VAULT, result.get().evidence().source());
-        assertTrue(result.get().renderedMessage().contains("USER_BOOKINGS.hotel_id"));
+        assertTrue(result.get().renderedMessage().contains("CUSTOMER_ORDERS.customer_id"));
         assertTrue(result.get().renderedMessage().contains("key-column"));
         assertTrue(result.get().renderedMessage().contains("anti-pattern"));
         assertTrue(articleVariant.isPresent());
         assertTrue(articleVariant.get().verificationReport().passed());
         assertEquals(result.get().evidence().source(), articleVariant.get().evidence().source());
-        assertTrue(articleVariant.get().renderedMessage().contains("USER_BOOKINGS.hotel_id"));
+        assertTrue(articleVariant.get().renderedMessage().contains("CUSTOMER_ORDERS.customer_id"));
         assertTrue(tableScopedVariant.isPresent());
         assertTrue(tableScopedVariant.get().verificationReport().passed());
-        assertTrue(tableScopedVariant.get().renderedMessage().contains("USER_BOOKINGS.hotel_id"));
-        assertFalse(tableScopedVariant.get().renderedMessage().contains("Table `USER_BOOKINGS` has"));
+        assertTrue(tableScopedVariant.get().renderedMessage().contains("CUSTOMER_ORDERS.customer_id"));
+        assertFalse(tableScopedVariant.get().renderedMessage().contains("Table `CUSTOMER_ORDERS` has"));
     }
 }

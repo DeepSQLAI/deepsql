@@ -58,7 +58,6 @@ All documentation is in the `docs/` folder (see the [Documentation Index](../REA
 - [Setup Guide](../SETUP.md) - Complete installation instructions
 - [Quick Start](../QUICKSTART.md) - Get started quickly
 - [API Client Usage](../API_CLIENT_USAGE.md) - Frontend API integration guide
-- [Feature Implementation Guides](../QUICK_WINS_IMPLEMENTATION_GUIDE.md) - Implementation details
 - [RAG Setup](../RAG_SETUP.md) - Configure RAG for SQL generation
 - [Chat Memory + Guardrails](../CHAT_MEMORY_AND_GUARDRAILS.md) - Architecture and operational flow
 
@@ -100,4 +99,4 @@ npm start
 
 ## License
 
-Private - StayFlexi Internal Tool
+Apache License 2.0 — see [LICENSE](../../LICENSE)

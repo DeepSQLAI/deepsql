@@ -58,9 +58,9 @@ Hard rules:
 
 The dashboard is for a business end user, not a DBA. Nothing technical may appear anywhere the user can see:
 
-- **No table names, column names, or SQL** in titles, labels, descriptions, captions, or tooltips. Not `HOTEL.subscription_start_date`, not `USER_BOOKINGS.booking_made_on`, not `DATE_SUB(CURDATE(), INTERVAL 30 DAY)`, not `WHERE ... IS NOT NULL`.
+- **No table names, column names, or SQL** in titles, labels, descriptions, captions, or tooltips. Not `CUSTOMERS.subscription_start_date`, not `CUSTOMER_ORDERS.booking_made_on`, not `DATE_SUB(CURDATE(), INTERVAL 30 DAY)`, not `WHERE ... IS NOT NULL`.
 - **No connection id / UUID**, no "read-only", no "grounded on", no "cohort source", no schema/database jargon.
-- The header description explains what the dashboard shows in **plain business language** ("Daily new properties and booking volume, and your busiest hotels"), never how it's computed.
+- The header description explains what the dashboard shows in **plain business language** ("Daily new properties and booking volume, and your busiest customers"), never how it's computed.
 - KPI labels are business terms ("New properties", "Bookings", "Avg bookings/day"), with an optional short plain-English sub-line ("in the selected period") — never a column reference.
 
 Keep all the schema/SQL reasoning to yourself; the user sees only clean business metrics.

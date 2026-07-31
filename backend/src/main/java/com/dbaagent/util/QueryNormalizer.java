@@ -40,7 +40,7 @@ public class QueryNormalizer {
      * Sanitize query text by removing common prefixes like "use database;", "set timestamp=?;", etc.
      * Returns only the actual DML/DDL statement (SELECT, INSERT, UPDATE, DELETE, etc.)
      *
-     * Example: "use idb_database; set timestamp=123; SELECT * FROM users" -> "SELECT * FROM users"
+     * Example: "use analytics_db; set timestamp=123; SELECT * FROM users" -> "SELECT * FROM users"
      */
     public static String sanitize(String query) {
         if (query == null || query.trim().isEmpty()) {

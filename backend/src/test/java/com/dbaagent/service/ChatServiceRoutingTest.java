@@ -272,10 +272,10 @@ class ChatServiceRoutingTest {
         TableMetadata bookings = new TableMetadata("bookings", null, "table", 12500L, 0L, List.of(
             new ColumnMetadata("booking_id", "bigint", null, false, true, null, 1)
         ), List.of());
-        TableMetadata hotels = new TableMetadata("hotels", null, "table", 150L, 0L, List.of(
-            new ColumnMetadata("hotel_id", "bigint", null, false, true, null, 1)
+        TableMetadata customers = new TableMetadata("customers", null, "table", 150L, 0L, List.of(
+            new ColumnMetadata("customer_id", "bigint", null, false, true, null, 1)
         ), List.of());
-        schema.setTables(List.of(orders, bookings, hotels));
+        schema.setTables(List.of(orders, bookings, customers));
 
         when(schemaScannerService.scanSchema("conn-1")).thenReturn(schema);
         lenient().when(schemaClassificationService.getLatestClassification("conn-1")).thenReturn(java.util.Optional.of(
@@ -289,7 +289,7 @@ class ChatServiceRoutingTest {
         lenient().when(tableClassificationRepository.findLatestByConnectionIdOrderByTableNameAsc("conn-1")).thenReturn(List.of(
             TableClassification.builder().connectionId("conn-1").tableName("orders").tableRole("FACT").build(),
             TableClassification.builder().connectionId("conn-1").tableName("bookings").tableRole("FACT").build(),
-            TableClassification.builder().connectionId("conn-1").tableName("hotels").tableRole("DIMENSION").build()
+            TableClassification.builder().connectionId("conn-1").tableName("customers").tableRole("DIMENSION").build()
         ));
         AgentDecision decision = new AgentDecision(true, AgentIntent.METADATA_ANALYSIS, "CLASSIFICATION");
         AgentExecutionResult agentResult = new AgentExecutionResult(
@@ -320,7 +320,7 @@ class ChatServiceRoutingTest {
         assertEquals("unified", response.getMode());
         assertTrue(response.getMessage().contains("`bookings`"));
         assertTrue(response.getMessage().contains("`orders`"));
-        assertFalse(response.getMessage().contains("`hotels`"));
+        assertFalse(response.getMessage().contains("`customers`"));
 
         verify(schemaScannerService).scanSchema("conn-1");
         verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("what are the largest fact tables?"), eq("what are the largest fact tables?"), eq("chat-1"), anyList(), any(), any(), eq(schema), eq(decision), any(), any());
@@ -383,7 +383,7 @@ class ChatServiceRoutingTest {
         schema.setDatabaseName("analytics");
         schema.setDbType("mysql");
         schema.setTables(List.of(
-            new TableMetadata("USER_CANCELLATIONS", null, "table", 1399701L, 0L, List.of(
+            new TableMetadata("ORDER_CANCELLATIONS", null, "table", 1399701L, 0L, List.of(
                 new ColumnMetadata("amount_breakdown", "json", null, true, false, null, 1),
                 new ColumnMetadata("cancel_date", "datetime", null, true, false, null, 2),
                 new ColumnMetadata("cancel_by", "varchar", 128L, true, false, null, 3)
@@ -395,7 +395,7 @@ class ChatServiceRoutingTest {
         AgentExecutionResult agentResult = new AgentExecutionResult(
             "run-index-live",
             AgentIntent.METADATA_ANALYSIS,
-            "Live advisor index candidates: `USER_CANCELLATIONS` should add `amount_breakdown, cancel_date, cancel_by`. CREATE INDEX idx_user_cancellations_amount_breakdown_cancel_date_cancel_by ON USER_CANCELLATIONS(amount_breakdown, cancel_date, cancel_by)",
+            "Live advisor index candidates: `ORDER_CANCELLATIONS` should add `amount_breakdown, cancel_date, cancel_by`. CREATE INDEX idx_user_cancellations_amount_breakdown_cancel_date_cancel_by ON ORDER_CANCELLATIONS(amount_breakdown, cancel_date, cancel_by)",
             null,
             "Goal: Analyze performance metadata",
             List.of(),
@@ -420,7 +420,7 @@ class ChatServiceRoutingTest {
         assertEquals("unified", response.getMode());
         assertTrue(response.getMessage().contains("Live advisor index candidates"));
         assertTrue(response.getMessage().contains("`amount_breakdown, cancel_date, cancel_by`"));
-        assertTrue(response.getMessage().contains("`USER_CANCELLATIONS`"));
+        assertTrue(response.getMessage().contains("`ORDER_CANCELLATIONS`"));
         assertTrue(response.getMessage().contains("CREATE INDEX idx_user_cancellations_amount_breakdown_cancel_date_cancel_by"));
         assertFalse(response.getToolsUsed().isEmpty());
 
@@ -436,13 +436,13 @@ class ChatServiceRoutingTest {
             "28000"
         );
 
-        when(agentOrchestrator.previewDecision(eq(true), eq("How many active hotels we have?"), any()))
+        when(agentOrchestrator.previewDecision(eq(true), eq("How many active customers we have?"), any()))
             .thenReturn(decision);
         when(agentOrchestrator.execute(
             eq(true),
             eq("conn-1"),
-            eq("How many active hotels we have?"),
-            eq("How many active hotels we have?"),
+            eq("How many active customers we have?"),
+            eq("How many active customers we have?"),
             eq("chat-1"),
             anyList(),
             any(),
@@ -455,7 +455,7 @@ class ChatServiceRoutingTest {
 
         ChatResponse response = chatService.processMessage(
             "conn-1",
-            "How many active hotels we have?",
+            "How many active customers we have?",
             null,
             null,
             null,
@@ -470,7 +470,7 @@ class ChatServiceRoutingTest {
             response.getMessage()
         );
 
-        verify(chatHistoryService).addMessage(eq("chat-1"), any(), eq("How many active hotels we have?"), isNull());
+        verify(chatHistoryService).addMessage(eq("chat-1"), any(), eq("How many active customers we have?"), isNull());
         verify(chatHistoryService).addMessage(
             eq("chat-1"),
             any(),
@@ -486,7 +486,7 @@ class ChatServiceRoutingTest {
         schema.setDatabaseName("analytics");
         schema.setDbType("mysql");
 
-        TableMetadata hotel = new TableMetadata("HOTEL", null, "table", 1250L, 0L, List.of(
+        TableMetadata customer = new TableMetadata("CUSTOMERS", null, "table", 1250L, 0L, List.of(
             new ColumnMetadata("id", "bigint", null, false, true, null, 1),
             new ColumnMetadata("name", "varchar", 255L, false, false, null, 2),
             new ColumnMetadata("country", "varchar", 100L, true, false, null, 3)
@@ -494,19 +494,19 @@ class ChatServiceRoutingTest {
         TableMetadata airbnbListingHotel = new TableMetadata("airbnb_listing_hotel", null, "table", 45L, 0L, List.of(
             new ColumnMetadata("id", "bigint", null, false, true, null, 1)
         ), List.of());
-        schema.setTables(List.of(hotel, airbnbListingHotel));
+        schema.setTables(List.of(customer, airbnbListingHotel));
 
         when(schemaScannerService.scanSchema("conn-1")).thenReturn(schema);
         stubAgenticMetadataAnswer(
-            "How many columns we have in HOTEL table?",
+            "How many columns we have in CUSTOMERS table?",
             schema,
-            "Connection `analytics` table `HOTEL` has **3 columns**.",
-            "run-hotel-column-count"
+            "Connection `analytics` table `CUSTOMERS` has **3 columns**.",
+            "run-customer-column-count"
         );
 
         ChatResponse response = chatService.processMessage(
             "conn-1",
-            "How many columns we have in HOTEL table?",
+            "How many columns we have in CUSTOMERS table?",
             null,
             null,
             null,
@@ -516,12 +516,12 @@ class ChatServiceRoutingTest {
 
         assertTrue(response.isSuccess());
         assertEquals("unified", response.getMode());
-        assertTrue(response.getMessage().contains("`HOTEL`"));
+        assertTrue(response.getMessage().contains("`CUSTOMERS`"));
         assertTrue(response.getMessage().contains("**3 columns**"));
         assertFalse(response.getMessage().contains("airbnb_listing_hotel"));
 
         verify(schemaScannerService).scanSchema("conn-1");
-        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("How many columns we have in HOTEL table?"), eq("How many columns we have in HOTEL table?"), eq("chat-1"), anyList(), any(), any(), eq(schema), any(), any(), any());
+        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("How many columns we have in CUSTOMERS table?"), eq("How many columns we have in CUSTOMERS table?"), eq("chat-1"), anyList(), any(), any(), eq(schema), any(), any(), any());
         verifyNoInteractions(queryExecutorService, queryGenerationPipeline, chatClient);
     }
 
@@ -531,7 +531,7 @@ class ChatServiceRoutingTest {
         schema.setDatabaseName("analytics");
         schema.setDbType("mysql");
         schema.setTables(List.of(
-            new TableMetadata("HOTEL", null, "table", 1250L, 0L, List.of(
+            new TableMetadata("CUSTOMERS", null, "table", 1250L, 0L, List.of(
                 new ColumnMetadata("id", "bigint", null, false, true, null, 1),
                 new ColumnMetadata("name", "varchar", 255L, false, false, null, 2)
             ), List.of())
@@ -541,15 +541,15 @@ class ChatServiceRoutingTest {
         run.setId("run-unified-metadata");
         when(schemaScannerService.scanSchema("conn-1")).thenReturn(schema);
         stubAgenticMetadataAnswer(
-            "What columns are there in HOTEL table?",
+            "What columns are there in CUSTOMERS table?",
             schema,
-            "Table `HOTEL` has **2 columns**.\n\nColumns:\n- `id` — `bigint`; primary key; not null\n- `name` — `varchar`; not null",
+            "Table `CUSTOMERS` has **2 columns**.\n\nColumns:\n- `id` — `bigint`; primary key; not null\n- `name` — `varchar`; not null",
             "run-unified-metadata"
         );
 
         ChatResponse response = chatService.processMessage(
             "conn-1",
-            "What columns are there in HOTEL table?",
+            "What columns are there in CUSTOMERS table?",
             null,
             null,
             null,
@@ -562,7 +562,7 @@ class ChatServiceRoutingTest {
         assertEquals("run-unified-metadata", response.getAgentRunId());
         assertFalse(response.getToolsUsed().isEmpty());
 
-        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("What columns are there in HOTEL table?"), eq("What columns are there in HOTEL table?"), eq("chat-1"), anyList(), any(), any(), eq(schema), any(), any(), any());
+        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("What columns are there in CUSTOMERS table?"), eq("What columns are there in CUSTOMERS table?"), eq("chat-1"), anyList(), any(), any(), eq(schema), any(), any(), any());
     }
 
     @Test
@@ -571,24 +571,24 @@ class ChatServiceRoutingTest {
         schema.setDatabaseName("analytics");
         schema.setDbType("mysql");
 
-        TableMetadata hotel = new TableMetadata("HOTEL", null, "table", 1250L, 0L, List.of(
+        TableMetadata customer = new TableMetadata("CUSTOMERS", null, "table", 1250L, 0L, List.of(
             new ColumnMetadata("id", "bigint", null, false, true, null, 1),
             new ColumnMetadata("name", "varchar", 255L, false, false, null, 2),
             new ColumnMetadata("country", "varchar", 100L, true, false, null, 3)
         ), List.of());
-        schema.setTables(List.of(hotel));
+        schema.setTables(List.of(customer));
 
         when(schemaScannerService.scanSchema("conn-1")).thenReturn(schema);
         stubAgenticMetadataAnswer(
-            "What columns are there in HOTEL table?",
+            "What columns are there in CUSTOMERS table?",
             schema,
-            "Table `HOTEL` has **3 columns**.\n\nColumns:\n- `id` — `bigint`; primary key; not null\n- `name` — `varchar`; not null\n- `country` — `varchar`; nullable",
-            "run-hotel-columns"
+            "Table `CUSTOMERS` has **3 columns**.\n\nColumns:\n- `id` — `bigint`; primary key; not null\n- `name` — `varchar`; not null\n- `country` — `varchar`; nullable",
+            "run-customer-columns"
         );
 
         ChatResponse response = chatService.processMessage(
             "conn-1",
-            "What columns are there in HOTEL table?",
+            "What columns are there in CUSTOMERS table?",
             null,
             null,
             null,
@@ -605,7 +605,7 @@ class ChatServiceRoutingTest {
         assertFalse(response.getMessage().contains("| Column | Type | Attributes |"));
 
         verify(schemaScannerService).scanSchema("conn-1");
-        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("What columns are there in HOTEL table?"), eq("What columns are there in HOTEL table?"), eq("chat-1"), anyList(), any(), any(), eq(schema), any(), any(), any());
+        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("What columns are there in CUSTOMERS table?"), eq("What columns are there in CUSTOMERS table?"), eq("chat-1"), anyList(), any(), any(), eq(schema), any(), any(), any());
         verifyNoInteractions(queryExecutorService, queryGenerationPipeline, chatClient);
     }
 
@@ -667,7 +667,7 @@ class ChatServiceRoutingTest {
         TableMetadata orderTable = new TableMetadata("order_table", null, "table", 120L, 0L, List.of(
             new ColumnMetadata("id", "bigint", null, false, true, null, 1)
         ), List.of(
-            new IndexMetadata("idx_order_hotel", "order_table", false, List.of("hotel_id"), "btree")
+            new IndexMetadata("idx_order_hotel", "order_table", false, List.of("customer_id"), "btree")
         ));
         schema.setTables(List.of(accounts, orderTable));
 
@@ -758,10 +758,10 @@ class ChatServiceRoutingTest {
         schema.setDatabaseName("analytics");
         schema.setDbType("mysql");
 
-        TableMetadata roomReservations = new TableMetadata("ROOM_RESERVATIONS", null, "table", 5000L, 0L, List.of(
+        TableMetadata roomReservations = new TableMetadata("ORDER_LINE_ITEMS", null, "table", 5000L, 0L, List.of(
             new ColumnMetadata("id", "bigint", null, false, true, null, 1),
             new ColumnMetadata("booking_id", "bigint", null, false, false, null, 2),
-            new ColumnMetadata("hotel_id", "bigint", null, false, false, null, 3),
+            new ColumnMetadata("customer_id", "bigint", null, false, false, null, 3),
             new ColumnMetadata("rate_plan_id", "bigint", null, true, false, null, 4),
             new ColumnMetadata("reservation_count", "int", null, true, false, null, 5)
         ), List.of());
@@ -771,7 +771,7 @@ class ChatServiceRoutingTest {
         ), List.of());
         TableMetadata orderTable = new TableMetadata("order_table", null, "table", 100L, 0L, List.of(
             new ColumnMetadata("id", "bigint", null, false, true, null, 1),
-            new ColumnMetadata("hotel_id", "bigint", null, false, false, null, 2)
+            new ColumnMetadata("customer_id", "bigint", null, false, false, null, 2)
         ), List.of());
         TableMetadata nrReservation = new TableMetadata("nr_reservation", null, "table", 100L, 0L, List.of(
             new ColumnMetadata("id", "bigint", null, false, true, null, 1),
@@ -779,22 +779,22 @@ class ChatServiceRoutingTest {
         ), List.of());
         schema.setTables(List.of(roomReservations, masterLoginAccessKeys, orderTable, nrReservation));
         schema.setRelationships(List.of(
-            new RelationshipMetadata("fk_room_booking", "ROOM_RESERVATIONS", "booking_id", "BOOKINGS", "id", "many-to-one", "fk_room_booking"),
-            new RelationshipMetadata("fk_room_hotel", "ROOM_RESERVATIONS", "hotel_id", "HOTEL", "id", "many-to-one", "fk_room_hotel"),
-            new RelationshipMetadata("fk_room_rate_plan", "ROOM_RESERVATIONS", "rate_plan_id", "RATE_PLAN", "id", "many-to-one", "fk_room_rate_plan")
+            new RelationshipMetadata("fk_room_booking", "ORDER_LINE_ITEMS", "booking_id", "BOOKINGS", "id", "many-to-one", "fk_room_booking"),
+            new RelationshipMetadata("fk_room_hotel", "ORDER_LINE_ITEMS", "customer_id", "CUSTOMERS", "id", "many-to-one", "fk_room_hotel"),
+            new RelationshipMetadata("fk_room_rate_plan", "ORDER_LINE_ITEMS", "rate_plan_id", "RATE_PLAN", "id", "many-to-one", "fk_room_rate_plan")
         ));
 
         when(schemaScannerService.scanSchema("conn-1")).thenReturn(schema);
         stubAgenticMetadataAnswer(
-            "Show me all key columns in ROOM_RESERVATIONS table",
+            "Show me all key columns in ORDER_LINE_ITEMS table",
             schema,
-            "The most relevant key columns in `ROOM_RESERVATIONS` are:\n- `id` — Primary key\n- `booking_id` — References BOOKINGS.id\n- `hotel_id` — References HOTEL.id\n- `rate_plan_id` — References RATE_PLAN.id\n- `room_type` — Common grouping/filter column",
+            "The most relevant key columns in `ORDER_LINE_ITEMS` are:\n- `id` — Primary key\n- `booking_id` — References BOOKINGS.id\n- `customer_id` — References CUSTOMERS.id\n- `rate_plan_id` — References RATE_PLAN.id\n- `room_type` — Common grouping/filter column",
             "run-room-reservation-keys"
         );
 
         ChatResponse response = chatService.processMessage(
             "conn-1",
-            "Show me all key columns in ROOM_RESERVATIONS table",
+            "Show me all key columns in ORDER_LINE_ITEMS table",
             null,
             null,
             null,
@@ -804,10 +804,10 @@ class ChatServiceRoutingTest {
 
         assertTrue(response.isSuccess());
         assertEquals("unified", response.getMode());
-        assertTrue(response.getMessage().contains("`ROOM_RESERVATIONS`"));
+        assertTrue(response.getMessage().contains("`ORDER_LINE_ITEMS`"));
         assertTrue(response.getMessage().contains("`id`"));
         assertTrue(response.getMessage().contains("`booking_id`"));
-        assertTrue(response.getMessage().contains("`hotel_id`"));
+        assertTrue(response.getMessage().contains("`customer_id`"));
         assertTrue(response.getMessage().contains("`rate_plan_id`"));
         assertTrue(response.getMessage().contains("`room_type`"));
         assertFalse(response.getMessage().contains("MASTER_LOGIN_ACCESS_KEYS"));
@@ -815,7 +815,7 @@ class ChatServiceRoutingTest {
         assertFalse(response.getMessage().contains("nr_reservation"));
 
         verify(schemaScannerService).scanSchema("conn-1");
-        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("Show me all key columns in ROOM_RESERVATIONS table"), eq("Show me all key columns in ROOM_RESERVATIONS table"), eq("chat-1"), anyList(), any(), any(), eq(schema), any(), any(), any());
+        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("Show me all key columns in ORDER_LINE_ITEMS table"), eq("Show me all key columns in ORDER_LINE_ITEMS table"), eq("chat-1"), anyList(), any(), any(), eq(schema), any(), any(), any());
         verifyNoInteractions(queryExecutorService, queryGenerationPipeline, chatClient);
     }
 
@@ -935,7 +935,7 @@ class ChatServiceRoutingTest {
         schema.setDatabaseName("analytics");
         schema.setDbType("mysql");
         schema.setTables(List.of(
-            new TableMetadata("USER_BOOKINGS", null, "table", 2500L, 0L, List.of(), List.of()),
+            new TableMetadata("CUSTOMER_ORDERS", null, "table", 2500L, 0L, List.of(), List.of()),
             new TableMetadata("PRICE_BREAKDOWN", null, "table", 6400L, 0L, List.of(), List.of())
         ));
 
@@ -944,9 +944,9 @@ class ChatServiceRoutingTest {
         AgentExecutionResult agentResult = new AgentExecutionResult(
             "run-join-columns",
             AgentIntent.METADATA_ANALYSIS,
-            "Verified direct relationship metadata between `USER_BOOKINGS` and `PRICE_BREAKDOWN`: `USER_BOOKINGS.id` -> `PRICE_BREAKDOWN.booking_id`.",
+            "Verified direct relationship metadata between `CUSTOMER_ORDERS` and `PRICE_BREAKDOWN`: `CUSTOMER_ORDERS.id` -> `PRICE_BREAKDOWN.booking_id`.",
             null,
-            "Goal: Analyze relationship metadata for USER_BOOKINGS, PRICE_BREAKDOWN",
+            "Goal: Analyze relationship metadata for CUSTOMER_ORDERS, PRICE_BREAKDOWN",
             List.of("SELECT * FROM information_schema.KEY_COLUMN_USAGE"),
             List.of("metadata_context_resolution_tool", "metadata_evidence_lookup_tool", "live_metadata_query_tool", "metadata_result_synthesis_tool"),
             0.92
@@ -970,7 +970,7 @@ class ChatServiceRoutingTest {
         assertEquals("unified", response.getMode());
         assertNull(response.getSql());
         assertEquals(List.of("SELECT * FROM information_schema.KEY_COLUMN_USAGE"), response.getExecutedQueries());
-        verify(chatHistoryService).addMessage(eq("chat-1"), any(), contains("USER_BOOKINGS"), isNull(), any());
+        verify(chatHistoryService).addMessage(eq("chat-1"), any(), contains("CUSTOMER_ORDERS"), isNull(), any());
     }
 
     @Test
@@ -980,7 +980,7 @@ class ChatServiceRoutingTest {
         schema.setDbType("mysql");
 
         TableMetadata guestMapping = new TableMetadata();
-        guestMapping.setName("GUEST_MAPPING");
+        guestMapping.setName("CONTACT_MAPPING");
         guestMapping.setColumns(List.of(
             new ColumnMetadata("id", "bigint", null, false, true, null, 1),
             new ColumnMetadata("booking_id", "varchar", 50L, false, false, null, 2)
@@ -992,7 +992,7 @@ class ChatServiceRoutingTest {
         AgentExecutionResult agentResult = new AgentExecutionResult(
             "run-guest-mapping-keys",
             AgentIntent.METADATA_ANALYSIS,
-            "Cached schema metadata identifies inferred keys for `GUEST_MAPPING`: `booking_id`, `room_id`.",
+            "Cached schema metadata identifies inferred keys for `CONTACT_MAPPING`: `booking_id`, `room_id`.",
             null,
             "Goal: Analyze key column metadata",
             List.of(),
@@ -1014,7 +1014,7 @@ class ChatServiceRoutingTest {
 
         assertNotNull(tokens);
         assertEquals(1, tokens.size());
-        assertTrue(tokens.get(0).contains("GUEST_MAPPING"));
+        assertTrue(tokens.get(0).contains("CONTACT_MAPPING"));
         assertTrue(tokens.get(0).contains("booking_id"));
         assertTrue(tokens.get(0).contains("room_id"));
 
@@ -1093,37 +1093,37 @@ class ChatServiceRoutingTest {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDatabaseName("analytics");
         schema.setDbType("mysql");
-        schema.setTables(List.of(new TableMetadata("USER_BOOKINGS", null, "table", null, null, List.of(), List.of())));
+        schema.setTables(List.of(new TableMetadata("CUSTOMER_ORDERS", null, "table", null, null, List.of(), List.of())));
 
         AgentDecision decision = new AgentDecision(true, AgentIntent.UNIVERSAL_CHAT, "BI_QUERY");
         QueryResult primaryResult = new QueryResult(
-            List.of("hotel_id", "bookings_count"),
+            List.of("customer_id", "bookings_count"),
             List.of(List.of("34431", 25)),
             1,
             null,
             false,
             20L,
-            "SELECT hotel_id, COUNT(*) FROM USER_BOOKINGS"
+            "SELECT customer_id, COUNT(*) FROM CUSTOMER_ORDERS"
         );
         AgentExecutionResult agentResult = new AgentExecutionResult(
             "run-universal",
             AgentIntent.UNIVERSAL_CHAT,
-            "Top hotel in the last 3 days is `34431` with 25 bookings.",
+            "Top customer in the last 3 days is `34431` with 25 bookings.",
             primaryResult,
             "Goal: Answer the user's data question with deterministic schema reasoning and safe SQL execution",
-            List.of("SELECT hotel_id, COUNT(*) FROM USER_BOOKINGS"),
+            List.of("SELECT customer_id, COUNT(*) FROM CUSTOMER_ORDERS"),
             List.of("universal_chat_tool"),
             0.94
         );
 
         when(schemaScannerService.scanSchema("conn-1")).thenReturn(schema);
-        when(agentOrchestrator.previewDecision(eq(true), contains("top 5 hotels"), any())).thenReturn(decision);
-        when(agentOrchestrator.execute(eq(true), eq("conn-1"), contains("top 5 hotels"), contains("top 5 hotels"), eq("chat-1"), anyList(), any(), any(), eq(schema), eq(decision), any(), any()))
+        when(agentOrchestrator.previewDecision(eq(true), contains("top 5 customers"), any())).thenReturn(decision);
+        when(agentOrchestrator.execute(eq(true), eq("conn-1"), contains("top 5 customers"), contains("top 5 customers"), eq("chat-1"), anyList(), any(), any(), eq(schema), eq(decision), any(), any()))
             .thenReturn(java.util.Optional.of(agentResult));
 
         ChatResponse response = chatService.processMessage(
             "conn-1",
-            "give me top 5 hotels by bookings volume in the last 3 days.",
+            "give me top 5 customers by bookings volume in the last 3 days.",
             null,
             null,
             null,
@@ -1134,9 +1134,9 @@ class ChatServiceRoutingTest {
         assertTrue(response.isSuccess());
         assertEquals("unified", response.getMode());
         assertEquals("run-universal", response.getAgentRunId());
-        assertEquals("SELECT hotel_id, COUNT(*) FROM USER_BOOKINGS", response.getSql());
+        assertEquals("SELECT customer_id, COUNT(*) FROM CUSTOMER_ORDERS", response.getSql());
         verify(schemaScannerService).scanSchema("conn-1");
-        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), contains("top 5 hotels"), contains("top 5 hotels"), eq("chat-1"), anyList(), any(), any(), eq(schema), eq(decision), any(), any());
+        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), contains("top 5 customers"), contains("top 5 customers"), eq("chat-1"), anyList(), any(), any(), eq(schema), eq(decision), any(), any());
         verifyNoInteractions(queryExecutorService, queryGenerationPipeline, chatClient);
     }
 
@@ -1152,13 +1152,13 @@ class ChatServiceRoutingTest {
             "SELECT total_mrr"
         );
         QueryResult detailResult = new QueryResult(
-            List.of("hotel_name", "country", "subscription_amount"),
+            List.of("customer_name", "country", "subscription_amount"),
             List.of(List.of("Hotel A", "India", "25000")),
             1,
             null,
             false,
             31L,
-            "SELECT hotel_name, country, subscription_amount"
+            "SELECT customer_name, country, subscription_amount"
         );
         AgentExecutionResult agentResult = new AgentExecutionResult(
             "run-multi",
@@ -1166,7 +1166,7 @@ class ChatServiceRoutingTest {
             "MRR from new properties in the last month is 295,488.81 INR. The property details are listed below.",
             headlineResult,
             "Goal: Answer the user's request with multi-step schema reasoning, safe SQL execution, and stitched coverage of every requested part",
-            List.of("SELECT total_mrr", "SELECT hotel_name, country, subscription_amount"),
+            List.of("SELECT total_mrr", "SELECT customer_name, country, subscription_amount"),
             List.of("context_resolution_tool", "universal_chat_tool", "universal_chat_tool", "result_synthesis_tool"),
             0.94,
             List.of(
@@ -1191,7 +1191,7 @@ class ChatServiceRoutingTest {
                     "COMPLETED",
                     "Hotel A in India has a subscription amount of 25,000.",
                     "Listed the matching property details",
-                    List.of("SELECT hotel_name, country, subscription_amount"),
+                    List.of("SELECT customer_name, country, subscription_amount"),
                     detailResult,
                     Map.of("rowCount", 1),
                     0.92
@@ -1246,14 +1246,14 @@ class ChatServiceRoutingTest {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDatabaseName("analytics");
         schema.setDbType("mysql");
-        schema.setTables(List.of(new TableMetadata("GUEST_MAPPING", null, "table", null, null, List.of(), List.of())));
+        schema.setTables(List.of(new TableMetadata("CONTACT_MAPPING", null, "table", null, null, List.of(), List.of())));
 
         ChatMessage priorUser = new ChatMessage();
         priorUser.setRole(ChatMessage.MessageRole.USER);
         priorUser.setContent("what are all the inferred keys in guest mapping table?");
         ChatMessage priorAssistant = new ChatMessage();
         priorAssistant.setRole(ChatMessage.MessageRole.ASSISTANT);
-        priorAssistant.setContent("guest_mapping.booking_id, guest_mapping.room_id, guest_mapping.reservation_id");
+        priorAssistant.setContent("contact_mapping.booking_id, contact_mapping.room_id, contact_mapping.reservation_id");
 
         when(chatHistoryService.getChatMessages("chat-1")).thenReturn(List.of(priorUser, priorAssistant));
         ResolvedConversationContext matchedContext = new ResolvedConversationContext(
@@ -1261,9 +1261,9 @@ class ChatServiceRoutingTest {
             "BRAIN_METADATA",
             "VERIFIED",
             priorUser.getContent(),
-            "Prior thread focused on inferred keys for GUEST_MAPPING.",
-            Map.of("tableName", "GUEST_MAPPING"),
-            List.of(Map.of("displayLabel", "GUEST_MAPPING", "entityType", "TABLE")),
+            "Prior thread focused on inferred keys for CONTACT_MAPPING.",
+            Map.of("tableName", "CONTACT_MAPPING"),
+            List.of(Map.of("displayLabel", "CONTACT_MAPPING", "entityType", "TABLE")),
             Map.of("keyColumns", List.of("booking_id", "room_id", "reservation_id")),
             null,
             List.of(),
@@ -1274,7 +1274,7 @@ class ChatServiceRoutingTest {
             "ctx-guest-mapping",
             "BRAIN_METADATA",
             "VERIFIED",
-            List.of("GUEST_MAPPING"),
+            List.of("CONTACT_MAPPING"),
             List.of(),
             null,
             null,
@@ -1292,9 +1292,9 @@ class ChatServiceRoutingTest {
         AgentExecutionResult agentResult = new AgentExecutionResult(
             "run-follow-up",
             AgentIntent.METADATA_ANALYSIS,
-            "Based on the prior `GUEST_MAPPING` key list, `booking_id` is the strongest booking join key.",
+            "Based on the prior `CONTACT_MAPPING` key list, `booking_id` is the strongest booking join key.",
             null,
-            "Goal: Analyze key columns metadata for GUEST_MAPPING",
+            "Goal: Analyze key columns metadata for CONTACT_MAPPING",
             List.of(),
             List.of("vault_metadata_lookup_tool"),
             0.9
@@ -1354,16 +1354,16 @@ class ChatServiceRoutingTest {
         schema.setDatabaseName("analytics");
         schema.setDbType("mysql");
         schema.setTables(List.of(
-            new TableMetadata("GUEST_MAPPING", null, "table", null, null, List.of(), List.of()),
-            new TableMetadata("USER_BOOKINGS", null, "table", null, null, List.of(), List.of())
+            new TableMetadata("CONTACT_MAPPING", null, "table", null, null, List.of(), List.of()),
+            new TableMetadata("CUSTOMER_ORDERS", null, "table", null, null, List.of(), List.of())
         ));
 
         ChatMessage priorUser = new ChatMessage();
         priorUser.setRole(ChatMessage.MessageRole.USER);
-        priorUser.setContent("Show guest names and emails from GUEST_MAPPING with their booking amounts for the last 30 days.");
+        priorUser.setContent("Show guest names and emails from CONTACT_MAPPING with their booking amounts for the last 30 days.");
         ChatMessage priorAssistant = new ChatMessage();
         priorAssistant.setRole(ChatMessage.MessageRole.ASSISTANT);
-        priorAssistant.setContent("I used the established USER_BOOKINGS and GUEST_MAPPING join path.");
+        priorAssistant.setContent("I used the established CUSTOMER_ORDERS and CONTACT_MAPPING join path.");
 
         when(chatHistoryService.getChatMessages("chat-1")).thenReturn(List.of(priorUser, priorAssistant));
         ResolvedConversationContext matchedContext = new ResolvedConversationContext(
@@ -1371,11 +1371,11 @@ class ChatServiceRoutingTest {
             "BI_QUERY",
             "VERIFIED",
             priorUser.getContent(),
-            "Prior thread joined USER_BOOKINGS and GUEST_MAPPING for guest booking amounts.",
-            Map.of("tables", List.of("USER_BOOKINGS", "GUEST_MAPPING")),
-            List.of(Map.of("displayLabel", "GUEST_MAPPING", "entityType", "TABLE")),
+            "Prior thread joined CUSTOMER_ORDERS and CONTACT_MAPPING for guest booking amounts.",
+            Map.of("tables", List.of("CUSTOMER_ORDERS", "CONTACT_MAPPING")),
+            List.of(Map.of("displayLabel", "CONTACT_MAPPING", "entityType", "TABLE")),
             Map.of("statusFilter", "ALL"),
-            "SELECT ... FROM USER_BOOKINGS JOIN GUEST_MAPPING ...",
+            "SELECT ... FROM CUSTOMER_ORDERS JOIN CONTACT_MAPPING ...",
             List.of(),
             0.96
         );
@@ -1384,8 +1384,8 @@ class ChatServiceRoutingTest {
             "ctx-guest-bookings",
             "BI_QUERY",
             "VERIFIED",
-            List.of("USER_BOOKINGS", "GUEST_MAPPING"),
-            List.of("USER_BOOKINGS", "GUEST_MAPPING"),
+            List.of("CUSTOMER_ORDERS", "CONTACT_MAPPING"),
+            List.of("CUSTOMER_ORDERS", "CONTACT_MAPPING"),
             null,
             "booking amounts",
             List.of("booking_status = 'CANCELLED'"),
@@ -1405,7 +1405,7 @@ class ChatServiceRoutingTest {
             "I narrowed the prior guest-booking query to cancelled bookings only.",
             null,
             "Goal: Answer the user's data question with deterministic schema reasoning and safe SQL execution",
-            List.of("SELECT ... FROM USER_BOOKINGS JOIN GUEST_MAPPING ... WHERE booking_status = 'CANCELLED'"),
+            List.of("SELECT ... FROM CUSTOMER_ORDERS JOIN CONTACT_MAPPING ... WHERE booking_status = 'CANCELLED'"),
             List.of("universal_chat_tool"),
             0.94
         );
@@ -1469,7 +1469,7 @@ class ChatServiceRoutingTest {
         priorUser.setContent("give me recurring guests in last 7 days");
         ChatMessage priorAssistant = new ChatMessage();
         priorAssistant.setRole(ChatMessage.MessageRole.ASSISTANT);
-        priorAssistant.setContent("I need one clarification before I run SQL safely: which time column should define this window? Likely candidates are INTELL_USERS.date_joined.");
+        priorAssistant.setContent("I need one clarification before I run SQL safely: which time column should define this window? Likely candidates are STAFF_USERS.date_joined.");
 
         when(chatHistoryService.getChatMessages("chat-1")).thenReturn(List.of(priorUser, priorAssistant));
         when(schemaScannerService.scanSchema("conn-1")).thenReturn(schema);

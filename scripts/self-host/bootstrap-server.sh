@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # bootstrap-server.sh — One-time setup for a fresh Linux VM that will run the
-# DeepSQL self-hosted Docker stack (used for the dba-agent.stayflexi.com deployment).
+# DeepSQL self-hosted Docker stack.
 #
 # Run as root or with sudo on the target server:
 #   curl -fsSL https://.../bootstrap-server.sh | sudo bash
@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-DEPLOY_DIR="${DEEPSQL_DEPLOY_DIR:-/opt/dba-agent}"
+DEPLOY_DIR="${DEEPSQL_DEPLOY_DIR:-/opt/deepsql}"
 DEPLOY_USER="${DEEPSQL_DEPLOY_USER:-ubuntu}"
 
 echo "=== DeepSQL server bootstrap ==="
@@ -40,33 +40,25 @@ mkdir -p "$DEPLOY_DIR"
 chown "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR"
 echo "Deploy directory: $DEPLOY_DIR"
 
-# ── Copy stack files if running from the repo ────────────────────────────────
+# ── Seed .env if a checkout is already present ───────────────────────────────
+# The stack is built from source, so $DEPLOY_DIR must hold a full checkout —
+# copying only docker-compose.yml would leave nothing to build.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-if [[ -f "$REPO_ROOT/docker-compose.yml" ]]; then
-  cp "$REPO_ROOT/docker-compose.yml" "$DEPLOY_DIR/docker-compose.yml"
-  cp -r "$REPO_ROOT/docker" "$DEPLOY_DIR/docker"
-  echo "Copied docker-compose.yml and docker/ config to $DEPLOY_DIR."
-fi
-
-# ── Create .env from example if not present ──────────────────────────────────
-if [[ ! -f "$DEPLOY_DIR/.env" ]]; then
-  if [[ -f "$REPO_ROOT/.env.example" ]]; then
-    cp "$REPO_ROOT/.env.example" "$DEPLOY_DIR/.env"
-    chown "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR/.env"
-    echo "Created $DEPLOY_DIR/.env from .env.example."
-    echo ">>> Edit $DEPLOY_DIR/.env and fill in required values before starting."
-  else
-    echo "Warning: .env.example not found. Create $DEPLOY_DIR/.env manually."
-  fi
-else
+if [[ -f "$REPO_ROOT/docker-compose.yml" && ! -f "$DEPLOY_DIR/.env" && -f "$REPO_ROOT/.env.example" ]]; then
+  cp "$REPO_ROOT/.env.example" "$DEPLOY_DIR/.env"
+  chown "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR/.env"
+  echo "Created $DEPLOY_DIR/.env from .env.example."
+elif [[ -f "$DEPLOY_DIR/.env" ]]; then
   echo "$DEPLOY_DIR/.env already exists — not overwritten."
 fi
 
 echo
 echo "=== Bootstrap complete ==="
 echo "Next steps:"
-echo "  1. Edit $DEPLOY_DIR/.env (set DEEPSQL_CHAT_API_KEY, DEEPSQL_EMBEDDING_API_KEY, etc.)"
-echo "  2. Run: cd $DEPLOY_DIR && docker compose pull && docker compose up -d"
-echo "  3. Or trigger the backend-prod-deploy GitHub Actions workflow."
+echo "  1. Put a checkout of the DeepSQL source in $DEPLOY_DIR (git clone), if it is not there already."
+echo "  2. cd $DEPLOY_DIR && cp .env.example .env  (skip if .env was created above)"
+echo "  3. Edit .env — at minimum DEEPSQL_CHAT_PROVIDER, DEEPSQL_CHAT_API_KEY, DEEPSQL_CHAT_ENDPOINT, DEEPSQL_CHAT_MODEL."
+echo "  4. Run: ./scripts/self-host/install.sh"
+echo "     (or: docker compose up -d --build — the first build takes several minutes)"

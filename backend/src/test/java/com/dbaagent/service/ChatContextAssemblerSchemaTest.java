@@ -173,11 +173,11 @@ class ChatContextAssemblerSchemaTest {
     }
 
     @Test
-    void compactView_tokenMatchIncludesUserBookingsForBookingsQuestion() {
+    void compactView_tokenMatchIncludesCustomerOrdersForOrdersQuestion() {
         SchemaMetadata schema = buildSchema(180, 4);
 
         TableMetadata userBookings = new TableMetadata();
-        userBookings.setName("USER_BOOKINGS");
+        userBookings.setName("CUSTOMER_ORDERS");
         userBookings.setColumns(List.of(
             buildColumn("booking_amount"),
             buildColumn("booking_made_on"),
@@ -185,7 +185,7 @@ class ChatContextAssemblerSchemaTest {
         ));
 
         TableMetadata bookingLogs = new TableMetadata();
-        bookingLogs.setName("BOOKING_LOGS");
+        bookingLogs.setName("ORDER_LOGS");
         bookingLogs.setColumns(List.of(
             buildColumn("booking_id"),
             buildColumn("created_at")
@@ -194,10 +194,10 @@ class ChatContextAssemblerSchemaTest {
         schema.getTables().add(userBookings);
         schema.getTables().add(bookingLogs);
 
-        String result = assembler.buildSchemaContext(schema, "what is the volume of bookings in the last 3 days");
+        String result = assembler.buildSchemaContext(schema, "what is the volume of orders in the last 3 days");
 
-        assertTrue(result.contains("USER_BOOKINGS"), "Bookings question should include USER_BOOKINGS in compact schema context");
-        assertTrue(result.contains("booking_amount varchar"), "Selected booking table should include its columns");
+        assertTrue(result.contains("CUSTOMER_ORDERS"), "Orders question should include CUSTOMER_ORDERS in compact schema context");
+        assertTrue(result.contains("booking_amount varchar"), "Selected order table should include its columns");
     }
 
     @Test

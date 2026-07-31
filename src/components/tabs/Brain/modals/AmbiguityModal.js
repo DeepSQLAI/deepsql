@@ -55,7 +55,7 @@ export function AmbiguityModal({
                 <form className={styles.modalBody} onSubmit={handleSubmit}>
                     <div className={styles.docHint}>
                         When a query uses <strong>{ambiguityData?.columnName}</strong> without a table prefix,
-                        pick the canonical table that should be assumed (e.g., <code>HOTEL</code> for <code>hotel_id</code>).
+                        pick the canonical table that should be assumed (e.g., <code>CUSTOMERS</code> for <code>customer_id</code>).
                     </div>
 
                     <div className={styles.ambiguityMeta}>

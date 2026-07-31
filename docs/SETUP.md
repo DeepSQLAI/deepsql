@@ -17,7 +17,7 @@ This guide will help you run the DBA Agent project locally.
 ### 1. Install Frontend Dependencies
 
 ```bash
-cd /Users/venkat/Documents/GitHub/dbaagent
+cd /path/to/deepsql
 npm install
 ```
 
@@ -30,7 +30,7 @@ This will install:
 
 #### Start Vault Database (PostgreSQL)
 ```bash
-cd /Users/venkat/Documents/GitHub/dbaagent
+cd /path/to/deepsql
 docker compose up -d postgres
 ```
 
@@ -88,7 +88,7 @@ Backend will start on: `http://localhost:8080`
 
 #### Terminal 2 - Frontend (Next.js)
 ```bash
-cd /Users/venkat/Documents/GitHub/dbaagent
+cd /path/to/deepsql
 npm run dev
 ```
 

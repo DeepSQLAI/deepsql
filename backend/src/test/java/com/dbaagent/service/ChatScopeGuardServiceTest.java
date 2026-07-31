@@ -13,8 +13,8 @@ class ChatScopeGuardServiceTest {
     @Test
     void allowsRecognizedBiQueries() {
         ChatScopeGuardService.ScopeDecision decision = service.evaluate(
-            "Show revenue by hotel for last week",
-            "Show revenue by hotel for last week",
+            "Show revenue by customer for last week",
+            "Show revenue by customer for last week",
             new ChatQuestionRoutingService.QuestionRoute(
                 ChatQuestionRoutingService.RouteType.BI_QUERY,
                 ChatQuestionRoutingService.BrainTopic.GENERAL

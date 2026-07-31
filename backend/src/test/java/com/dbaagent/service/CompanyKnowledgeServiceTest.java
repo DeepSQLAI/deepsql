@@ -71,12 +71,12 @@ class CompanyKnowledgeServiceTest {
             .title("MRR calculation")
             .entryType(CompanyKnowledgeEntry.EntryType.BUSINESS_RULE)
             .content("""
-                Use HOTEL_PRICING.amount / ACCOUNTS.account_billing_interval_months for MRR.
-                Anchor this to @@HOTEL_PRICING.amount and @@ACCOUNTS.account_billing_interval_months.
+                Use PRODUCT_PRICING.amount / ACCOUNTS.account_billing_interval_months for MRR.
+                Anchor this to @@PRODUCT_PRICING.amount and @@ACCOUNTS.account_billing_interval_months.
                 The plain-text ACCOUNTS.Property_status note should not be treated as an invalid reference.
                 """)
             .linkedTables(List.of("ACCOUNTS"))
-            .linkedColumns(List.of("HOTEL_PRICING.amount", "ACCOUNTS.account_billing_interval_months"))
+            .linkedColumns(List.of("PRODUCT_PRICING.amount", "ACCOUNTS.account_billing_interval_months"))
             .build();
 
         when(companyKnowledgeEntryRepository.findByConnectionIdOrderByRecency("conn-1"))
@@ -88,7 +88,7 @@ class CompanyKnowledgeServiceTest {
         assertThat(entries).singleElement().satisfies(annotated -> {
             assertThat(annotated.getCoverageStatus()).isEqualTo("COMPLETE");
             assertThat(annotated.getJoinCoverageStatus()).isEqualTo("NOT_APPLICABLE");
-            assertThat(annotated.getMentionedColumns()).contains("HOTEL_PRICING.amount", "ACCOUNTS.account_billing_interval_months");
+            assertThat(annotated.getMentionedColumns()).contains("PRODUCT_PRICING.amount", "ACCOUNTS.account_billing_interval_months");
             assertThat(annotated.getUnlinkedMentions()).isEmpty();
             assertThat(annotated.getInvalidMentions()).isEmpty();
         });
@@ -101,9 +101,9 @@ class CompanyKnowledgeServiceTest {
             .connectionId("conn-1")
             .title("MRR calculation")
             .entryType(CompanyKnowledgeEntry.EntryType.BUSINESS_RULE)
-            .content("Use @@HOTEL_PRICING.amount / @@ACCOUNTS.account_billing_interval_months for MRR.")
+            .content("Use @@PRODUCT_PRICING.amount / @@ACCOUNTS.account_billing_interval_months for MRR.")
             .linkedTables(List.of("ACCOUNTS"))
-            .linkedColumns(List.of("HOTEL_PRICING.amount", "ACCOUNTS.account_billing_interval_months"))
+            .linkedColumns(List.of("PRODUCT_PRICING.amount", "ACCOUNTS.account_billing_interval_months"))
             .build();
 
         when(companyKnowledgeEntryRepository.findAllById(argThat(ids -> ids != null && ids.iterator().hasNext())))
@@ -119,7 +119,7 @@ class CompanyKnowledgeServiceTest {
         assertThat(context.hintContext())
             .contains("=== COMPANY KNOWLEDGE HINTS ===")
             .contains("MRR calculation")
-            .contains("@@HOTEL_PRICING.amount / @@ACCOUNTS.account_billing_interval_months")
+            .contains("@@PRODUCT_PRICING.amount / @@ACCOUNTS.account_billing_interval_months")
             .contains("Linked tables: ACCOUNTS")
             .doesNotContain("coverage=")
             .doesNotContain("Invalid or unknown references");
@@ -133,11 +133,11 @@ class CompanyKnowledgeServiceTest {
     @Test
     void selectFromRagHits_preservesTrailingClausesOfLongRules() throws Exception {
         String longRule = "For calculating the MRR, we should refer to the subscription amount in "
-            + "@@HOTEL_PRICING.amount column. The billing interval should come from "
+            + "@@PRODUCT_PRICING.amount column. The billing interval should come from "
             + "@@ACCOUNTS.account_billing_interval_months. Amount / billing interval is the MRR. "
-            + "Please note that HOTEL PRICING is at the hotel level and the ACCOUNTS are at the "
-            + "group level. HOTEL table should have the association of hotel id and group id. "
-            + "So for every hotel, you should do Amount / Billing interval to get the MRR. "
+            + "Please note that CUSTOMERS PRICING is at the customer level and the ACCOUNTS are at the "
+            + "group level. CUSTOMERS table should have the association of customer id and group id. "
+            + "So for every customer, you should do Amount / Billing interval to get the MRR. "
             + "Please also note that for all non indian accounts, the amount might be in USD. "
             + "That should be converted to INR (1 USD = 92 INR).";
         assertThat(longRule.length()).isGreaterThan(420);
@@ -149,7 +149,7 @@ class CompanyKnowledgeServiceTest {
             .entryType(CompanyKnowledgeEntry.EntryType.BUSINESS_RULE)
             .content(longRule)
             .linkedTables(List.of("ACCOUNTS"))
-            .linkedColumns(List.of("HOTEL_PRICING.amount", "ACCOUNTS.account_billing_interval_months"))
+            .linkedColumns(List.of("PRODUCT_PRICING.amount", "ACCOUNTS.account_billing_interval_months"))
             .build();
 
         when(companyKnowledgeEntryRepository.findAllById(argThat(ids -> ids != null && ids.iterator().hasNext())))
@@ -274,8 +274,8 @@ class CompanyKnowledgeServiceTest {
             .connectionId("conn-1")
             .title("Hotel onboarding context")
             .content("""
-                Use @HOTEL as the source of truth for property onboarding.
-                Track onboarding from @@HOTEL.subscription_start_date and active state from @@ACCOUNTS.account_status.
+                Use @CUSTOMERS as the source of truth for property onboarding.
+                Track onboarding from @@CUSTOMERS.subscription_start_date and active state from @@ACCOUNTS.account_status.
                 """)
             .build();
 
@@ -289,12 +289,12 @@ class CompanyKnowledgeServiceTest {
         verify(companyKnowledgeEntryRepository).save(captor.capture());
 
         assertThat(captor.getValue().getEntryType()).isEqualTo(CompanyKnowledgeEntry.EntryType.COMPANY_CONTEXT);
-        assertThat(captor.getValue().getLinkedTables()).containsExactly("HOTEL");
+        assertThat(captor.getValue().getLinkedTables()).containsExactly("CUSTOMERS");
         assertThat(captor.getValue().getLinkedColumns())
-            .containsExactlyInAnyOrder("HOTEL.subscription_start_date", "ACCOUNTS.account_status");
-        assertThat(saved.getLinkedTables()).containsExactly("HOTEL");
+            .containsExactlyInAnyOrder("CUSTOMERS.subscription_start_date", "ACCOUNTS.account_status");
+        assertThat(saved.getLinkedTables()).containsExactly("CUSTOMERS");
         assertThat(saved.getLinkedColumns())
-            .containsExactlyInAnyOrder("HOTEL.subscription_start_date", "ACCOUNTS.account_status");
+            .containsExactlyInAnyOrder("CUSTOMERS.subscription_start_date", "ACCOUNTS.account_status");
     }
 
     @Test
@@ -304,11 +304,11 @@ class CompanyKnowledgeServiceTest {
             .connectionId("conn-2")
             .title("MRR conversion")
             .content("""
-                For MRR, use @@idb_database.HOTEL_PRICING.amount.
-                Convert to monthly value with @@idb_database.ACCOUNTS.account_billing_interval_months.
+                For MRR, use @@analytics_db.PRODUCT_PRICING.amount.
+                Convert to monthly value with @@analytics_db.ACCOUNTS.account_billing_interval_months.
                 """)
             .linkedTables(List.of())
-            .linkedColumns(List.of("idb_database.HOTEL_PRICING.amount"))
+            .linkedColumns(List.of("analytics_db.PRODUCT_PRICING.amount"))
             .build();
 
         when(companyKnowledgeEntryRepository.findByConnectionIdOrderByRecency("conn-2"))
@@ -322,8 +322,8 @@ class CompanyKnowledgeServiceTest {
         assertThat(entries).singleElement().satisfies(annotated -> {
             assertThat(annotated.getLinkedColumns())
                 .containsExactlyInAnyOrder(
-                    "idb_database.HOTEL_PRICING.amount",
-                    "idb_database.ACCOUNTS.account_billing_interval_months"
+                    "analytics_db.PRODUCT_PRICING.amount",
+                    "analytics_db.ACCOUNTS.account_billing_interval_months"
                 );
             assertThat(annotated.getInvalidMentions()).isEmpty();
             assertThat(annotated.getCoverageStatus()).isEqualTo("COMPLETE");
@@ -332,7 +332,7 @@ class CompanyKnowledgeServiceTest {
         verify(companyKnowledgeEntryRepository).save(argThat(saved ->
             saved.getId().equals("entry-3")
                 && saved.getLinkedColumns() != null
-                && saved.getLinkedColumns().contains("idb_database.ACCOUNTS.account_billing_interval_months")
+                && saved.getLinkedColumns().contains("analytics_db.ACCOUNTS.account_billing_interval_months")
         ));
     }
 
@@ -343,11 +343,11 @@ class CompanyKnowledgeServiceTest {
             .connectionId("conn-2")
             .title("Onboarding instructions")
             .content("""
-                We should not use idb_database.HOTEL_PRICING for onboarding checks.
-                Use @idb_database.HOTEL as the source of truth and @@idb_database.HOTEL.onboarding_status for current status.
+                We should not use analytics_db.PRODUCT_PRICING for onboarding checks.
+                Use @analytics_db.CUSTOMERS as the source of truth and @@analytics_db.CUSTOMERS.onboarding_status for current status.
                 """)
-            .linkedTables(List.of("idb_database.HOTEL"))
-            .linkedColumns(List.of("idb_database.HOTEL.onboarding_status"))
+            .linkedTables(List.of("analytics_db.CUSTOMERS"))
+            .linkedColumns(List.of("analytics_db.CUSTOMERS.onboarding_status"))
             .build();
 
         when(companyKnowledgeEntryRepository.findByConnectionIdOrderByRecency("conn-2"))
@@ -358,8 +358,8 @@ class CompanyKnowledgeServiceTest {
 
         assertThat(entries).singleElement().satisfies(annotated -> {
             assertThat(annotated.getCoverageStatus()).isEqualTo("COMPLETE");
-            assertThat(annotated.getMentionedTables()).containsExactly("idb_database.HOTEL");
-            assertThat(annotated.getMentionedColumns()).containsExactly("idb_database.HOTEL.onboarding_status");
+            assertThat(annotated.getMentionedTables()).containsExactly("analytics_db.CUSTOMERS");
+            assertThat(annotated.getMentionedColumns()).containsExactly("analytics_db.CUSTOMERS.onboarding_status");
             assertThat(annotated.getInvalidMentions()).isEmpty();
             assertThat(annotated.getUnlinkedMentions()).isEmpty();
         });
@@ -370,7 +370,7 @@ class CompanyKnowledgeServiceTest {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setTables(List.of(
             table("ACCOUNTS", column("account_billing_interval_months")),
-            table("HOTEL_PRICING", column("amount"))
+            table("PRODUCT_PRICING", column("amount"))
         ));
         schema.setRelationships(List.of());
         return schema;
@@ -379,7 +379,7 @@ class CompanyKnowledgeServiceTest {
     private SchemaMetadata schemaWithHotelAndAccounts() {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setTables(List.of(
-            table("HOTEL", column("subscription_start_date")),
+            table("CUSTOMERS", column("subscription_start_date")),
             table("ACCOUNTS", column("account_status"))
         ));
         schema.setRelationships(List.of());
@@ -389,8 +389,8 @@ class CompanyKnowledgeServiceTest {
     private SchemaMetadata schemaWithQualifiedHotelTables() {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setTables(List.of(
-            table("idb_database", "HOTEL", column("onboarding_status")),
-            table("idb_database", "HOTEL_PRICING", column("amount"))
+            table("analytics_db", "CUSTOMERS", column("onboarding_status")),
+            table("analytics_db", "PRODUCT_PRICING", column("amount"))
         ));
         schema.setRelationships(List.of());
         return schema;
@@ -399,8 +399,8 @@ class CompanyKnowledgeServiceTest {
     private SchemaMetadata schemaWithQualifiedHotelTablesAndAccounts() {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setTables(List.of(
-            table("idb_database", "HOTEL_PRICING", column("amount")),
-            table("idb_database", "ACCOUNTS", column("account_billing_interval_months"))
+            table("analytics_db", "PRODUCT_PRICING", column("amount")),
+            table("analytics_db", "ACCOUNTS", column("account_billing_interval_months"))
         ));
         schema.setRelationships(List.of());
         return schema;

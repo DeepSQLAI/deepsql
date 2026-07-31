@@ -1229,8 +1229,8 @@ public class QueryGenerationPipeline {
             || normalizedQuestion.contains(" users ")
             || normalizedQuestion.contains(" member ")
             || normalizedQuestion.contains(" members ")
-            || normalizedQuestion.contains(" hotel ")
-            || normalizedQuestion.contains(" hotels ")
+            || normalizedQuestion.contains(" customer ")
+            || normalizedQuestion.contains(" customers ")
             || normalizedQuestion.contains(" account ")
             || normalizedQuestion.contains(" accounts ");
     }

@@ -8,7 +8,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.0.3</version>
+        <version>4.1.0</version>
         <relativePath/>
     </parent>
 
@@ -25,7 +25,7 @@
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <aws.sdk.version>2.41.14</aws.sdk.version>
-        <spring-ai.version>2.0.0-M2</spring-ai.version>
+        <spring-ai.version>2.0.0</spring-ai.version>
     </properties>
 
     <!-- Spring AI BOM for dependency management -->
@@ -229,7 +229,8 @@
         <!-- Spring AI - Vector Store RAG Advisor -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-advisors-vector-store</artifactId>
+            <!-- Renamed from spring-ai-advisors-vector-store in Spring AI 2.0.0 GA. -->
+            <artifactId>spring-ai-vector-store-advisor</artifactId>
         </dependency>
 
         <!-- OpenAI Java SDK (direct access, works with Azure via AzureApiKeyCredential) -->
@@ -361,12 +362,6 @@
         <testResources>
             <testResource>
                 <directory>src/test/resources</directory>
-            </testResource>
-            <testResource>
-                <directory>../tests/suites/sql-accuracy</directory>
-                <includes>
-                    <include>sql-accuracy-test-cases.json</include>
-                </includes>
             </testResource>
         </testResources>
         <plugins>

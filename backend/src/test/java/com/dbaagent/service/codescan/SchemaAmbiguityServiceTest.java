@@ -47,19 +47,19 @@ class SchemaAmbiguityServiceTest {
     @Test
     void detectsSimilarTableNames() {
         var items = service.compute("c1");
-        // Expect a SIMILAR_TABLE_NAMES item linking USER_BOOKINGS and NR_BOOKING (share token "BOOKING").
+        // Expect a SIMILAR_TABLE_NAMES item linking CUSTOMER_ORDERS and NR_ORDERS (share token "ORDERS").
         boolean foundSimilar = items.stream().anyMatch(i ->
             "SIMILAR_TABLE_NAMES".equals(i.kind()) &&
-            ((i.title().contains("USER_BOOKINGS") && i.title().contains("NR_BOOKING"))));
-        assertTrue(foundSimilar, "expected USER_BOOKINGS ↔ NR_BOOKING to be flagged similar; items=" + items);
+            ((i.title().contains("CUSTOMER_ORDERS") && i.title().contains("NR_ORDERS"))));
+        assertTrue(foundSimilar, "expected CUSTOMER_ORDERS ↔ NR_ORDERS to be flagged similar; items=" + items);
     }
 
     @Test
     void emitsMissingTableDescriptionForUndocumentedTable() {
         var items = service.compute("c1");
         boolean hit = items.stream().anyMatch(i ->
-            "MISSING_TABLE_DESCRIPTION".equals(i.kind()) && "USER_BOOKINGS".equals(i.targetTable()));
-        assertTrue(hit, "expected MISSING_TABLE_DESCRIPTION for USER_BOOKINGS; items=" + items);
+            "MISSING_TABLE_DESCRIPTION".equals(i.kind()) && "CUSTOMER_ORDERS".equals(i.targetTable()));
+        assertTrue(hit, "expected MISSING_TABLE_DESCRIPTION for CUSTOMER_ORDERS; items=" + items);
     }
 
     @Test
@@ -74,21 +74,21 @@ class SchemaAmbiguityServiceTest {
     @Test
     void documentedTablesAreNotMissingTable() {
         when(docRepo.findByConnectionId("c1")).thenReturn(List.of(
-            doc(SchemaDocumentation.DocumentationType.TABLE, "USER_BOOKINGS", null)
+            doc(SchemaDocumentation.DocumentationType.TABLE, "CUSTOMER_ORDERS", null)
         ));
         var items = service.compute("c1");
         boolean hit = items.stream().anyMatch(i ->
-            "MISSING_TABLE_DESCRIPTION".equals(i.kind()) && "USER_BOOKINGS".equals(i.targetTable()));
-        assertFalse(hit, "USER_BOOKINGS now has a doc, should not be missing");
+            "MISSING_TABLE_DESCRIPTION".equals(i.kind()) && "CUSTOMER_ORDERS".equals(i.targetTable()));
+        assertFalse(hit, "CUSTOMER_ORDERS now has a doc, should not be missing");
     }
 
     private static SchemaMetadata threeTableSchema() {
         SchemaMetadata m = new SchemaMetadata();
         m.setDbType("postgres");
         m.setTables(new ArrayList<>(List.of(
-            table("USER_BOOKINGS", List.of("id", "status", "guest_id")),
-            table("NR_BOOKING", List.of("id", "status", "rate")),
-            table("ROOM_RESERVATIONS", List.of("id", "checkin", "checkout"))
+            table("CUSTOMER_ORDERS", List.of("id", "status", "guest_id")),
+            table("NR_ORDERS", List.of("id", "status", "rate")),
+            table("ORDER_LINE_ITEMS", List.of("id", "checkin", "checkout"))
         )));
         return m;
     }

@@ -467,7 +467,7 @@ public class SlowQueryInsightsService {
                 int matchCount = kc.getMatchingQueryIds() != null ? kc.getMatchingQueryIds().size() : 0;
                 double blast = matchCount * (1.0 + (kc.getCriticalCount() * 0.6) + (kc.getHighCount() * 0.3));
                 // Use raw value for skew insights — these are operational
-                // column values (hotel_id, status) not PII
+                // column values (customer_id, status) not PII
                 String skewDisplayValue = kc.getRawValue() != null
                     ? kc.getRawValue() : kc.getDisplayValue();
                 return SlowQueryInsightsResponse.SkewItem.builder()

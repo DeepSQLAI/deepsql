@@ -15,7 +15,7 @@ The TrainingService now provides detailed, structured logging to help you unders
 ```
 ╔════════════════════════════════════════════════════════════
 ║ RAG RETRIEVAL - Starting
-║ Connection: eec2fd58-df58-4c49-ad08-c458bdb9dc29
+║ Connection: 00000000-0000-0000-0000-000000000000
 ║ Question: Show me all active users from last month
 ║ Top-K: 5
 ║ Data Source: Azure AI Search (Hybrid)
@@ -24,7 +24,7 @@ The TrainingService now provides detailed, structured logging to help you unders
 → Using Azure AI Search - Hybrid Search Mode
   ├─ Vector Search: Enabled (HNSW algorithm)
   ├─ Keyword Search: Enabled (BM25 ranking)
-  └─ Filtering: connectionId = 'eec2fd58-df58-4c49-ad08-c458bdb9dc29'
+  └─ Filtering: connectionId = '00000000-0000-0000-0000-000000000000'
 → Azure Search completed: 45ms
 → Results retrieved: 3 documents
 → Top Results:
@@ -48,7 +48,7 @@ Columns:
 ```
 ╔════════════════════════════════════════════════════════════
 ║ RAG RETRIEVAL - Starting
-║ Connection: eec2fd58-df58-4c49-ad08-c458bdb9dc29
+║ Connection: 00000000-0000-0000-0000-000000000000
 ║ Question: List all products
 ║ Top-K: 5
 ║ Data Source: In-Memory Cache
@@ -86,11 +86,11 @@ SELECT * FROM products WHERE available = true...
 │ SQL: SELECT * FROM users WHERE active = 1
 │ Storage: Azure AI Search
 └─────────────────────────────────────────────────────────
-  ✓ Saved to database: 244c5d11-513c-405c-bd1f-5ec93d2cac56
+  ✓ Saved to database: 11111111-1111-1111-1111-111111111111
   ✓ Embedding created: 198ms
   ✓ Indexed to Azure AI Search
   └─ Searchable via: Vector similarity + Keyword matching
-✓ Query example training completed: 244c5d11-513c-405c-bd1f-5ec93d2cac56
+✓ Query example training completed: 11111111-1111-1111-1111-111111111111
 ```
 
 ### 4. Training - Query Example (In-Memory)
@@ -102,10 +102,10 @@ SELECT * FROM products WHERE available = true...
 │ SQL: SELECT * FROM orders WHERE customer_id = ?
 │ Storage: Database + Cache
 └─────────────────────────────────────────────────────────
-  ✓ Saved to database: 8a7f2c3d-9e4b-4a1c-8d2f-3b5c6e7a8f9d
+  ✓ Saved to database: 22222222-2222-2222-2222-222222222222
   ✓ Embedding created: 203ms
   ✓ Cached in memory
-✓ Query example training completed: 8a7f2c3d-9e4b-4a1c-8d2f-3b5c6e7a8f9d
+✓ Query example training completed: 22222222-2222-2222-2222-222222222222
 ```
 
 ### 5. First Query (Empty Index)
@@ -113,7 +113,7 @@ SELECT * FROM products WHERE available = true...
 ```
 ╔════════════════════════════════════════════════════════════
 ║ RAG RETRIEVAL - Starting
-║ Connection: eec2fd58-df58-4c49-ad08-c458bdb9dc29
+║ Connection: 00000000-0000-0000-0000-000000000000
 ║ Question: Show me sales data
 ║ Top-K: 5
 ║ Data Source: Azure AI Search (Hybrid)
@@ -122,7 +122,7 @@ SELECT * FROM products WHERE available = true...
 → Using Azure AI Search - Hybrid Search Mode
   ├─ Vector Search: Enabled (HNSW algorithm)
   ├─ Keyword Search: Enabled (BM25 ranking)
-  └─ Filtering: connectionId = 'eec2fd58-df58-4c49-ad08-c458bdb9dc29'
+  └─ Filtering: connectionId = '00000000-0000-0000-0000-000000000000'
 → Azure Search completed: 38ms
 → Results retrieved: 0 documents
 ⚠ No matching documents found in Azure Search

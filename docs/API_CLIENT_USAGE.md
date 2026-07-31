@@ -166,7 +166,7 @@ try {
 The API client automatically uses the correct URL:
 
 - **Development**: `http://localhost:8080`
-- **Production**: `https://dba-agent-api.stayflexi.com`
+- **Production**: your deployment's API base URL (set `VITE_API_URL`)
 - **Custom**: Set `NEXT_PUBLIC_API_URL` environment variable
 
 ## Updated Components

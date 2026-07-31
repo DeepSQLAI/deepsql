@@ -29,7 +29,7 @@ public class ChatScopeGuardService {
             + "|semantic model|schema docs|company knowledge"
             + "|customer|customers|account|accounts|booking|bookings|order|orders|payment|payments|invoice|invoices"
             + "|revenue|sales|gmv|arr|mrr|churn|ltv|aov|funnel|conversion|occupancy|adr|revpar|property|properties"
-            + "|hotel|hotels|guest|guests)\\b"
+            + "|customer|customers|guest|guests)\\b"
     );
 
     private static final Pattern QUERY_REFERENCE_PATTERN = Pattern.compile(

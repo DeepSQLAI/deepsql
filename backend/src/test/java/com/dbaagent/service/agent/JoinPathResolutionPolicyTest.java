@@ -20,21 +20,21 @@ class JoinPathResolutionPolicyTest {
     void enhanceResolution_usesSchemaRelationshipsToKeepRequestedEntityInScope() {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setTables(List.of(
-            table("USER_BOOKINGS",
+            table("CUSTOMER_ORDERS",
                 col("id"),
-                col("booking_amount"),
+                col("order_amount"),
                 col("user_email")),
-            table("GUEST_MAPPING",
-                col("booking_id"),
+            table("CONTACT_MAPPING",
+                col("order_id"),
                 col("user_name"),
                 col("email"))
         ));
         schema.setRelationships(List.of(
             new RelationshipMetadata(
                 "guest_booking",
-                "GUEST_MAPPING",
-                "booking_id",
-                "USER_BOOKINGS",
+                "CONTACT_MAPPING",
+                "order_id",
+                "CUSTOMER_ORDERS",
                 "id",
                 "many-to-one",
                 "fk_guest_booking"
@@ -42,8 +42,8 @@ class JoinPathResolutionPolicyTest {
         ));
 
         ResolvedContext resolvedContext = new ResolvedContext(
-            List.of("USER_BOOKINGS"),
-            Map.of("USER_BOOKINGS", List.of("booking_amount", "user_email")),
+            List.of("CUSTOMER_ORDERS"),
+            Map.of("CUSTOMER_ORDERS", List.of("order_amount", "user_email")),
             List.of(),
             List.of(),
             ResolvedContext.Confidence.MEDIUM
@@ -58,16 +58,16 @@ class JoinPathResolutionPolicyTest {
         );
 
         assertThat(decision.hasEnhancement()).isTrue();
-        assertThat(decision.resolvedContext().tables()).contains("USER_BOOKINGS", "GUEST_MAPPING");
+        assertThat(decision.resolvedContext().tables()).contains("CUSTOMER_ORDERS", "CONTACT_MAPPING");
         assertThat(decision.chosenJoinConditions())
-            .contains("GUEST_MAPPING.booking_id = USER_BOOKINGS.id");
+            .contains("CONTACT_MAPPING.order_id = CUSTOMER_ORDERS.id");
         List<String> guestMappingColumns = decision.resolvedContext().columns().entrySet().stream()
-            .filter(entry -> "GUEST_MAPPING".equalsIgnoreCase(entry.getKey()))
+            .filter(entry -> "CONTACT_MAPPING".equalsIgnoreCase(entry.getKey()))
             .map(java.util.Map.Entry::getValue)
             .findFirst()
             .orElse(List.of());
         List<String> userBookingColumns = decision.resolvedContext().columns().entrySet().stream()
-            .filter(entry -> "USER_BOOKINGS".equalsIgnoreCase(entry.getKey()))
+            .filter(entry -> "CUSTOMER_ORDERS".equalsIgnoreCase(entry.getKey()))
             .map(java.util.Map.Entry::getValue)
             .findFirst()
             .orElse(List.of());
@@ -82,32 +82,32 @@ class JoinPathResolutionPolicyTest {
     void enhanceResolution_addsPersonEntityTableEvenWhenCurrentContextAlreadyHasTwoTables() {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setTables(List.of(
-            table("USER_BOOKINGS",
+            table("CUSTOMER_ORDERS",
                 col("id"),
-                col("hotel_id"),
-                col("booking_amount"),
+                col("customer_id"),
+                col("order_amount"),
                 col("user_email")),
-            table("HOTEL",
+            table("CUSTOMERS",
                 col("id"),
                 col("name")),
-            table("GUEST_MAPPING",
-                col("booking_id"),
+            table("CONTACT_MAPPING",
+                col("order_id"),
                 col("user_name"),
                 col("email"))
         ));
         schema.setRelationships(List.of(
-            new RelationshipMetadata("ub_hotel", "USER_BOOKINGS", "hotel_id", "HOTEL", "id", "many-to-one", "fk_ub_hotel"),
-            new RelationshipMetadata("guest_booking", "GUEST_MAPPING", "booking_id", "USER_BOOKINGS", "id", "many-to-one", "fk_guest_booking")
+            new RelationshipMetadata("ub_hotel", "CUSTOMER_ORDERS", "customer_id", "CUSTOMERS", "id", "many-to-one", "fk_ub_hotel"),
+            new RelationshipMetadata("guest_booking", "CONTACT_MAPPING", "order_id", "CUSTOMER_ORDERS", "id", "many-to-one", "fk_guest_booking")
         ));
 
         ResolvedContext resolvedContext = new ResolvedContext(
-            List.of("USER_BOOKINGS", "HOTEL"),
+            List.of("CUSTOMER_ORDERS", "CUSTOMERS"),
             Map.of(
-                "USER_BOOKINGS", List.of("booking_amount"),
-                "HOTEL", List.of("name")
+                "CUSTOMER_ORDERS", List.of("order_amount"),
+                "CUSTOMERS", List.of("name")
             ),
             List.of(),
-            List.of("USER_BOOKINGS.hotel_id = HOTEL.id"),
+            List.of("CUSTOMER_ORDERS.customer_id = CUSTOMERS.id"),
             ResolvedContext.Confidence.MEDIUM
         );
 
@@ -120,35 +120,35 @@ class JoinPathResolutionPolicyTest {
         );
 
         assertThat(decision.hasEnhancement()).isTrue();
-        assertThat(decision.resolvedContext().tables()).contains("USER_BOOKINGS", "HOTEL", "GUEST_MAPPING");
+        assertThat(decision.resolvedContext().tables()).contains("CUSTOMER_ORDERS", "CUSTOMERS", "CONTACT_MAPPING");
         assertThat(decision.chosenJoinConditions())
-            .contains("GUEST_MAPPING.booking_id = USER_BOOKINGS.id");
+            .contains("CONTACT_MAPPING.order_id = CUSTOMER_ORDERS.id");
     }
 
     @Test
     void enhanceResolution_infersForeignKeyStyleJoinWhenExplicitJoinGraphIsMissing() {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setTables(List.of(
-            table("USER_BOOKINGS",
+            table("CUSTOMER_ORDERS",
                 col("id"),
-                col("booking_amount"),
-                col("booking_made_on")),
-            table("GUEST_MAPPING",
-                col("booking_id"),
+                col("order_amount"),
+                col("order_made_on")),
+            table("CONTACT_MAPPING",
+                col("order_id"),
                 col("user_name"),
                 col("email"))
         ));
 
         ResolvedContext resolvedContext = new ResolvedContext(
-            List.of("USER_BOOKINGS"),
-            Map.of("USER_BOOKINGS", List.of("booking_amount")),
+            List.of("CUSTOMER_ORDERS"),
+            Map.of("CUSTOMER_ORDERS", List.of("order_amount")),
             List.of(),
             List.of(),
             ResolvedContext.Confidence.MEDIUM
         );
 
         JoinPathResolutionPolicy.Decision decision = policy.enhanceResolution(
-            "Show top customers by total booking amount with their names and emails",
+            "Show top customers by total order amount with their names and emails",
             schema,
             resolvedContext,
             List.of(),
@@ -156,9 +156,9 @@ class JoinPathResolutionPolicyTest {
         );
 
         assertThat(decision.hasEnhancement()).isTrue();
-        assertThat(decision.resolvedContext().tables()).contains("USER_BOOKINGS", "GUEST_MAPPING");
+        assertThat(decision.resolvedContext().tables()).contains("CUSTOMER_ORDERS", "CONTACT_MAPPING");
         assertThat(decision.chosenJoinConditions())
-            .contains("GUEST_MAPPING.booking_id = USER_BOOKINGS.id");
+            .contains("CONTACT_MAPPING.order_id = CUSTOMER_ORDERS.id");
     }
 
     private static TableMetadata table(String name, ColumnMetadata... columns) {

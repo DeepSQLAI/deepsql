@@ -201,7 +201,7 @@ public class SlackDailyDigestService {
         "savings", "index_wins", "summary", "slow", "customers", "deep_dive", "spotlight", "newcomers", "concurrency", "schema", "security", "growth", "waste", "free");
     private static final String CONNECTION_UNAVAILABLE_HEADLINE = "live database access unavailable";
     private static final List<String> LABEL_COLUMN_CANDIDATES = List.of(
-        "name", "title", "display_name", "displayname", "label", "full_name", "hotel_name",
+        "name", "title", "display_name", "displayname", "label", "full_name", "customer_name",
         "shop_name", "property_name", "account_name", "customer_name", "slug", "code"
     );
 
@@ -577,7 +577,7 @@ public class SlackDailyDigestService {
                     // Was: truncate(item.getQueryPreview(), 60) — produced
                     // partial SQL like "SELECT b.id, b.user_email, b.checkin," that
                     // cut off mid-clause and was unreadable in Slack. Switch to a
-                    // human-readable label ("Booking lookup by hotel_id") + the
+                    // human-readable label ("Booking lookup by customer_id") + the
                     // 8-char query ID so the user can look up the full text in the
                     // CLI / UI.
                     sb.append(String.format(
@@ -846,7 +846,7 @@ public class SlackDailyDigestService {
         if (col == null) return false;
         String lower = col.toLowerCase();
         return lower.endsWith("_id") || lower.endsWith("id")
-            || lower.equals("hotel") || lower.equals("group_id")
+            || lower.equals("customer") || lower.equals("group_id")
             || lower.equals("account_id") || lower.equals("tenant_id")
             || lower.equals("customer_id") || lower.equals("user_id")
             || lower.equals("booking_id") || lower.equals("property_id");
@@ -872,7 +872,7 @@ public class SlackDailyDigestService {
      * outreach / optimization for. Each row reads:
      * <pre>
      *   1. Isha Foundation — 5 slow queries · 31.1s total · worst 4.8s
-     *      → top: Booking lookup by hotel_id (id: e7e53f00)
+     *      → top: Booking lookup by customer_id (id: e7e53f00)
      * </pre>
      * The "top" line is the customer's single worst query (by mean exec time),
      * so the operator can jump straight from "this customer is suffering" to
@@ -1547,7 +1547,7 @@ public class SlackDailyDigestService {
     /**
      * Turn a SQL preview into a 1-line, human-readable label for the digest.
      * Backed by {@link QueryLabeler} — produces things like
-     * "Booking lookup by hotel_id" or "Room reservations aggregation" instead
+     * "Booking lookup by customer_id" or "Room reservations aggregation" instead
      * of the partial SQL prefix the old {@code truncate(preview, 60)} produced.
      * The full text isn't lost — the digest pairs this with the query ID so
      * users can pull it up in the CLI ({@code deepsql queries get <id>}) or
@@ -2523,7 +2523,7 @@ public class SlackDailyDigestService {
      * r . , plan nam…}).
      *
      * <p>Now: a human-readable label via {@link QueryLabeler} ("Booking
-     * lookup by hotel_id", "Room reservations aggregation"). Callers that
+     * lookup by customer_id", "Room reservations aggregation"). Callers that
      * have a queryId/fingerprint pair the label with {@link #shortId} so
      * users can look up the full text via the CLI / Slow Queries tab.
      */

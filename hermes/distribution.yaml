@@ -18,7 +18,7 @@ env_requires:
   - name: AZURE_OPENAI_ENDPOINT
     description: "Azure OpenAI resource endpoint (…cognitiveservices/…openai.azure.com)"
     required: false
-    default: "https://dba-agent-3-resource.openai.azure.com/"
+    default: "https://your-resource.openai.azure.com/"
   - name: DEEPSQL_API_BASE_URL
     description: "DeepSQL backend API base URL"
     required: false

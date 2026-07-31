@@ -72,7 +72,7 @@ Auto-Training - Successful queries stored for future use
 You need to create an embedding deployment in your Azure OpenAI resource:
 
 1. Go to [Azure Portal](https://portal.azure.com)
-2. Navigate to your Azure OpenAI resource: `dba-agent-foundry-resource`
+2. Navigate to your Azure OpenAI resource
 3. Go to **Deployments** → **Create new deployment**
 4. Select model: **text-embedding-ada-002** (or text-embedding-3-small/large)
 5. Deployment name: **text-embedding-ada-002** (or your preferred name)
@@ -324,13 +324,13 @@ Once embedding deployment is ready:
 
 ```bash
 # 1. Train with schema
-curl -X POST http://localhost:8080/api/training/schema/4dd73a02-4ab6-4ace-ab2b-98caea7d6000
+curl -X POST http://localhost:8080/api/training/schema/00000000-0000-0000-0000-000000000000
 
 # 2. Ask a question
 curl -X POST http://localhost:8080/api/chat \
   -H "Content-Type: application/json" \
   -d '{
-    "connectionId": "4dd73a02-4ab6-4ace-ab2b-98caea7d6000",
+    "connectionId": "00000000-0000-0000-0000-000000000000",
     "message": "How many users are there?",
     "threadId": "test-123"
   }'
@@ -339,13 +339,13 @@ curl -X POST http://localhost:8080/api/chat \
 curl -X POST http://localhost:8080/api/chat \
   -H "Content-Type: application/json" \
   -d '{
-    "connectionId": "4dd73a02-4ab6-4ace-ab2b-98caea7d6000",
+    "connectionId": "00000000-0000-0000-0000-000000000000",
     "message": "Show me user count",
     "threadId": "test-456"
   }'
 
 # 4. Check stats
-curl http://localhost:8080/api/training/stats/4dd73a02-4ab6-4ace-ab2b-98caea7d6000
+curl http://localhost:8080/api/training/stats/00000000-0000-0000-0000-000000000000
 ```
 
 You should see improved SQL generation on the second query!

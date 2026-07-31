@@ -30,7 +30,7 @@ const DEFAULT_SUITE_PATH = path.join(
   "mcp",
   "aws_sf_prod-product-suite.json",
 );
-const LEGACY_CONNECTION_ID = "0b8c8fc2-aba6-4a5a-886d-5f5e08ee9cbe";
+const LEGACY_CONNECTION_ID = "00000000-0000-0000-0000-000000000000";
 
 function getArgValue(args, name, fallback) {
   const index = args.indexOf(name);

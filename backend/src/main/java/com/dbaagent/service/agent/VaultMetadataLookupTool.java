@@ -728,16 +728,19 @@ public class VaultMetadataLookupTool implements AgentTool {
         }
 
         List<Map<String, Object>> rows = new ArrayList<>();
-        addAnchorIfPresent(rows, schema, "INTELL_USERS", "best existing assignee/owner table if staff users live here");
+        // Generic anchor candidates. Only tables that actually exist in the connected
+        // schema are returned, so this list is a best-effort hint across common
+        // application schemas rather than an assumption about any particular one.
+        addAnchorIfPresent(rows, schema, "USERS", "best existing assignee/owner table if staff users live here");
         addAnchorIfPresent(rows, schema, "USER", "alternate user/owner table if the app still relies on the legacy user table");
-        addAnchorIfPresent(rows, schema, "HOTEL", "useful scope table if tasks are hotel-level operational work");
-        addAnchorIfPresent(rows, schema, "USER_BOOKINGS", "attach tasks to bookings when the work item is reservation-driven");
-        addAnchorIfPresent(rows, schema, "ROOM_RESERVATIONS", "attach tasks to stay/reservation operations when room-level workflow matters");
-        addAnchorIfPresent(rows, schema, "BOOKING_NOTES", "closest existing notes/history table if you need free-form task context");
+        addAnchorIfPresent(rows, schema, "ACCOUNTS", "useful scope table if tasks are account-level operational work");
+        addAnchorIfPresent(rows, schema, "ORDERS", "attach tasks to orders when the work item is transaction-driven");
+        addAnchorIfPresent(rows, schema, "ORDER_ITEMS", "attach tasks to line-item operations when item-level workflow matters");
+        addAnchorIfPresent(rows, schema, "NOTES", "closest existing notes/history table if you need free-form task context");
         addAnchorIfPresent(rows, schema, "CUSTOMER_NOTES", "candidate notes table if tasks are customer-service oriented");
-        addAnchorIfPresent(rows, schema, "BOOKING_CONVERSATION", "candidate activity/comment stream if tasks need threaded discussion");
-        addAnchorIfPresent(rows, schema, "BOOKING_TAGS", "lightweight categorization table if tasks need labels/status grouping");
-        addAnchorIfPresent(rows, schema, "GUEST_MAPPING", "bridge table if task ownership or follow-ups are guest-specific");
+        addAnchorIfPresent(rows, schema, "COMMENTS", "candidate activity/comment stream if tasks need threaded discussion");
+        addAnchorIfPresent(rows, schema, "TAGS", "lightweight categorization table if tasks need labels/status grouping");
+        addAnchorIfPresent(rows, schema, "CUSTOMERS", "bridge table if task ownership or follow-ups are customer-specific");
         return rows;
     }
 
@@ -760,7 +763,7 @@ public class VaultMetadataLookupTool implements AgentTool {
 
     private List<Map<String, Object>> defaultTaskModuleTables() {
         return List.of(
-            proposedTable("TASKS", "core task record with title, description, priority, due date, status, owner, and optional booking/hotel links"),
+            proposedTable("TASKS", "core task record with title, description, priority, due date, status, owner, and optional booking/customer links"),
             proposedTable("TASK_ASSIGNEES", "supports multiple owners/watchers per task and keeps assignment history clean"),
             proposedTable("TASK_COMMENTS", "discussion thread or internal notes on each task"),
             proposedTable("TASK_ACTIVITY", "immutable audit/activity stream for status changes, assignment changes, and reminders"),

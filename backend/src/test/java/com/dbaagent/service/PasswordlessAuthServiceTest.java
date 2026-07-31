@@ -72,17 +72,17 @@ class PasswordlessAuthServiceTest {
     @Test
     void loginWithPassword_allowsFreshTwoFactorChallengeWhenNoOtpRequestsExist() throws Exception {
         User user = activeUser();
-        when(userRepository.findByEmailIgnoreCase("venkatesh.sakamuri@stayflexi.com")).thenReturn(Optional.of(user));
+        when(userRepository.findByEmailIgnoreCase("alex.doe@example.com")).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("secret-pass", "encoded-password")).thenReturn(true);
         when(securityEventRepository.countByEmailIgnoreCaseAndEventTypeAndCreatedAtAfter(
-            eq("venkatesh.sakamuri@stayflexi.com"), eq(SecurityEventType.OTP_REQUESTED.name()), any(LocalDateTime.class))
+            eq("alex.doe@example.com"), eq(SecurityEventType.OTP_REQUESTED.name()), any(LocalDateTime.class))
         ).thenReturn(0L);
         when(securityEventRepository.countByClientIpAndEventTypeAndCreatedAtAfter(
             eq("127.0.0.1"), eq(SecurityEventType.OTP_REQUESTED.name()), any(LocalDateTime.class))
         ).thenReturn(0L);
 
         PasswordlessAuthService.AuthFlowResult result = service.loginWithPassword(
-            "venkatesh.sakamuri@stayflexi.com",
+            "alex.doe@example.com",
             "secret-pass",
             "127.0.0.1",
             "JUnit",
@@ -92,7 +92,7 @@ class PasswordlessAuthServiceTest {
         assertThat(result.success()).isTrue();
         assertThat(result.nextChallengeId()).isNotBlank();
         assertThat(result.sessionAuthentication()).isNull();
-        verify(emailService).sendLoginOtp(eq("venkatesh.sakamuri@stayflexi.com"), anyString(), eq(10));
+        verify(emailService).sendLoginOtp(eq("alex.doe@example.com"), anyString(), eq(10));
 
         ArgumentCaptor<AuthLoginChallenge> challengeCaptor = ArgumentCaptor.forClass(AuthLoginChallenge.class);
         verify(authLoginChallengeRepository, atLeastOnce()).save(challengeCaptor.capture());
@@ -103,14 +103,14 @@ class PasswordlessAuthServiceTest {
     @Test
     void loginWithPassword_blocksOnlyWhenOtpRequestRateLimitIsActuallyExceeded() throws Exception {
         User user = activeUser();
-        when(userRepository.findByEmailIgnoreCase("venkatesh.sakamuri@stayflexi.com")).thenReturn(Optional.of(user));
+        when(userRepository.findByEmailIgnoreCase("alex.doe@example.com")).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("secret-pass", "encoded-password")).thenReturn(true);
         when(securityEventRepository.countByEmailIgnoreCaseAndEventTypeAndCreatedAtAfter(
-            eq("venkatesh.sakamuri@stayflexi.com"), eq(SecurityEventType.OTP_REQUESTED.name()), any(LocalDateTime.class))
+            eq("alex.doe@example.com"), eq(SecurityEventType.OTP_REQUESTED.name()), any(LocalDateTime.class))
         ).thenReturn(5L);
 
         ResponseStatusException error = assertThrows(ResponseStatusException.class, () -> service.loginWithPassword(
-            "venkatesh.sakamuri@stayflexi.com",
+            "alex.doe@example.com",
             "secret-pass",
             "127.0.0.1",
             "JUnit",
@@ -126,7 +126,7 @@ class PasswordlessAuthServiceTest {
         User user = new User();
         user.setId(1L);
         user.setUsername("admin");
-        user.setEmail("venkatesh.sakamuri@stayflexi.com");
+        user.setEmail("alex.doe@example.com");
         user.setPassword("encoded-password");
         user.setRole("ADMIN");
         user.setAccountStatus("ACTIVE");

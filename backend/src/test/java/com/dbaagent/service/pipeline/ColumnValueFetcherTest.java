@@ -94,11 +94,11 @@ class ColumnValueFetcherTest {
         doReturn(List.of("CONFIRMED", "CANCELLED"))
             .when(jdbcTemplate).queryForList(contains("bookings"), eq(String.class));
         doReturn(List.of("Mumbai", "Delhi"))
-            .when(jdbcTemplate).queryForList(contains("hotels"), eq(String.class));
+            .when(jdbcTemplate).queryForList(contains("customers"), eq(String.class));
 
         var filterColumns = List.of(
             new FilterColumn("bookings", "status"),
-            new FilterColumn("hotels", "city")
+            new FilterColumn("customers", "city")
         );
         var result = fetcher.fetch("conn-1", "POSTGRESQL", filterColumns);
 
@@ -106,6 +106,6 @@ class ColumnValueFetcherTest {
             .startsWith("=== COLUMN VALUES FOR FILTERS ===")
             .endsWith("===\n")
             .contains("bookings.status: CONFIRMED, CANCELLED")
-            .contains("hotels.city: Mumbai, Delhi");
+            .contains("customers.city: Mumbai, Delhi");
     }
 }

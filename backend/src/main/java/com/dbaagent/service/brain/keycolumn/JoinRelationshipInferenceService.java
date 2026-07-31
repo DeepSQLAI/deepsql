@@ -503,7 +503,7 @@ public class JoinRelationshipInferenceService {
             return true;
         }
 
-        // Handle prefixed columns like "pm_hotel_id" -> "hotel"
+        // Handle prefixed columns like "pm_hotel_id" -> "customer"
         // Check if column contains the table name after any prefix
         if (colBase.contains("_")) {
             String[] parts = colBase.split("_");
@@ -738,9 +738,9 @@ public class JoinRelationshipInferenceService {
             // Try to find a matching table
             String targetTable = findTargetTable(baseName, tableNames, sourceTable);
 
-            // If not found, try stripping common prefixes (e.g., "pm_hotel" -> "hotel")
+            // If not found, try stripping common prefixes (e.g., "pm_hotel" -> "customer")
             if (targetTable == null && baseName.contains("_")) {
-                // Try the part after the prefix (e.g., "pm_hotel" -> "hotel")
+                // Try the part after the prefix (e.g., "pm_hotel" -> "customer")
                 int lastUnderscore = baseName.lastIndexOf('_');
                 if (lastUnderscore > 0) {
                     String suffix = baseName.substring(lastUnderscore + 1);

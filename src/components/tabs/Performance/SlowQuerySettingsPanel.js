@@ -148,7 +148,7 @@ export default function SlowQuerySettingsPanel({ connectionId }) {
               id="sq-tenant-select"
               className={styles.select}
               value={tenantColumn}
-              placeholder="e.g. hotel_id"
+              placeholder="e.g. customer_id"
               onChange={(e) => setAdvForm({ ...adv })}
               onBlur={(e) => e.target.value && save({ tenantColumn: e.target.value })}
             />
@@ -181,7 +181,7 @@ export default function SlowQuerySettingsPanel({ connectionId }) {
               <input
                 className={styles.select}
                 value={adv.customerLookupTable}
-                placeholder="e.g. hotels"
+                placeholder="e.g. customers"
                 onChange={(e) => setAdv({ customerLookupTable: e.target.value })}
               />
             </div>

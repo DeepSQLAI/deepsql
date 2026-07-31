@@ -1,76 +1,94 @@
 # DeepSQL
 
-AI-powered Database Performance Assistant.
+**An AI database performance assistant you run yourself.** Point it at PostgreSQL or
+MySQL and ask questions in plain English — schema exploration, query generation, slow
+query analysis, index recommendations, generated dashboards. Bring your own LLM: OpenAI,
+Azure OpenAI, or any OpenAI-compatible endpoint, including one running on your own
+hardware. No vendor account is required and no model provider is hardcoded.
+
+Everything runs in your environment. Database credentials are encrypted in a local vault,
+and nothing leaves the machines you control except the prompts you send to the LLM
+endpoint you configured.
 
 ---
 
-## Self-Hosted Deployment (Docker)
+## Quick start
 
-The full stack runs as four Docker containers: PostgreSQL (vault DB), Valkey (cache), backend (Spring Boot), and frontend (nginx).
-
-### Prerequisites
-
-- Docker Engine 24+ with `docker compose` v2
-- `curl`
-- An API key from an LLM provider. DeepSQL ships no model credentials — you bring
-  your own. Any of these work:
-  - **OpenAI** — an `sk-…` key
-  - **Azure OpenAI** — key, endpoint, and deployment name
-  - **Any OpenAI-compatible server** — vLLM, Ollama, LM Studio, TGI, via a custom endpoint
-
-  Credentials go in `.env` and are read from the environment. They are never sent
-  anywhere but the provider you point them at.
-
-### Quick Start
+There are no prebuilt images and no container registry. Docker Compose builds the backend
+and frontend from this checkout.
 
 ```bash
-# 1. Authenticate with the DeepSQL image registry
-echo "<YOUR_GHCR_TOKEN>" | docker login ghcr.io -u <YOUR_GITHUB_USERNAME> --password-stdin
-
-# 2. Clone the distribution repo (or unpack the offline bundle)
-git clone https://github.com/DeepSQLAI/deepsql.git
+git clone <this-repo> deepsql
 cd deepsql
+cp .env.example .env      # required — compose reads .env and will not start without it
+$EDITOR .env              # set DEEPSQL_CHAT_* — see "Bring your own LLM" below
 
-# 3. Configure
-cp .env.example .env
-# Edit .env — see "Configuring the LLM" below
-
-# 4. Install (auto-generates JWT secret, encryption key, DB password)
 ./scripts/self-host/install.sh
-
-# 5. Open http://localhost:3000
 ```
 
-The install script will prompt for any required values that are still placeholders.
+`install.sh` generates the JWT secret, the credential-vault encryption key and the vault DB
+password, prompts for your LLM key and the first admin account, builds both images, starts
+the stack, and verifies pgvector is live. Then open http://localhost:3000 and log in with
+the admin email and password you entered.
 
-### Configuring the LLM
+**The first build takes several minutes.** It compiles the Spring Boot backend with Maven
+inside the container and bundles the frontend with Vite. It has not hung — later builds
+reuse the Docker layer cache and are fast.
 
-Chat and embeddings are configured separately, so they can use different providers,
-keys, or endpoints. Set these in `.env`:
+Prefer to drive Compose yourself?
+
+```bash
+# .env.example ships these two empty on purpose — they are validated secrets,
+# not free text, and the backend refuses to start without them.
+printf 'SECURITY_JWT_SECRET=%s\n' "$(openssl rand -base64 64 | tr -d '\n')" >> .env
+printf 'ENCRYPTION_KEY=%s\n'      "$(openssl rand -base64 32)"             >> .env
+
+docker compose up -d --build
+```
+
+Back up `ENCRYPTION_KEY`. It encrypts every database credential you store, and losing it
+means re-entering all of them.
+
+That builds and starts everything, but leaves you without a way to log in: there is no
+seeded account, self-service signup is disabled, and the setup wizard's
+`POST /setup/initialize` is disabled. The first user is created through a localhost-only
+bootstrap endpoint — set `SECURITY_ADMIN_BOOTSTRAP_ENABLED=true` and `ADMIN_BOOTSTRAP_SECRET`
+in `.env` and call it yourself, or run `install.sh`, which does exactly that and then turns
+the flag back off.
+
+### Requirements
+
+- Docker Engine with Docker Compose v2 (`docker compose version`)
+- `curl` and `openssl` (used by `install.sh`)
+- About 4 GB of memory available to Docker — the backend JVM is configured with a 3 GB max heap
+
+---
+
+## Bring your own LLM
+
+Chat and embeddings are configured independently, so they can point at different providers,
+keys, or endpoints. One provider id ships today — `openai` — and it is the only one you
+need: it speaks OpenAI, Azure OpenAI, and any OpenAI-compatible server.
 
 ```env
 DEEPSQL_CHAT_PROVIDER=openai
-DEEPSQL_CHAT_API_KEY=sk-your-key-here
+DEEPSQL_CHAT_API_KEY=sk-your-key
 DEEPSQL_CHAT_ENDPOINT=https://api.openai.com/v1
 DEEPSQL_CHAT_MODEL=gpt-4o
 
 DEEPSQL_EMBEDDING_PROVIDER=openai
-DEEPSQL_EMBEDDING_API_KEY=sk-your-key-here
+DEEPSQL_EMBEDDING_API_KEY=sk-your-key
 DEEPSQL_EMBEDDING_ENDPOINT=https://api.openai.com/v1
 DEEPSQL_EMBEDDING_MODEL=text-embedding-3-large
 ```
 
-`openai` is the only provider id in this release, and it is the only one you need:
-it speaks OpenAI, Azure OpenAI, and any OpenAI-compatible server. Point
-`DEEPSQL_CHAT_ENDPOINT` at the server you want.
+`_PROVIDER` gates the rest: with it unset, no other variable in that group is read.
+`_ENDPOINT` has no working fallback for chat, so set it explicitly even for OpenAI.
+Embeddings are optional in the sense that the app still starts without them — retrieval
+just stays keyword-only until they are configured.
 
-`DEEPSQL_CHAT_PROVIDER` gates the rest — with it unset, no other `DEEPSQL_CHAT_*`
-value is read. `DEEPSQL_CHAT_ENDPOINT` has no working fallback, so set it explicitly
-even for OpenAI. The embedding variables are optional in the sense that the app still
-starts without them, but RAG retrieval stays keyword-only until they are set.
-
-**Azure OpenAI** — an `.azure.com` endpoint switches to `api-key` header auth
-automatically, and `MODEL` is your *deployment* name:
+**Azure OpenAI** — an `.azure.com` or `.azure-api.net` endpoint switches authentication to
+the `api-key` header automatically, and `_MODEL` is your *deployment* name:
 
 ```env
 DEEPSQL_CHAT_PROVIDER=openai
@@ -79,7 +97,7 @@ DEEPSQL_CHAT_ENDPOINT=https://your-resource.cognitiveservices.azure.com/
 DEEPSQL_CHAT_MODEL=your-deployment-name
 ```
 
-**Ollama or another local server**:
+**Ollama, vLLM, LM Studio, TGI** — anything that speaks the OpenAI wire format:
 
 ```env
 DEEPSQL_CHAT_PROVIDER=openai
@@ -88,70 +106,148 @@ DEEPSQL_CHAT_ENDPOINT=http://host.docker.internal:11434/v1
 DEEPSQL_CHAT_MODEL=llama3.1
 ```
 
-Environment variables are the supported way to configure this. The onboarding wizard
-in the UI writes an older set of config keys that the resolver does not read, so it
-does not currently configure the LLM — use `.env`.
+Optional tuning, same prefix, all defaulted: `_TEMPERATURE`, `_API_VERSION` (the Azure REST
+version), `_USE_RESPONSES_API` (`true` / `false` / `auto`).
 
-`.env` is the only tier above the environment: values may also be stored in the
-vault database under `llm.<role>.provider` and `llm.<role>.<provider>.<field>`, which
-take precedence, but nothing writes those rows for you today.
-
-### First-Run Admin Bootstrap (optional)
-
-To have `install.sh` create the first admin account automatically, add to `.env` before running:
-
-```env
-SECURITY_ADMIN_BOOTSTRAP_ENABLED=true
-ADMIN_BOOTSTRAP_SECRET=choose-a-one-time-secret
-DEEPSQL_INITIAL_ADMIN_EMAIL=admin@yourcompany.com
-DEEPSQL_INITIAL_ADMIN_PASSWORD=choose-a-strong-password
-```
-
-After first login, set `SECURITY_ADMIN_BOOTSTRAP_ENABLED=false` and restart:
-
-```bash
-docker compose up -d backend
-```
-
-### Useful Commands
-
-```bash
-./scripts/self-host/status.sh          # Health check all services
-./scripts/self-host/smoke-test.sh      # Post-install validation
-./scripts/self-host/uninstall.sh       # Stop and remove containers (data preserved)
-./scripts/self-host/uninstall.sh --purge-data   # Remove containers AND volumes
-```
-
-### Default Ports
-
-| Service  | Port |
-|----------|------|
-| Frontend | 3000 |
-| Backend  | 8080 |
-| Postgres | 5432 |
-| Valkey   | 6379 |
-
-Override any port in `.env` (e.g. `DEEPSQL_FRONTEND_PORT=13000`).
+> Environment variables are the way to configure the LLM. The onboarding wizard in the UI
+> writes a different, older set of config keys that the resolver does not read — it will not
+> configure a provider for you.
 
 ---
 
-## Documentation
+## What it does
 
-- **Self-host guide**: [`docs/root/SELF_HOST_GUIDE.md`](docs/root/SELF_HOST_GUIDE.md)
-- **MCP server**: [`docs/root/MCP_PHASE1.md`](docs/root/MCP_PHASE1.md)
-- **Architecture & dev guide**: [`docs/root/CLAUDE.md`](docs/root/CLAUDE.md)
-- **Full docs index**: [`docs/README.md`](docs/README.md)
+- **Ask in English.** Schema questions, business questions, "why is this slow" questions.
+  SQL that the assistant or an agent generates is validated and executed read-only; the
+  hand-written SQL editor is the only path that can mutate, and only for a confirming admin.
+- **Slow query analysis.** Ingests and groups slow queries, attributes cost, and explains
+  what is actually expensive.
+- **Index recommendations.** Advises, and can apply them for you — `CREATE INDEX
+  CONCURRENTLY` on PostgreSQL, so no table lock.
+- **Generated dashboards.** An agent writes a single self-contained HTML document, rendered
+  in a sandboxed iframe with no network access. It reads data only through a read-only query
+  bridge back to the backend — the agent gets creative freedom, the database keeps its guard
+  rail.
+- **MCP server.** Gives coding agents (Claude Code, Cursor, Codex, Claude Desktop) the same
+  capabilities over stdio.
+- **SSH tunnelling.** Reach databases behind a bastion without exposing them.
+- **PostgreSQL and MySQL**, behind one dialect registry.
+
+### MCP server
+
+The server lives in `mcp/` and exposes 44 tools that wrap the backend API, so agents reuse
+the same orchestration, retrieval and guardrails instead of getting raw database
+credentials. SQL execution is read-only-enforced before it reaches the backend.
+
+```bash
+DEEPSQL_API_BASE_URL=http://localhost:8080/api/ \
+DEEPSQL_AUTH_TOKEN=<your-deepsql-token> \
+npm run mcp:phase1
+```
+
+It has no npm dependencies of its own — `npm run mcp:phase1` is just
+`node mcp/deepsql-phase1-server.js`, so it runs straight from a fresh clone.
+
+See [`mcp/README.md`](mcp/README.md) for the CLI, editor configuration and the full tool
+table, and [`docs/root/MCP_PHASE1.md`](docs/root/MCP_PHASE1.md) for the rollout notes.
 
 ---
 
 ## Development
 
-```bash
-# Backend (auth disabled in dev mode)
-cd backend && mvn spring-boot:run
+Run the stateful dependencies in Docker — PostgreSQL needs the **pgvector** extension, which
+is tedious to install by hand — and everything else natively for hot reload.
 
-# Frontend
-npm install && npm run dev
+```bash
+docker compose up -d postgres valkey    # requires .env to exist
+
+cd backend && mvn spring-boot:run       # http://localhost:8080/api
+npm install && npm run dev              # http://localhost:3000
 ```
 
-Visit http://localhost:3000 — login with `admin` / `admin` in dev mode.
+You will need **JDK 25** and **Maven 3.9+** (there is no Maven wrapper in the repo), and
+**Node 22**, which is what the frontend image builds with.
+
+The backend needs the same environment as the container: at minimum `DB_URL`, `DB_USERNAME`,
+`DB_PASSWORD`, `SECURITY_JWT_SECRET`, `ENCRYPTION_KEY`, and the `DEEPSQL_CHAT_*` group.
+Authentication is on by default in every profile and there is no `admin`/`admin` shortcut:
+either create the first account through the bootstrap flow above, or set
+`SECURITY_AUTH_ENABLED=false` to let the backend accept unauthenticated API calls while you
+work on it.
+
+Useful commands:
+
+```bash
+npm run lint             # eslint
+npm run build            # production frontend bundle
+cd backend && mvn test   # backend test suite
+```
+
+---
+
+## Operating the stack
+
+```bash
+./scripts/self-host/status.sh                    # compose ps + health probes
+./scripts/self-host/smoke-test.sh                # end-to-end check against the vault DB
+./scripts/self-host/uninstall.sh                 # stop and remove containers, keep data
+./scripts/self-host/uninstall.sh --purge-data    # also drop the volumes
+```
+
+To pick up new code, pull and rebuild:
+
+```bash
+git pull && docker compose up -d --build
+```
+
+### Ports
+
+| Service  | Port | Override                |
+|----------|------|-------------------------|
+| Frontend | 3000 | `DEEPSQL_FRONTEND_PORT` |
+| Backend  | 8080 | `DEEPSQL_BACKEND_PORT`  |
+| Postgres | 5432 | `DEEPSQL_POSTGRES_PORT` |
+| Valkey   | 6379 | `DEEPSQL_VALKEY_PORT`   |
+
+### Configuration reference
+
+Everything lives in `.env`, which is documented inline. The variables that matter most:
+
+| Variable | Purpose |
+|---|---|
+| `DEEPSQL_CHAT_PROVIDER`, `_API_KEY`, `_ENDPOINT`, `_MODEL` | The chat model. Required. |
+| `DEEPSQL_EMBEDDING_PROVIDER`, `_API_KEY`, `_ENDPOINT`, `_MODEL` | Embeddings for retrieval. Optional; without them retrieval is keyword-only. |
+| `SECURITY_JWT_SECRET` | Signs session tokens. Generate with `openssl rand -base64 64`. |
+| `ENCRYPTION_KEY` — or `ENCRYPTION_KEYS` + `ENCRYPTION_KEY_ID` | AES-GCM key(s) for the credential vault. The backend refuses to start without one. |
+| `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | The vault database. Compose points these at its own `postgres` service. |
+| `SPRING_PROFILES_ACTIVE` | `prod` for self-hosting — hardened defaults. |
+| `SECURITY_AUTH_ENABLED` | Set `false` only for local development. |
+| `SECURITY_ADMIN_BOOTSTRAP_ENABLED`, `ADMIN_BOOTSTRAP_SECRET` | Gate the localhost-only first-admin endpoint. |
+| `CORS_ALLOWED_ORIGINS` | Browser origins allowed to call the API. |
+| `VECTOR_STORE_TYPE` | `pgvector` (the self-hosting default) or `azure`. |
+| `EMBEDDING_FAIL_OPEN` | Whether a failed embedding call degrades silently or raises. |
+| `SLACK_*`, `EMAIL_*` | Optional Slack bot and SMTP. |
+
+### Telemetry
+
+The backend can report anonymous install and usage counters to PostHog. **No project key
+ships with this repository**, so the sink is a no-op unless you configure
+`deepsql.telemetry.posthog-project-key` yourself. `DO_NOT_TRACK=1` or
+`DEEPSQL_TELEMETRY_DISABLED=1` disables it outright, as does the admin toggle.
+
+---
+
+## Stack
+
+Spring Boot 4 on Java 25 · React 19 + Vite · PostgreSQL with pgvector · Valkey for
+caching · nginx.
+
+## Documentation
+
+- [`docs/README.md`](docs/README.md) — documentation index
+- [`AGENTS.md`](AGENTS.md) — codebase map
+- [`mcp/README.md`](mcp/README.md) — CLI and MCP server
+
+## License
+
+[Apache 2.0](LICENSE).

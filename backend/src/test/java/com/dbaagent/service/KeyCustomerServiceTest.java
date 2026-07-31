@@ -109,13 +109,13 @@ class KeyCustomerServiceTest {
 
     @Test
     void passesNonSensitiveNumericIds() {
-        // Numeric hotel_id in PUBLIC table -> NOT masked
-        setupAnalysis(List.of(buildQuery("q1", "SELECT * FROM bookings WHERE hotel_id = 42",
-            "SELECT * FROM bookings WHERE hotel_id = ?", SlowQuery.Severity.MEDIUM, 200.0, 3L)));
+        // Numeric customer_id in PUBLIC table -> NOT masked
+        setupAnalysis(List.of(buildQuery("q1", "SELECT * FROM bookings WHERE customer_id = 42",
+            "SELECT * FROM bookings WHERE customer_id = ?", SlowQuery.Severity.MEDIUM, 200.0, 3L)));
 
         when(sqlParserService.extractWhereClauseLiterals(anyString()))
             .thenReturn(List.of(ColumnLiteralPair.builder()
-                .tableName("bookings").columnName("hotel_id").value("42").operation("=").build()));
+                .tableName("bookings").columnName("customer_id").value("42").operation("=").build()));
 
         when(keyColumnRepo.findByConnectionIdOrderByImportanceScoreDesc("conn1")).thenReturn(List.of());
         when(classificationRepo.findLatestByConnectionIdOrderByTableNameAsc("conn1")).thenReturn(List.of());
@@ -150,13 +150,13 @@ class KeyCustomerServiceTest {
 
     @Test
     void nullTableExcludedWhenTableNameFilterActive() {
-        setupAnalysis(List.of(buildQuery("q1", "SELECT * FROM bookings WHERE hotel_id = 1 AND status = 'active'",
-            "SELECT * FROM bookings WHERE hotel_id = ? AND status = ?", SlowQuery.Severity.HIGH, 400.0, 2L)));
+        setupAnalysis(List.of(buildQuery("q1", "SELECT * FROM bookings WHERE customer_id = 1 AND status = 'active'",
+            "SELECT * FROM bookings WHERE customer_id = ? AND status = ?", SlowQuery.Severity.HIGH, 400.0, 2L)));
 
         // Two literals: one with table, one without
         when(sqlParserService.extractWhereClauseLiterals(anyString()))
             .thenReturn(List.of(
-                ColumnLiteralPair.builder().tableName("bookings").columnName("hotel_id").value("1").operation("=").build(),
+                ColumnLiteralPair.builder().tableName("bookings").columnName("customer_id").value("1").operation("=").build(),
                 ColumnLiteralPair.builder().tableName(null).columnName("status").value("active").operation("=").build()
             ));
 
@@ -167,23 +167,23 @@ class KeyCustomerServiceTest {
         Optional<KeyCustomerResult> result = service.analyze("conn1", 20, "bookings");
         assertTrue(result.isPresent());
         assertEquals(1, result.get().getKeyCustomers().size());
-        assertEquals("hotel_id", result.get().getKeyCustomers().get(0).getColumnName());
+        assertEquals("customer_id", result.get().getKeyCustomers().get(0).getColumnName());
     }
 
     // ==================== Deduplication ====================
 
     @Test
     void sameLiteralInOneQueryCountedOnce() {
-        // Self-join or redundant WHERE: hotel_id = 42 appears twice in one query
+        // Self-join or redundant WHERE: customer_id = 42 appears twice in one query
         setupAnalysis(List.of(buildQuery("q1",
-            "SELECT * FROM bookings b JOIN hotels h ON b.hotel_id = h.id WHERE b.hotel_id = 42 AND h.hotel_id = 42",
-            "SELECT * FROM bookings b JOIN hotels h ON b.hotel_id = h.id WHERE b.hotel_id = ? AND h.hotel_id = ?",
+            "SELECT * FROM bookings b JOIN customers h ON b.customer_id = h.id WHERE b.customer_id = 42 AND h.customer_id = 42",
+            "SELECT * FROM bookings b JOIN customers h ON b.customer_id = h.id WHERE b.customer_id = ? AND h.customer_id = ?",
             SlowQuery.Severity.CRITICAL, 800.0, 5L)));
 
         when(sqlParserService.extractWhereClauseLiterals(anyString()))
             .thenReturn(List.of(
-                ColumnLiteralPair.builder().tableName("bookings").columnName("hotel_id").value("42").operation("=").build(),
-                ColumnLiteralPair.builder().tableName("bookings").columnName("hotel_id").value("42").operation("=").build()
+                ColumnLiteralPair.builder().tableName("bookings").columnName("customer_id").value("42").operation("=").build(),
+                ColumnLiteralPair.builder().tableName("bookings").columnName("customer_id").value("42").operation("=").build()
             ));
 
         when(keyColumnRepo.findByConnectionIdOrderByImportanceScoreDesc("conn1")).thenReturn(List.of());
@@ -199,25 +199,25 @@ class KeyCustomerServiceTest {
     @Test
     void sameLiteralInTwoQueriesCountedTwice() {
         setupAnalysis(List.of(
-            buildQuery("q1", "SELECT * FROM bookings WHERE hotel_id = 42",
-                "SELECT * FROM bookings WHERE hotel_id = ?", SlowQuery.Severity.HIGH, 300.0, 2L),
-            buildQuery("q2", "SELECT * FROM rooms WHERE hotel_id = 42",
-                "SELECT * FROM rooms WHERE hotel_id = ?", SlowQuery.Severity.MEDIUM, 200.0, 1L)
+            buildQuery("q1", "SELECT * FROM bookings WHERE customer_id = 42",
+                "SELECT * FROM bookings WHERE customer_id = ?", SlowQuery.Severity.HIGH, 300.0, 2L),
+            buildQuery("q2", "SELECT * FROM rooms WHERE customer_id = 42",
+                "SELECT * FROM rooms WHERE customer_id = ?", SlowQuery.Severity.MEDIUM, 200.0, 1L)
         ));
 
-        when(sqlParserService.extractWhereClauseLiterals("SELECT * FROM bookings WHERE hotel_id = 42"))
+        when(sqlParserService.extractWhereClauseLiterals("SELECT * FROM bookings WHERE customer_id = 42"))
             .thenReturn(List.of(ColumnLiteralPair.builder()
-                .tableName("bookings").columnName("hotel_id").value("42").operation("=").build()));
-        when(sqlParserService.extractWhereClauseLiterals("SELECT * FROM rooms WHERE hotel_id = 42"))
+                .tableName("bookings").columnName("customer_id").value("42").operation("=").build()));
+        when(sqlParserService.extractWhereClauseLiterals("SELECT * FROM rooms WHERE customer_id = 42"))
             .thenReturn(List.of(ColumnLiteralPair.builder()
-                .tableName("bookings").columnName("hotel_id").value("42").operation("=").build()));
+                .tableName("bookings").columnName("customer_id").value("42").operation("=").build()));
 
         when(keyColumnRepo.findByConnectionIdOrderByImportanceScoreDesc("conn1")).thenReturn(List.of());
         when(classificationRepo.findLatestByConnectionIdOrderByTableNameAsc("conn1")).thenReturn(List.of());
 
         Optional<KeyCustomerResult> result = service.analyze("conn1", 20, null);
         assertTrue(result.isPresent());
-        // Same bucket key (bookings|hotel_id|42) -> 2 queries
+        // Same bucket key (bookings|customer_id|42) -> 2 queries
         assertEquals(1, result.get().getKeyCustomers().size());
         assertEquals(2, result.get().getKeyCustomers().get(0).getSlowQueryCount());
     }
@@ -275,20 +275,20 @@ class KeyCustomerServiceTest {
     @Test
     void filtersByKeyColumnAnalysis() {
         setupAnalysis(List.of(buildQuery("q1",
-            "SELECT * FROM bookings WHERE hotel_id = 42 AND temp_flag = 'x'",
-            "SELECT * FROM bookings WHERE hotel_id = ? AND temp_flag = ?",
+            "SELECT * FROM bookings WHERE customer_id = 42 AND temp_flag = 'x'",
+            "SELECT * FROM bookings WHERE customer_id = ? AND temp_flag = ?",
             SlowQuery.Severity.MEDIUM, 200.0, 1L)));
 
         when(sqlParserService.extractWhereClauseLiterals(anyString()))
             .thenReturn(List.of(
-                ColumnLiteralPair.builder().tableName("bookings").columnName("hotel_id").value("42").operation("=").build(),
+                ColumnLiteralPair.builder().tableName("bookings").columnName("customer_id").value("42").operation("=").build(),
                 ColumnLiteralPair.builder().tableName("bookings").columnName("temp_flag").value("x").operation("=").build()
             ));
 
-        // Only hotel_id is a key column
+        // Only customer_id is a key column
         KeyColumnAnalysis kca = new KeyColumnAnalysis();
         kca.setTableName("bookings");
-        kca.setColumnName("hotel_id");
+        kca.setColumnName("customer_id");
         kca.setKeyType("TRUE_KEY");
         kca.setImportanceScore(BigDecimal.valueOf(90));
         when(keyColumnRepo.findByConnectionIdOrderByImportanceScoreDesc("conn1"))
@@ -298,9 +298,9 @@ class KeyCustomerServiceTest {
 
         Optional<KeyCustomerResult> result = service.analyze("conn1", 20, null);
         assertTrue(result.isPresent());
-        // Only hotel_id included; temp_flag filtered out
+        // Only customer_id included; temp_flag filtered out
         assertEquals(1, result.get().getKeyCustomers().size());
-        assertEquals("hotel_id", result.get().getKeyCustomers().get(0).getColumnName());
+        assertEquals("customer_id", result.get().getKeyCustomers().get(0).getColumnName());
     }
 
     // ==================== Helpers ====================

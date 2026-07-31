@@ -31,10 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * someone reverts the fix or adds a new property that ships our URL,
  * this fails before CI lets the PR land.
  *
- * Note: application-azprod.properties is OUR Azure-prod-specific
- * deployment config. It used to hardcode our domains; now that the
- * repository is published it takes them from the environment like every
- * other profile. {@link CorsAllowlistSafetyTest} enforces that across
+ * Note: {@link CorsAllowlistSafetyTest} enforces the same rule across
  * every shipped properties file AND the Java @Value defaults this test
  * cannot see, since it reads properties through java.util.Properties.
  */
@@ -109,7 +106,6 @@ class SelfHostPropertiesSafetyTest {
     private static final List<String> SCANNED_FILES = List.of(
         "application.properties",
         "application-prod.properties",
-        "application-azprod.properties",
         "application-test.properties"
     );
 
@@ -123,12 +119,12 @@ class SelfHostPropertiesSafetyTest {
         // Hardcoded, human-readable, and committed on purpose so the "test" Spring
         // profile signs JWTs deterministically in CI without any env var. It is never
         // loaded outside @ActiveProfiles("test") and cannot reach a real deployment.
-        "application-test.properties#security.jwt.secret",
-        // A UUID identifying one pre-seeded test database connection row — not a
-        // secret, just a lookup key into the vault DB. It only trips the value-shape
-        // backstop because a UUID's hex-and-hyphen shape coincidentally satisfies the
-        // same "long, unbroken, alnum-ish" pattern real key material has.
-        "application-test.properties#test.connection.id"
+        "application-test.properties#security.jwt.secret"
+        // NOTE: test.connection.id used to be exempted here because it shipped a real
+        // connection UUID as its default, whose hex-and-hyphen shape tripped the
+        // value-shape backstop. It now defaults to empty (${TEST_CONNECTION_ID:}), so
+        // it no longer offends and the exemption is deliberately gone. If a default is
+        // ever re-added, this test SHOULD fail — that is the point.
     );
 
     /**

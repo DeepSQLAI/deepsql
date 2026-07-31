@@ -111,7 +111,7 @@ class SchemaDescriptionServiceTest {
             SchemaDocumentation.builder()
                 .connectionId("conn1")
                 .objectType(DocumentationType.TABLE)
-                .objectName("idb_database.HOTEL")
+                .objectName("analytics_db.CUSTOMERS")
                 .description("Existing AI description")
                 .source(DocumentationSource.AI_GENERATED)
                 .build()
@@ -119,9 +119,9 @@ class SchemaDescriptionServiceTest {
 
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
-        TableMetadata hotel = buildTable("HOTEL");
-        hotel.setSchema("idb_database");
-        schema.setTables(List.of(hotel));
+        TableMetadata customer = buildTable("CUSTOMERS");
+        customer.setSchema("analytics_db");
+        schema.setTables(List.of(customer));
         when(schemaScannerService.scanSchema("conn1")).thenReturn(schema);
 
         var result = service.generateDescriptions("conn1", null);
@@ -140,17 +140,17 @@ class SchemaDescriptionServiceTest {
             SchemaDocumentation.builder()
                 .connectionId("conn-2")
                 .objectType(DocumentationType.TABLE)
-                .objectName("HOTEL")
+                .objectName("CUSTOMERS")
                 .description("Other connection doc")
                 .source(DocumentationSource.AI_GENERATED)
                 .build()
         ));
         when(schemaDocRepo.save(any())).thenAnswer(i -> i.getArgument(0));
 
-        var schema = buildSchemaWithTables("HOTEL");
+        var schema = buildSchemaWithTables("CUSTOMERS");
         when(schemaScannerService.scanSchema("conn1")).thenReturn(schema);
         mockLlmResponse("""
-            [{"tableName":"HOTEL","tableDescription":"Hotel master record","confidence":0.81,"columns":[]}]
+            [{"tableName":"CUSTOMERS","tableDescription":"Hotel master record","confidence":0.81,"columns":[]}]
             """);
 
         var result = service.generateDescriptions("conn1", null);

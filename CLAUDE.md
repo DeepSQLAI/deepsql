@@ -38,7 +38,6 @@ npm run dev       # Dev server (http://localhost:3000)
 npm run lint      # Lint
 npm run test:local-regression  # Quick local regression suite
 npm run local-deploy           # Start services + run local regression suite
-npm run test:postgres-sim-regression  # Run the dedicated postgres simulator regression suite
 npm run mcp:phase1  # Start the Phase 1 DeepSQL MCP server (stdio)
 npm run build     # Build (dev)
 npm run build:production  # Build (prod)
@@ -264,9 +263,7 @@ ENCRYPTION_KEY_ID=<id-1>
     mvn test -Dtest=ApiSmokeTest
   ```
 - **Frontend**: `npm run lint` for static analysis.
-- **Quick local deploy regression**: `npm run test:local-regression` runs frontend build + health probes, backend `ApiSmokeTest`, and the brain-retrieval smoke suite (BI + schema exploration retrieval, business rules, inferred relationships). It defaults to connection `a273f43a-a844-44a3-9026-1b0de1167e8f` unless `LOCAL_REGRESSION_CONNECTION_ID` or `BRAIN_RETRIEVAL_CONNECTION_ID` overrides it. Enable frontend lint explicitly with `LOCAL_REGRESSION_RUN_FRONTEND_LINT=1`.
-- **Brain retrieval suite**: `npm run test:brain-retrieval` runs the full brain-retrieval fixture. The chat-agent-based suites (chat-resilience, sql-accuracy, schema-metadata, performance-monitoring) were removed when we stopped shipping our own chat agent; brain-retrieval covers BI and schema exploration by asserting on the brain's RAG outputs directly.
-- **Postgres simulator regression**: `POSTGRES_SIM_CONNECTION_ID=<connection-id> npm run test:postgres-sim-regression` exercises the brain's retrieval paths against the logistics workload simulator schema.
+- **Quick local deploy regression**: `npm run test:local-regression` runs the frontend build, service health probes, and the backend `ApiSmokeTest`. Enable frontend lint explicitly with `LOCAL_REGRESSION_RUN_FRONTEND_LINT=1`.
 
 ## Documentation Updates
 

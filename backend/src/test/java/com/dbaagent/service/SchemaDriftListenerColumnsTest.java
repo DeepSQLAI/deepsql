@@ -41,8 +41,8 @@ class SchemaDriftListenerColumnsTest {
     @Test
     void onColumnsAddedQueuesAiRegenForParentTablesUniquely() {
         listener.onColumnsAdded("c1", List.of(
-            new SchemaDriftListener.ColumnRef("HOTEL_SERVICES", "tip_amount"),
-            new SchemaDriftListener.ColumnRef("HOTEL_SERVICES", "tip_percent"),
+            new SchemaDriftListener.ColumnRef("PRODUCT_SERVICES", "tip_amount"),
+            new SchemaDriftListener.ColumnRef("PRODUCT_SERVICES", "tip_percent"),
             new SchemaDriftListener.ColumnRef("BOOKINGS", "rebooking_id")
         ));
         // Background virtual thread should fire generateDescriptions exactly
@@ -53,7 +53,7 @@ class SchemaDriftListenerColumnsTest {
             .generateDescriptions(eq("c1"), tablesCaptor.capture());
         var tables = tablesCaptor.getValue();
         assertEquals(2, tables.size());
-        assertTrue(tables.contains("HOTEL_SERVICES"));
+        assertTrue(tables.contains("PRODUCT_SERVICES"));
         assertTrue(tables.contains("BOOKINGS"));
     }
 

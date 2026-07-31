@@ -133,7 +133,7 @@ class QueryOptimizationServiceTest {
         when(keyColumnAnalysisRepository
             .findByConnectionIdAndTableNameOrderByImportanceScoreDesc(CONN, "bookings"))
             .thenReturn(List.of(
-                keyCol("bookings", "hotel_id", new BigDecimal("0.41"), 1820L,
+                keyCol("bookings", "customer_id", new BigDecimal("0.41"), 1820L,
                     new BigDecimal("90"), false)));
 
         String ctx = invoke(svc, List.of("bookings"));

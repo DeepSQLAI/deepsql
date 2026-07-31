@@ -108,7 +108,7 @@ export function useSchemaDocsData(connectionId) {
     }
 
     // Build note lookup maps (case-insensitive).
-    // Notes may use schema-qualified names (e.g. "idb_database.USER") while
+    // Notes may use schema-qualified names (e.g. "analytics_db.USER") while
     // the schema API returns bare names ("USER"). Index by both forms.
     //
     // When two notes match the same (table, column), pick by source authority:

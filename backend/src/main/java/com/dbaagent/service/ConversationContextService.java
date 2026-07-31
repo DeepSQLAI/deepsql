@@ -749,7 +749,7 @@ public class ConversationContextService {
                 && (normalized.contains("name")
                     || normalized.contains("title")
                     || normalized.contains("property")
-                    || normalized.contains("hotel"));
+                    || normalized.contains("customer"));
         });
         if (labelIndex < 0) {
             labelIndex = findFirstStringLikeIndex(queryResult.getRows());
@@ -1185,7 +1185,7 @@ public class ConversationContextService {
         if (question != null) {
             String lower = question.toLowerCase(Locale.ROOT);
             for (String metric : List.of("booking volume", "bookings", "revenue", "subscription", "cancellations",
-                "hotels", "properties", "payments", "arr", "mrr", "funnel", "conversion")) {
+                "customers", "properties", "payments", "arr", "mrr", "funnel", "conversion")) {
                 if (lower.contains(metric)) {
                     return metric;
                 }

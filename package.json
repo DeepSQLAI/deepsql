@@ -8,8 +8,6 @@
     "build:production": "vite build --mode production",
     "preview": "vite preview",
     "lint": "eslint .",
-    "test:brain-retrieval": "bash tests/suites/brain-retrieval/run-brain-retrieval-tests.sh",
-    "test:postgres-sim-regression": "bash tests/suites/postgres-sim/run-postgres-sim-regression.sh",
     "mcp:phase1": "node mcp/deepsql-phase1-server.js",
     "test:mcp:comparison": "node mcp/test-mcp-comparison.js",
     "test:local-regression": "bash scripts/run-local-regression-suite.sh",

@@ -8,7 +8,7 @@
 // resolved server-side from your saved `deepsql login` — nothing heavy installs,
 // and your terminal shares the same conversations as the web app.
 //
-//   deepsql agent "how many active hotels?"   one-shot
+//   deepsql agent "how many active customers?"   one-shot
 //   deepsql                                    interactive chat (resumes latest)
 
 const readline = require("node:readline");

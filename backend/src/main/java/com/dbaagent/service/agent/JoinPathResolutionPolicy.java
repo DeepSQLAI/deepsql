@@ -357,7 +357,7 @@ final class JoinPathResolutionPolicy {
             || normalizedQuestion.contains(" email ")
             || normalizedQuestion.contains(" country ")
             || normalizedQuestion.contains(" name ")
-            || normalizedQuestion.contains(" hotel ");
+            || normalizedQuestion.contains(" customer ");
     }
 
     private boolean mentionsMetric(String normalizedQuestion) {
@@ -376,7 +376,7 @@ final class JoinPathResolutionPolicy {
             || normalized.contains("country")
             || normalized.contains("state")
             || normalized.contains("city")
-            || normalized.contains("hotel");
+            || normalized.contains("customer");
     }
 
     private boolean isMetricColumn(ColumnMetadata column) {
@@ -482,8 +482,8 @@ final class JoinPathResolutionPolicy {
     }
 
     private boolean questionMentionsPropertyEntity(String normalizedQuestion) {
-        return normalizedQuestion.contains(" hotel ")
-            || normalizedQuestion.contains(" hotels ")
+        return normalizedQuestion.contains(" customer ")
+            || normalizedQuestion.contains(" customers ")
             || normalizedQuestion.contains(" property ")
             || normalizedQuestion.contains(" properties ")
             || normalizedQuestion.contains(" account ")
@@ -503,7 +503,7 @@ final class JoinPathResolutionPolicy {
 
     private boolean looksLikePropertyEntity(String identifier) {
         String normalized = identifier == null ? "" : identifier.toLowerCase(Locale.ROOT);
-        return normalized.contains("hotel")
+        return normalized.contains("customer")
             || normalized.contains("property")
             || normalized.contains("account");
     }

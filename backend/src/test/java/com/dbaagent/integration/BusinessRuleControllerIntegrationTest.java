@@ -30,7 +30,7 @@ class BusinessRuleControllerIntegrationTest extends BaseIntegrationTest {
     @DisplayName("Learns and resolves connection-scoped SQL guardrails")
     void learnsAndResolvesGuardrailsForConfiguredConnection() throws Exception {
         String question = "how much subscription revenue we collected for all of 2025 for united states account";
-        String teaching = "For subscription revenue use ACCOUNTS and ACCOUNTS_LEDGER, join on group_id, type=CREDIT and mode=SUBSCRIPTION instead of HOTEL and HOTEL_PRICING";
+        String teaching = "For subscription revenue use ACCOUNTS and ACCOUNTS_LEDGER, join on group_id, type=CREDIT and mode=SUBSCRIPTION instead of CUSTOMERS and PRODUCT_PRICING";
 
         String learnPayload = objectMapper.writeValueAsString(Map.of(
             "text", teaching,

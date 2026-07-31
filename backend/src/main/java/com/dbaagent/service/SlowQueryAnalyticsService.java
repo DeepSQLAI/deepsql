@@ -93,7 +93,7 @@ public class SlowQueryAnalyticsService {
      */
     private static final List<String> TENANT_STEMS = List.of(
         "tenant", "customer", "account", "organization", "org", "workspace",
-        "client", "company", "hotel", "property", "merchant", "store",
+        "client", "company", "customer", "property", "merchant", "store",
         "business", "subscriber", "site", "shop");
 
     /** System schemas to exclude when scanning information_schema (Postgres + MySQL). */
@@ -553,7 +553,7 @@ public class SlowQueryAnalyticsService {
     /**
      * Recommend candidate tenant/customer columns for a connection by scanning
      * its schema. A real tenant key has two tells: a name that contains a
-     * tenant-ish stem ({@code hotel_id}, {@code customer_id}, …) and presence
+     * tenant-ish stem ({@code customer_id}, {@code customer_id}, …) and presence
      * across many tables. We rank by (table coverage × id-shape bonus) so the
      * column that scopes the most tables floats to the top.
      *
@@ -605,7 +605,7 @@ public class SlowQueryAnalyticsService {
         "name", "display_name", "full_name", "title", "label", "company_name");
 
     /**
-     * Best-effort: given a tenant column like {@code hotel_id}, find the table
+     * Best-effort: given a tenant column like {@code customer_id}, find the table
      * that holds the tenant rows and the columns to resolve an id to a name —
      * so the customer name-lookup config fills itself in. Returns null when no
      * confident match exists (the user can still set it manually).
@@ -619,7 +619,7 @@ public class SlowQueryAnalyticsService {
         JdbcTemplate jdbc = connectionService.getJdbcTemplateForBackgroundJob(connectionId);
 
         // every column of every table whose name contains the stem
-        // (hotel -> hotel, hotels, hotel_details, sf_hotels, ...)
+        // (customer -> customer, customers, hotel_details, sf_hotels, ...)
         List<Map<String, Object>> cols = jdbc.queryForList(
             "SELECT table_name, column_name FROM information_schema.columns "
                 + "WHERE table_schema NOT IN (" + SYSTEM_SCHEMAS + ") "
@@ -658,13 +658,13 @@ public class SlowQueryAnalyticsService {
         // Two-tier ranking:
         //   1. Tables that actually have rows beat empty ones.
         //   2. Among non-empty (or all-empty) candidates, prefer the shortest
-        //      name — the canonical entity table (`hotels`) over a wider child
-        //      (`hotel_booking_details`).
+        //      name — the canonical entity table (`orders`) over a wider child
+        //      (`order_line_details`).
         //
         // The row-presence probe is what fixes the case-sensitive duplicates
         // bug: on MySQL with lower_case_table_names=0, schemas can carry both
-        // `HOTEL` (the real, populated entity table) and a leftover empty
-        // `hotel`. The old "shortest first" tiebreaker would pick whichever
+        // `ORDERS` (the real, populated entity table) and a leftover empty
+        // `orders`. The old "shortest first" tiebreaker would pick whichever
         // appeared first in information_schema's iteration order — if it
         // happened to land on the empty one, every customer name lookup
         // returned NULL and the UI fell back to bare numeric IDs.

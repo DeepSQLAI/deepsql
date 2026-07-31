@@ -313,7 +313,7 @@ curl http://localhost:8080/api/advisor/health/YOUR_CONNECTION_ID
 
 ## Real Example from Your Database
 
-**Tested on:** MySQL (idb_database)
+**Tested on:** MySQL
 
 **Results:**
 - **Overall Health:** POOR

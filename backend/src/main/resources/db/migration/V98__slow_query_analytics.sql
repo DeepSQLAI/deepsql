@@ -28,7 +28,7 @@ ALTER TABLE resource_limits
     ADD COLUMN IF NOT EXISTS slow_query_history_retention_days INTEGER NOT NULL DEFAULT 30;
 
 -- ── per-connection analytics config ───────────────────────────────────────
--- One tenant column per connection (e.g. hotel_id). Optional lookup config
+-- One tenant column per connection (e.g. customer_id). Optional lookup config
 -- lets DeepSQL resolve a tenant id to a human-readable customer name by
 -- running a cheap SELECT against the target DB.
 CREATE TABLE IF NOT EXISTS connection_analytics_config (

@@ -41,11 +41,11 @@ class SchemaSnapshotServiceTest {
     @Test
     void getLatestDatabaseObjects_returnsTablesAndViewsFromLatestSnapshot() throws Exception {
         SchemaMetadata metadata = new SchemaMetadata();
-        metadata.setDatabaseName("idb_database");
+        metadata.setDatabaseName("analytics_db");
         metadata.setTables(List.of(
             new TableMetadata(
                 "ACCOUNTS",
-                "idb_database",
+                "analytics_db",
                 "table",
                 42L,
                 1024L,
@@ -57,7 +57,7 @@ class SchemaSnapshotServiceTest {
             ),
             new TableMetadata(
                 "HOTEL_VIEW",
-                "idb_database",
+                "analytics_db",
                 "view",
                 0L,
                 0L,
@@ -81,7 +81,7 @@ class SchemaSnapshotServiceTest {
 
         assertThat(objects).hasSize(2);
         assertThat(objects.get(0).getName()).isEqualTo("ACCOUNTS");
-        assertThat(objects.get(0).getSchema()).isEqualTo("idb_database");
+        assertThat(objects.get(0).getSchema()).isEqualTo("analytics_db");
         assertThat(objects.get(0).getType()).isEqualTo("table");
         assertThat(objects.get(0).getColumns()).extracting("name")
             .containsExactly("account_id", "account_name");

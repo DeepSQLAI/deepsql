@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 @Service
 public class AgentPlanner {
     private static final Pattern DEPENDENT_REFERENCE_PATTERN = Pattern.compile(
-        "(?i)\\b(those|them|these|that|same|same\\s+scope|same\\s+properties|same\\s+accounts|same\\s+users|same\\s+hotels|returned|above|previous|their\\b|all\\s+those)\\b"
+        "(?i)\\b(those|them|these|that|same|same\\s+scope|same\\s+properties|same\\s+accounts|same\\s+users|same\\s+customers|returned|above|previous|their\\b|all\\s+those)\\b"
     );
     private static final Pattern LOOKUP_PATTERN = Pattern.compile(
         "(?i)\\b(show|list|give|provide|return|details?|breakdown|split|names?|countries?|amounts?|ids?)\\b"

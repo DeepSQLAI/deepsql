@@ -269,7 +269,7 @@ public class KeyCustomerService {
         // Rule 1+2: Column-level sensitivity from sensitiveColumns JSON.
         // We check if this specific column is flagged as sensitive, rather than
         // masking all columns from a sensitive table (which produces false
-        // positives for operational columns like hotel_id, booking_status).
+        // positives for operational columns like customer_id, booking_status).
         if (classification != null && classification.getSensitiveColumns() != null) {
             for (Map<String, Object> sc : classification.getSensitiveColumns()) {
                 String scColumn = (String) sc.get("column");

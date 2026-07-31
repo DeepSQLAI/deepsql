@@ -149,13 +149,13 @@ class CliAuthorizationServiceTest {
         @Test
         @DisplayName("device flow uses configured appBaseUrl for verification_uri")
         void deviceVerificationUriUsesConfiguredHost() {
-            ReflectionTestUtils.setField(service, "appBaseUrl", "https://deepsql.stayflexi.com");
+            ReflectionTestUtils.setField(service, "appBaseUrl", "https://deepsql.example.com");
 
             CliAuthorizationService.StartedDeviceCode started =
                 service.startDeviceFlow("host", "label");
 
             assertThat(started.verificationUri())
-                .isEqualTo("https://deepsql.stayflexi.com/cli-authorize/device");
+                .isEqualTo("https://deepsql.example.com/cli-authorize/device");
         }
 
         @Test
@@ -194,7 +194,7 @@ class CliAuthorizationServiceTest {
         void browserAuthorizeUrlHonorsLocalhostBase() {
             // The reported regression: customer's CLI on a laptop port-
             // forwarded to a VM, base-url was http://localhost:8081 but the
-            // CLI opened https://deepsql.stayflexi.com. Root cause was a
+            // CLI opened https://deepsql.example.com. Root cause was a
             // hardcoded prod-properties default, but lock the service-level
             // contract here too: anything passed in via `app.base-url`
             // must be exactly what comes out in authorize_url, including
@@ -209,7 +209,8 @@ class CliAuthorizationServiceTest {
 
             assertThat(started.authorizeUrl())
                 .startsWith("http://localhost:8081/cli-authorize?id=")
-                .doesNotContain("stayflexi");
+                // must not fall back to any hosted/demo domain
+                .doesNotContain("deepsql.example.com");
         }
     }
 

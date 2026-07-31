@@ -69,7 +69,7 @@ Update `application.properties` or set environment variables:
 azure.search.enabled=true
 
 # Connection details
-azure.search.endpoint=https://dba-agent-search.search.windows.net
+azure.search.endpoint=https://<your-search-resource>.search.windows.net
 azure.search.api-key=YOUR_ADMIN_API_KEY_HERE
 azure.search.index-name=dba-agent-training-data
 ```
@@ -78,7 +78,7 @@ Or using environment variables:
 
 ```bash
 export AZURE_SEARCH_ENABLED=true
-export AZURE_SEARCH_ENDPOINT=https://dba-agent-search.search.windows.net
+export AZURE_SEARCH_ENDPOINT=https://<your-search-resource>.search.windows.net
 export AZURE_SEARCH_API_KEY=your-admin-key
 ```
 

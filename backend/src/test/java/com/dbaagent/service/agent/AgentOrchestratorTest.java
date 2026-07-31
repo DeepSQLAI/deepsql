@@ -201,7 +201,7 @@ class AgentOrchestratorTest {
     void previewDecision_returnsNoneWhenAgenticDisabled() {
         AgentDecision decision = orchestrator.previewDecision(
             false,
-            "which hotels are about to churn",
+            "which customers are about to churn",
             new ChatQuestionRoutingService.QuestionRoute(
                 ChatQuestionRoutingService.RouteType.BI_QUERY,
                 ChatQuestionRoutingService.BrainTopic.GENERAL

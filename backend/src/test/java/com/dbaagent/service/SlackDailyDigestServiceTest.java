@@ -241,7 +241,7 @@ class SlackDailyDigestServiceTest {
         ConnectionAccessGrant grant = new ConnectionAccessGrant();
         grant.setUsername("alice");
         grant.setAccessLevel(ConnectionAccessLevel.FULL_CONTENT);
-        grant.setGrantedBy("admin@stayflexi.com");
+        grant.setGrantedBy("admin@example.com");
         grant.setCreatedAt(LocalDateTime.now().minusHours(2));
 
         lenient().when(databaseEventRepository.findRecentEvents(eq("conn-1"), any())).thenReturn(List.of());
@@ -254,7 +254,7 @@ class SlackDailyDigestServiceTest {
         String out = sb.toString();
         assertThat(out).contains("alice");
         assertThat(out).contains("FULL_CONTENT");
-        assertThat(out).contains("admin@stayflexi.com");
+        assertThat(out).contains("admin@example.com");
     }
 
     @Test

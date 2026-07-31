@@ -36,8 +36,8 @@ class PromptIntentAnalyzerTest {
     @Test
     void analyze_biMetricPrompt_routesToBiSqlQuery() {
         PromptIntent intent = analyzer.analyze(
-            "How many hotels were onboarded in the last 3 days?",
-            "How many hotels were onboarded in the last 3 days?",
+            "How many customers were onboarded in the last 3 days?",
+            "How many customers were onboarded in the last 3 days?",
             ResolvedConversationContext.empty(),
             new ChatQuestionRoutingService.QuestionRoute(
                 ChatQuestionRoutingService.RouteType.BI_QUERY,

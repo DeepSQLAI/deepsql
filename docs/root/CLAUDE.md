@@ -26,9 +26,7 @@ Do NOT ask "should I update CLAUDE.md?" - just update it as part of task complet
 - 2026-02-04: Moved all Markdown docs into `docs/` (root docs under `docs/root/`), added a root `README.md` stub, and updated doc links.
 - 2026-03-12: Added a Phase 1 DeepSQL MCP stdio server in `mcp/` with read-only tools for connections, schema, chat, SQL execution, and EXPLAIN. See `docs/root/MCP_PHASE1.md`.
 - 2026-03-30: Main chat execution was tightened to stay schema-agnostic. Do not add customer-specific table names, column names, SQL templates, or prompt-to-table shortcuts in chat classifier, planner, resolver, composer, or execution paths. Fix chat behavior through generic semantic ranking, context retrieval, and guardrails instead.
-- 2026-04-14: Added a quick local regression flow via `scripts/run-local-regression-suite.sh` and `scripts/local-deploy.sh`. The runner pairs frontend build + health probes with the backend `ApiSmokeTest` and a live brain-retrieval smoke pass. Frontend lint is opt-in via `LOCAL_REGRESSION_RUN_FRONTEND_LINT=1` because the repo currently has broader pre-existing lint debt.
-- 2026-04-14: Added a dedicated postgres simulator regression suite under `tests/suites/postgres-sim/` with brain-retrieval coverage plus a `run-postgres-sim-regression.sh` wrapper and `npm run test:postgres-sim-regression` entrypoint.
-- 2026-05-23: Retired the chat-agent-based regression suites (`chat-resilience`, `sql-accuracy`, `schema-metadata`, `performance-monitoring`) since we no longer ship our own chat agent. Replaced them with `tests/suites/brain-retrieval/`, which asserts directly on the brain's retrieval APIs (`POST /api/training/context/{cid}` for RAG context with `ragTableNames`, `GET /api/training/retrieve/{cid}` for ranked snippets with `tablesCovered`, `GET /api/business-rules/connection/{cid}` for guardrail surfacing, and `GET /api/brain/inferred-relationships/{cid}` for FK inference). The new suite ships short (`brain-retrieval-smoke-test-cases.json`) and full (`brain-retrieval-test-cases.json`) fixtures plus a postgres-sim variant, and is wired into both `npm run test:local-regression` and `npm run test:postgres-sim-regression`.
+- 2026-04-14: Added a quick local regression flow via `scripts/run-local-regression-suite.sh` and `scripts/local-deploy.sh`. The runner pairs frontend build + health probes with the backend `ApiSmokeTest`. Frontend lint is opt-in via `LOCAL_REGRESSION_RUN_FRONTEND_LINT=1` because the repo currently has broader pre-existing lint debt.
 
 ## Project Overview
 
@@ -159,9 +157,6 @@ npm run test:local-regression
 
 # Start local services, then run the quick regression suite
 npm run local-deploy
-
-# Run the dedicated postgres simulator regression suite
-POSTGRES_SIM_CONNECTION_ID=<connection-id> npm run test:postgres-sim-regression
 
 # Build for development
 npm run build

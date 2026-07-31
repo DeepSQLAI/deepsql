@@ -474,7 +474,7 @@ public class EnhancedSqlParserService {
         }
 
         // Pattern 2: FROM table_name alias (without AS)
-        // Matches: FROM users u, FROM USER_BOOKINGS ub
+        // Matches: FROM users u, FROM ORDER_ITEMS oi
         Pattern fromPattern = Pattern.compile(
             "FROM\\s+(\\w+)\\s+(\\w+)(?=\\s*(?:,|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|CROSS|NATURAL|GROUP|ORDER|HAVING|LIMIT|UNION|\\)|$))",
             Pattern.CASE_INSENSITIVE
@@ -489,7 +489,7 @@ public class EnhancedSqlParserService {
         }
 
         // Pattern 3: JOIN table_name alias (without AS)
-        // Matches: JOIN rate_plans r ON, LEFT JOIN hotels h ON
+        // Matches: JOIN rate_plans r ON, LEFT JOIN customers h ON
         Pattern joinPattern = Pattern.compile(
             "JOIN\\s+(\\w+)\\s+(\\w+)\\s+ON\\b",
             Pattern.CASE_INSENSITIVE

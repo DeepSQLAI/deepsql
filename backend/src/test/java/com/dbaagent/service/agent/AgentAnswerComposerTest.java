@@ -22,7 +22,7 @@ class AgentAnswerComposerTest {
 
         AgentExecutionContext context = new AgentExecutionContext("conn-1", "question", null, "mysql");
         QueryResult queryResult = new QueryResult(
-            List.of("hotel_id", "events"),
+            List.of("customer_id", "events"),
             List.of(List.of("h-1", 44)),
             1,
             null,
@@ -83,11 +83,11 @@ class AgentAnswerComposerTest {
                     "tableCount", 507,
                     "noDirectModuleTablesFound", true,
                     "suggestedExistingTables", List.of(
-                        Map.of("table", "INTELL_USERS", "reason", "best existing assignee/owner table if staff users live here", "columns", List.of("id", "hotel_id", "email")),
-                        Map.of("table", "HOTEL", "reason", "useful scope table if tasks are hotel-level operational work", "columns", List.of("id", "name"))
+                        Map.of("table", "STAFF_USERS", "reason", "best existing assignee/owner table if staff users live here", "columns", List.of("id", "customer_id", "email")),
+                        Map.of("table", "CUSTOMERS", "reason", "useful scope table if tasks are customer-level operational work", "columns", List.of("id", "name"))
                     ),
                     "proposedTables", List.of(
-                        Map.of("table", "TASKS", "purpose", "core task record with title, description, priority, due date, status, owner, and optional booking/hotel links"),
+                        Map.of("table", "TASKS", "purpose", "core task record with title, description, priority, due date, status, owner, and optional booking/customer links"),
                         Map.of("table", "TASK_ACTIVITY", "purpose", "immutable audit/activity stream for status changes, assignment changes, and reminders")
                     )
                 )
@@ -100,8 +100,8 @@ class AgentAnswerComposerTest {
         AgentExecutionResult result = composer.compose(plan, context);
 
         assertThat(result.message()).contains("I do **not** see an obvious task-management module");
-        assertThat(result.message()).contains("`INTELL_USERS`");
-        assertThat(result.message()).contains("`HOTEL`");
+        assertThat(result.message()).contains("`STAFF_USERS`");
+        assertThat(result.message()).contains("`CUSTOMERS`");
         assertThat(result.message()).contains("`TASKS`");
         assertThat(result.message()).contains("`TASK_ACTIVITY`");
     }
@@ -121,15 +121,15 @@ class AgentAnswerComposerTest {
             )
         );
 
-        AgentExecutionContext context = new AgentExecutionContext("conn-1", "What columns are there in HOTEL table?", null, "mysql");
+        AgentExecutionContext context = new AgentExecutionContext("conn-1", "What columns are there in CUSTOMERS table?", null, "mysql");
         context.recordToolExecution("vault_metadata_lookup_tool", new AgentToolResult(
             new AgentObservation(
                 "vault_schema",
-                "Found 3 columns for HOTEL",
+                "Found 3 columns for CUSTOMERS",
                 Map.of(
                     "sufficient", true,
                     "answerType", "table_columns",
-                    "tableName", "HOTEL",
+                    "tableName", "CUSTOMERS",
                     "columnCount", 3,
                     "columns", List.of(
                         Map.of("column", "id", "type", "bigint", "primaryKey", true, "nullable", false),
@@ -145,7 +145,7 @@ class AgentAnswerComposerTest {
 
         AgentExecutionResult result = composer.compose(plan, context);
 
-        assertThat(result.message()).contains("Table `HOTEL` has **3 columns**");
+        assertThat(result.message()).contains("Table `CUSTOMERS` has **3 columns**");
         assertThat(result.message()).contains("Columns:");
         assertThat(result.message()).contains("`id` — `bigint`; primary key; not null");
         assertThat(result.message()).doesNotContain("| Column | Type | Attributes |");
@@ -167,20 +167,20 @@ class AgentAnswerComposerTest {
             )
         );
 
-        AgentExecutionContext context = new AgentExecutionContext("conn-1", "Show me all key columns in ROOM_RESERVATIONS table", null, "mysql");
+        AgentExecutionContext context = new AgentExecutionContext("conn-1", "Show me all key columns in ORDER_LINE_ITEMS table", null, "mysql");
         context.recordToolExecution("vault_metadata_lookup_tool", new AgentToolResult(
             new AgentObservation(
                 "vault_key_columns",
-                "Found 4 exact key columns for ROOM_RESERVATIONS",
+                "Found 4 exact key columns for ORDER_LINE_ITEMS",
                 Map.of(
                     "sufficient", true,
                     "answerType", "table_key_columns",
-                    "tableName", "ROOM_RESERVATIONS",
+                    "tableName", "ORDER_LINE_ITEMS",
                     "columnCount", 4,
                     "keyColumns", List.of(
                         Map.of("column", "id", "roles", List.of("Primary key"), "summary", "Primary key"),
                         Map.of("column", "booking_id", "roles", List.of("References BOOKINGS.id"), "summary", "References BOOKINGS.id"),
-                        Map.of("column", "hotel_id", "roles", List.of("References HOTEL.id"), "summary", "References HOTEL.id"),
+                        Map.of("column", "customer_id", "roles", List.of("References CUSTOMERS.id"), "summary", "References CUSTOMERS.id"),
                         Map.of("column", "rate_plan_id", "roles", List.of("References RATE_PLAN.id"), "summary", "References RATE_PLAN.id")
                     )
                 )
@@ -192,10 +192,10 @@ class AgentAnswerComposerTest {
 
         AgentExecutionResult result = composer.compose(plan, context);
 
-        assertThat(result.message()).contains("`ROOM_RESERVATIONS`");
+        assertThat(result.message()).contains("`ORDER_LINE_ITEMS`");
         assertThat(result.message()).contains("The most relevant key columns");
         assertThat(result.message()).contains("`booking_id` —");
-        assertThat(result.message()).contains("References HOTEL.id");
+        assertThat(result.message()).contains("References CUSTOMERS.id");
         assertThat(result.message()).doesNotContain("| Column | Why it matters |");
         assertThat(result.message()).doesNotContain("Closest Existing Tables");
     }

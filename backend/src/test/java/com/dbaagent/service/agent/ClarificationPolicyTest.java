@@ -102,7 +102,7 @@ class ClarificationPolicyTest {
                 "ctx-1",
                 "BI_QUERY",
                 "CLARIFICATION",
-                List.of("USER_BOOKINGS"),
+                List.of("CUSTOMER_ORDERS"),
                 List.of(),
                 null,
                 "booking revenue",

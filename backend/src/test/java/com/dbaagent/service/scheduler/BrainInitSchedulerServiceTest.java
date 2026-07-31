@@ -77,7 +77,7 @@ class BrainInitSchedulerServiceTest {
             .connectionId("conn-1")
             .currentStage(InitStage.FAILED)
             .progressPercent(92)
-            .stageMessage("Indexing table user_bookings for retrieval (500/500)")
+            .stageMessage("Indexing table customer_orders for retrieval (500/500)")
             .startedAt(LocalDateTime.of(2026, 3, 30, 15, 0))
             .completedAt(LocalDateTime.of(2026, 3, 30, 15, 10))
             .errorMessage("IllegalStateException: 0 usable embeddings")

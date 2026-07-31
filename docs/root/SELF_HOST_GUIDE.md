@@ -1,513 +1,685 @@
-# DeepSQL Self-Host Guide
+# DeepSQL Self-Host Operations Guide
 
-This package is the supported Docker deployment for DeepSQL self-hosting.
-DeepSQL distributes it as prebuilt multi-arch Docker images on GitHub Container Registry (ghcr.io), plus a lightweight distribution repo with Docker Compose, scripts, and configuration.
+Everything you need to run DeepSQL in production that does not fit in the README.
 
-Deployment boundary:
-- Runs inside the customer environment: DeepSQL frontend, backend, PostgreSQL vault, Valkey cache, pgvector-backed RAG storage, and all customer database connections.
-- Bring your own LLM: the operator supplies the model credentials (`DEEPSQL_CHAT_*` / `DEEPSQL_EMBEDDING_*`) and model traffic goes directly from the customer's backend to the provider they choose — OpenAI, Azure OpenAI, or a self-hosted OpenAI-compatible server. DeepSQL ships no model credentials and does not proxy or meter model calls.
+The [root `README.md`](../../README.md) covers what DeepSQL is, the quick start, the
+`DEEPSQL_CHAT_*` / `DEEPSQL_EMBEDDING_*` LLM configuration, and the development loop.
+This guide picks up from there: sizing a host, the full environment reference with the
+code that reads each variable, how the first admin account is actually created, TLS,
+upgrades, backups, and the failure modes worth knowing before they happen.
 
-## Supported Access Modes
+There is **no container registry and no prebuilt image**. You clone the repository and
+Docker Compose builds the backend and frontend from the checkout. Upgrading is
+`git pull` plus a rebuild.
 
-Self-host V1 supports three product entry points:
-
-- Direct chat in the DeepSQL web UI
-- MCP through a local stdio shim used by Claude Desktop or Codex
-- Slack through an in-backend Socket Mode bot
-
-Important MCP note:
-
-- The MCP process does not run inside Docker Compose in V1
-- Each end user runs the stdio MCP client locally on their laptop or workstation
-- That local process connects to the self-hosted DeepSQL backend over HTTPS with an MCP token
-- A centrally hosted remote MCP endpoint is a future phase
-
-## Docker Images
-
-| Image | Source | Architectures |
-|-------|--------|---------------|
-| `ghcr.io/deepsqlai/deepsql-backend:<tag>` | `backend/Dockerfile` | linux/amd64, linux/arm64 |
-| `ghcr.io/deepsqlai/deepsql-frontend:<tag>` | `Dockerfile` (root) | linux/amd64, linux/arm64 |
-
-Images are built and published automatically by the `release-docker` GitHub Actions workflow when a version tag is pushed.
+---
 
 ## Architecture
 
-```
-Customer Environment                          Your LLM provider
-┌──────────────────────────────────────┐     ┌──────────────────┐
-│  Browser → nginx (frontend:80)       │     │  OpenAI, Azure   │
-│    ├─ Static SPA assets              │     │  OpenAI, or any  │
-│    └─ /api/* → backend:8080 ─────────┼────→│  OpenAI-compat.  │
-│         ├─ PostgreSQL:5432 (vault)   │     │  server you run  │
-│         ├─ Valkey:6379 (cache)       │     └──────────────────┘
-│         └─ Customer DBs (outbound)   │
-└──────────────────────────────────────┘
-```
-
-All customer data stays local. Only LLM inference calls leave the environment, and they
-go directly to the provider the operator configures — DeepSQL does not proxy them. Point
-the endpoints at a self-hosted OpenAI-compatible server and nothing leaves at all.
-
-## Distribution Repo
-
-Customers receive access to [DeepSQLAI/deepsql](https://github.com/DeepSQLAI/deepsql). The
-older private `deepsql-self-host` repo is deprecated — it is kept only so existing clone
-URLs do not go dead. The runtime files a customer needs are:
+Four containers, defined in [`docker-compose.yml`](../../docker-compose.yml):
 
 ```
-deepsql/
-  docker-compose.yml          # Full stack: postgres, valkey, backend, frontend
-  .env.example                # Pre-filled with ghcr.io image refs
-  scripts/
-    self-host/
-      install.sh              # Auto-generates secrets, prompts for DEEPSQL_CHAT_API_KEY
-    status.sh                 # Health check monitoring
-    smoke-test.sh             # Post-deployment validation
-    uninstall.sh              # Cleanup (with --purge-data option)
-  docker/
-    nginx/default.conf        # SPA routing + API proxy
-    postgres/init/
-      01_create_scheduled_tasks.sql
-  README.md
+                     your network                          outbound
+┌───────────────────────────────────────────────┐     ┌──────────────────┐
+│                                               │     │  the LLM         │
+│  browser ──▶ frontend  (nginx :80 → host 3000)│     │  endpoint you    │
+│                 │  static SPA bundle          │     │  configure       │
+│                 └─ /api/ ─▶ backend :8080 ────┼────▶│  (OpenAI, Azure  │
+│                               │               │     │  OpenAI, or an   │
+│                               ├─▶ postgres :5432     │  OpenAI-compat.  │
+│                               │    vault + pgvector  │  server you run) │
+│                               ├─▶ valkey :6379       └──────────────────┘
+│                               │    cache
+│                               └─▶ your databases (outbound, incl. SSH tunnels)
+└───────────────────────────────────────────────┘
 ```
 
-## What is included (main repo)
+| Service    | Image / build                                    | Role |
+|------------|--------------------------------------------------|------|
+| `postgres` | `pgvector/pgvector:pg18`                          | Vault DB: encrypted connection credentials, users, chat history, brain artefacts, and — in the default `pgvector` mode — the RAG embeddings. Started with `pg_stat_statements` preloaded. |
+| `valkey`   | `valkey/valkey:9.1.1`                             | Redis-compatible cache. Loss of this container degrades performance, not correctness. |
+| `backend`  | built from [`backend/Dockerfile`](../../backend/Dockerfile) | Spring Boot 4.1.0 / Spring AI 2.0.0 on Java 25. All API, orchestration, retrieval and guardrails. |
+| `frontend` | built from the root [`Dockerfile`](../../Dockerfile) | Vite-built React SPA served by nginx 1.27, which also reverse-proxies `/api/` to `backend:8080` so the browser bundle can use relative URLs. |
 
-Release engineering scripts in the main repo:
+Named volumes: `dba-agent-postgres` (vault data), `dba-agent-valkey` (cache), and
+`dba-agent-logs` (backend log files at `/app/logs`). Docker prefixes them with the
+Compose project name — see [Project name](#project-name-two-stacks-by-accident).
 
-- `scripts/self-host/install.sh` — enhanced with auto-secret generation
-- `scripts/self-host/status.sh`
-- `scripts/self-host/smoke-test.sh`
-- `scripts/self-host/uninstall.sh`
-- `scripts/self-host/package.sh` — tarball bundler
-- `scripts/self-host/release.sh` — local build + package + optional push
-- `.github/workflows/release-docker.yml` — CI/CD for ghcr.io publishing
+Only two things leave the environment: calls to the LLM endpoint you configure, and
+optional anonymous telemetry that is a no-op unless you supply your own PostHog key.
+Point the LLM endpoints at a server on your own network and nothing leaves at all.
 
-## Prerequisites
+### First-run database initialisation
 
-Required on the host machine:
-- Docker Engine 24+
-- Docker Compose v2 (`docker compose`)
-- `curl`
-
-Recommended minimum host sizing:
-- 4 vCPU
-- 8 GB RAM (4 GB minimum)
-- 40 GB free disk
+The scripts in [`docker/postgres/init/`](../../docker/postgres/init/) run **only when the
+`dba-agent-postgres` volume is empty** — that is standard postgres-image behaviour. They
+create the db-scheduler table, enable `pgvector`, and enable `pg_stat_statements`.
+`install.sh` re-applies the first and second of those on every run
+(`ensure_scheduler_table`, `ensure_pg_stat_statements`), so an upgrade over an existing
+volume is not silently missing them.
 
 ---
 
-## Creating a New Release
+## Host requirements
 
-### Step 1: Tag the release
+**Software**
 
-```bash
-git tag v1.1.0
-git push origin v1.1.0
-```
+- Docker Engine with Compose v2 — check with `docker compose version`
+- `curl` and `openssl`, used by `scripts/self-host/install.sh`
+- Git, to clone and later to `git pull` for upgrades
 
-This triggers the `release-docker` GitHub Actions workflow which:
-1. Builds backend and frontend images for amd64 + arm64 via Buildx + QEMU
-2. Pushes them to ghcr.io with tags `1.1.0` and `latest`
-3. Creates a GitHub Release with auto-generated release notes
+Nothing else. The JDK, Maven and Node toolchains live inside the build stages.
 
-Monitor the build:
+**Memory — read this before provisioning.** The backend entrypoint sets `-Xmx3g` together
+with `-XX:+ExitOnOutOfMemoryError` ([`backend/Dockerfile`](../../backend/Dockerfile),
+lines 41–66), and the comment there records why:
 
-```bash
-gh run list --workflow=release-docker.yml --limit 1
-gh run watch <run-id>
-```
+> Heap was 1 GB … but brain init's `SCHEMA_CLASSIFICATION` runs ~10 parallel
+> virtual-thread sub-classifications that each load hundreds of tables' columns +
+> indexes into memory. On a large MySQL schema (~600 tables) the parallel load OOMs
+> the 1 GB heap; with `-XX:+ExitOnOutOfMemoryError` the JVM exits cleanly (code 0, no
+> shutdown logs — looks like an external SIGTERM) and the brain init progress is lost.
+> The container auto-restarts and the cycle repeats every ~8 min.
 
-### Step 2: Update the distribution repo
+Two things follow.
 
-```bash
-cd /path/to/deepsql-self-host
-```
+1. **The backend alone wants ~4 GB available to Docker** — 3 GB of heap plus JVM
+   overhead. The 3 GB figure was chosen assuming a host with roughly 15 GB of RAM, which
+   leaves plenty for postgres, valkey, nginx and the OS. Size the host so postgres and
+   valkey are not competing with that 3 GB.
+2. **A restart loop with no error is the OOM signature.** If the backend container
+   restarts every few minutes during brain initialisation, with exit code 0 and no
+   shutdown logs, it ran out of heap. It does not look like an OOM — it looks like
+   something killed the process from outside. See
+   [Troubleshooting](#backend-restarts-every-few-minutes-during-brain-init).
 
-Update `.env.example` to pin the new version:
+**Disk.** Building compiles the backend with Maven inside the container and bundles the
+frontend with Vite, so the build cache and images together are multiple GB. On top of
+that the vault volume grows with your schema metadata and — in `pgvector` mode — one
+embedding row per RAG document. Both grow with the number and size of the databases you
+connect. Give the host generous headroom and monitor the volume rather than trusting a
+fixed number.
 
-```env
-DEEPSQL_BACKEND_IMAGE=ghcr.io/deepsqlai/deepsql-backend:1.1.0
-DEEPSQL_FRONTEND_IMAGE=ghcr.io/deepsqlai/deepsql-frontend:1.1.0
-```
-
-If docker-compose, scripts, or config files changed in the main repo, copy them over:
-
-```bash
-# Only copy files that actually changed:
-cp /path/to/dba-agent/docker-compose.yml .
-cp /path/to/dba-agent/scripts/self-host/install.sh scripts/install.sh
-cp /path/to/dba-agent/scripts/self-host/status.sh scripts/status.sh
-cp /path/to/dba-agent/scripts/self-host/smoke-test.sh scripts/smoke-test.sh
-cp /path/to/dba-agent/scripts/self-host/uninstall.sh scripts/uninstall.sh
-cp /path/to/dba-agent/docker/nginx/default.conf docker/nginx/default.conf
-cp /path/to/dba-agent/docker/postgres/init/01_create_scheduled_tasks.sql docker/postgres/init/
-```
-
-**Important:** The self-host repo scripts use `ROOT_DIR` one level up (not two). After copying `install.sh`, verify these differences:
-- `ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"` (not `../../`)
-- "Useful commands" output uses `./scripts/*.sh` (not `./scripts/self-host/*.sh`)
-
-Commit and tag:
-
-```bash
-git add -A
-git commit -m "chore: sync with dba-agent v1.1.0"
-git tag v1.1.0
-git push origin main --tags
-```
-
-### Step 3: Notify the customer
-
-Tell them to update:
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-Or pin the new version in their `.env`:
-
-```env
-DEEPSQL_BACKEND_IMAGE=ghcr.io/deepsqlai/deepsql-backend:1.1.0
-DEEPSQL_FRONTEND_IMAGE=ghcr.io/deepsqlai/deepsql-frontend:1.1.0
-```
+**CPU.** No verified minimum. Brain initialisation is the CPU-heavy phase and is
+parallel across virtual threads, so more cores shorten it; steady-state serving is light.
 
 ---
 
-## Distributing to a New Customer
-
-### Step 1: Grant access
-
-**Option A — GitHub collaborator (recommended):**
-Invite their GitHub username as an outside collaborator with read access on `DeepSQLAI/deepsql`. ghcr.io packages inherit repo access, so they can pull images too.
-
-**Option B — Read-only PAT:**
-Generate a Personal Access Token (classic) with `read:packages` scope and share it.
-
-### Step 2: Share credentials
-
-Via a secure channel (1Password, encrypted message, etc.), send:
-- GitHub PAT (if using Option B instead of collaborator access)
-
-Do **not** send LLM credentials. The customer brings their own — see "Configuring the
-LLM" in the README. DeepSQL ships no model credentials.
-
-### Step 3: Customer setup
-
-They follow the README in `deepsql`:
+## Installing
 
 ```bash
-# 1. Authenticate with registry
-echo "<TOKEN>" | docker login ghcr.io -u <USERNAME> --password-stdin
-
-# 2. Clone the distribution repo
-git clone https://github.com/DeepSQLAI/deepsql.git
+git clone <this-repo> deepsql
 cd deepsql
-
-# 3. Configure
 cp .env.example .env
-# Edit .env — set DEEPSQL_CHAT_* (and DEEPSQL_EMBEDDING_* for RAG)
+$EDITOR .env                     # at minimum the DEEPSQL_CHAT_* group
 
-# 4. Install (auto-generates JWT secret, encryption key, DB password)
 ./scripts/self-host/install.sh
-
-# 5. Open http://localhost:3000
 ```
+
+[`scripts/self-host/install.sh`](../../scripts/self-host/install.sh) is the recommended
+path, not a convenience wrapper — it is the only thing in the repository that performs
+the [first-run admin bootstrap](#first-run-access) correctly. In order it:
+
+1. Copies `.env.example` to `.env` and exits if `.env` did not exist, so you get a chance
+   to fill it in.
+2. Generates `SECURITY_JWT_SECRET`, `ENCRYPTION_KEY`, `DB_PASSWORD` and
+   `ADMIN_BOOTSTRAP_SECRET` with `openssl` if they are still placeholders, and writes
+   them back into `.env`.
+3. Prompts for `DEEPSQL_CHAT_API_KEY`, for `DEEPSQL_EMBEDDING_API_KEY` (only if
+   `DEEPSQL_EMBEDDING_PROVIDER` is set), for the initial admin email and password, and
+   optionally for `DEEPSQL_COMPANY_NAME`.
+4. Requires `DEEPSQL_CHAT_PROVIDER`, `DEEPSQL_CHAT_API_KEY` and `DEEPSQL_CHAT_ENDPOINT`
+   to be real values, and requires `AZURE_SEARCH_*` only if you chose the Azure vector
+   store.
+5. Sets `SPRING_AUTOCONFIGURE_EXCLUDE` to exclude Spring AI's Azure vector-store
+   auto-configuration when `VECTOR_STORE_TYPE=pgvector`, so the stack needs no Azure
+   settings at all.
+6. Builds both images, starts the stack under the Compose project name
+   `deepsql-selfhost`, and waits for the backend and frontend to answer.
+7. Ensures the db-scheduler table and `pg_stat_statements` exist, then verifies the
+   pgvector RAG store: the `vector` extension, the `rag_documents` table, that
+   `rag_documents.embedding` is `vector(3072)`, and that the `idx_rag_docs_embedding` ANN
+   index exists. Any of those missing is a hard failure.
+8. Flips `SECURITY_ADMIN_BOOTSTRAP_ENABLED=true`, creates the admin account, then flips it
+   back to `false` in `.env` and restarts the backend.
+
+Re-running it is the supported way to apply configuration changes and to rebuild after a
+`git pull`. It is idempotent: already-set secrets are left alone, and the admin bootstrap
+step no-ops once `.env` no longer carries a blank admin password.
+
+The script honours `DEEPSQL_ENV_FILE`, `DEEPSQL_COMPOSE_FILE` and `DEEPSQL_PROJECT_NAME`
+if you need to run more than one stack on a host.
+
+### Preparing a bare Linux VM
+
+[`scripts/self-host/bootstrap-server.sh`](../../scripts/self-host/bootstrap-server.sh),
+run as root on a fresh Debian/Ubuntu host, installs Docker and the Compose plugin, ensures
+`curl`, creates the deploy directory (`/opt/deepsql`, override with `DEEPSQL_DEPLOY_DIR`;
+owner `ubuntu`, override with `DEEPSQL_DEPLOY_USER`), and seeds `.env` from `.env.example`
+if a checkout is already in place. It does not clone the repository for you — put the
+checkout in the deploy directory yourself, since the stack is built from source.
 
 ---
 
-## Quick Start (Main Repo — Development)
+## First-run access
 
-### 1. Prepare the environment file
+**`docker compose up -d --build` on its own leaves you with a stack you cannot log into.**
+There is no seeded account, and all three of the obvious ways to make one are closed:
+
+| Path | Status | Code |
+|---|---|---|
+| `POST /api/auth/signup` | Always returns 403 — the handler is a stub with no logic behind it. | [`AuthController.java:77-82`](../../backend/src/main/java/com/dbaagent/controller/AuthController.java) |
+| `POST /api/setup/initialize` (the onboarding wizard) | Always returns 410. The handler ignores its request body entirely. | [`SetupController.java:68-73`](../../backend/src/main/java/com/dbaagent/controller/SetupController.java) |
+| `POST /api/users/admin/reset` | The only working path, behind three independent gates. | [`UserController.java:81-91`](../../backend/src/main/java/com/dbaagent/controller/UserController.java) |
+
+`/api/users/admin/reset` checks, in order:
+
+1. `security.admin.bootstrap.enabled` must be true — set `SECURITY_ADMIN_BOOTSTRAP_ENABLED=true`
+   ([`UserController.java:36-37`](../../backend/src/main/java/com/dbaagent/controller/UserController.java),
+   bound from [`application.properties:21`](../../backend/src/main/resources/application.properties)).
+   Note that [`application-prod.properties:11`](../../backend/src/main/resources/application-prod.properties)
+   hardcodes it to `false`; the environment variable overrides it, which is why it works
+   under `SPRING_PROFILES_ACTIVE=prod`.
+2. The request must come from a **loopback address**. `isLocalRequest` reads
+   `request.getRemoteAddr()` and accepts only `127.0.0.1`, `::1` or another loopback
+   address ([`UserController.java:133-149`](../../backend/src/main/java/com/dbaagent/controller/UserController.java)).
+   There is no `X-Forwarded-For` handling, so a call routed through the frontend nginx, a
+   reverse proxy, or from another host is rejected. It has to originate **inside the
+   backend container**.
+3. The `X-Admin-Bootstrap-Secret` header must equal `security.admin.bootstrap.secret`. A
+   blank configured secret fails every comparison, so `ADMIN_BOOTSTRAP_SECRET` must
+   genuinely be set ([`UserController.java:151-158`](../../backend/src/main/java/com/dbaagent/controller/UserController.java)).
+
+`install.sh` satisfies all three and then closes the door again. If you must do it by
+hand — recovering a lost admin password, say — this is the procedure it uses:
 
 ```bash
-cp .env.example .env
+# 1. Set both in .env, then restart the backend so it picks them up.
+#      SECURITY_ADMIN_BOOTSTRAP_ENABLED=true
+#      ADMIN_BOOTSTRAP_SECRET=<a one-time secret>
+docker compose -p deepsql-selfhost up -d backend
+
+# 2. Call the endpoint from inside the backend container (loopback requirement).
+docker compose -p deepsql-selfhost exec -T backend sh -lc '
+  curl -fsS -X POST http://localhost:8080/api/users/admin/reset \
+    -H "Content-Type: application/json" \
+    -H "X-Admin-Bootstrap-Secret: <the same secret>" \
+    -d "{\"email\":\"admin@example.com\",\"password\":\"<a strong password>\"}"'
+
+# 3. Set SECURITY_ADMIN_BOOTSTRAP_ENABLED=false in .env and restart again.
+docker compose -p deepsql-selfhost up -d backend
 ```
 
-The install script auto-generates security secrets (`SECURITY_JWT_SECRET`, `ENCRYPTION_KEY`, `DB_PASSWORD`) if they are still set to placeholders. It also prompts interactively for your LLM chat API key.
+Two things worth knowing about the endpoint. It **deletes any existing user named
+`admin`** before recreating it — that is what makes it a password reset, and it is
+destructive. And the created account's *username* is always `admin`, regardless of the
+email you pass; the email is what you log in with.
 
-Required values that must be provided manually:
-- `DEEPSQL_CHAT_PROVIDER` — `openai` is the only id shipped; it also covers Azure OpenAI and any OpenAI-compatible server
-- `DEEPSQL_CHAT_API_KEY`
-- `DEEPSQL_CHAT_ENDPOINT` — e.g. `https://api.openai.com/v1`
-- `DEEPSQL_CHAT_MODEL` — e.g. `gpt-4o`
+Every subsequent user is created by an administrator from the UI. Self-service signup
+never re-opens.
 
-Strongly recommended (without them RAG retrieval stays keyword-only):
-- `DEEPSQL_EMBEDDING_PROVIDER`, `DEEPSQL_EMBEDDING_API_KEY`
+---
 
-Recommended defaults for self-host:
+## Configuration
+
+All configuration is environment variables in `.env`, which Compose passes to the backend
+via `env_file` ([`docker-compose.yml:66-67`](../../docker-compose.yml)).
+[`.env.example`](../../.env.example) is documented inline and is the fastest reference;
+the tables below add the code that actually reads each value, so you can check a claim
+rather than trust it.
+
+> The onboarding wizard in the UI is **not** a way to configure the LLM. It writes a
+> different, older namespace of config keys that
+> [`LlmConfigResolver`](../../backend/src/main/java/com/dbaagent/llm/LlmConfigResolver.java)
+> does not read. Environment variables are the working path.
+
+### Security and secrets
+
+| Variable | Read by | Notes |
+|---|---|---|
+| `SECURITY_JWT_SECRET` | `application.properties:20`, `application-prod.properties:10` | Signs session tokens. `openssl rand -base64 64`. Rotating it invalidates every session. |
+| `ENCRYPTION_KEY` | [`EncryptionService.java:36`](../../backend/src/main/java/com/dbaagent/security/EncryptionService.java) | AES-GCM key for the credential vault. `openssl rand -base64 32`. |
+| `ENCRYPTION_KEYS` | [`EncryptionService.java:35`](../../backend/src/main/java/com/dbaagent/security/EncryptionService.java) | Rotation form: comma-separated `id:key` pairs. Use instead of `ENCRYPTION_KEY`, not alongside. |
+| `ENCRYPTION_KEY_ID` | [`EncryptionService.java:37`](../../backend/src/main/java/com/dbaagent/security/EncryptionService.java) | Names the active key. Required when more than one key is configured (`EncryptionService.java:217`). `install.sh` requires it to be non-blank; `.env.example` ships `self-hosted-key-1`. |
+| `SECURITY_AUTH_ENABLED` | `application.properties:18` → [`SecurityConfig.java`](../../backend/src/main/java/com/dbaagent/config/SecurityConfig.java) | Leave at `true`. `false` accepts unauthenticated API calls — local development only. |
+| `SECURITY_ADMIN_BOOTSTRAP_ENABLED` | `application.properties:21` → [`UserController.java:36`](../../backend/src/main/java/com/dbaagent/controller/UserController.java) | Gate for the first-admin endpoint. Must be `false` in steady state. |
+| `ADMIN_BOOTSTRAP_SECRET` | `application.properties:22` → [`UserController.java:39`](../../backend/src/main/java/com/dbaagent/controller/UserController.java) | The `X-Admin-Bootstrap-Secret` value. Blank disables the endpoint outright. |
+| `SECURITY_COOKIE_SECURE` | `application.properties:28` → [`AuthSessionService.java:41`](../../backend/src/main/java/com/dbaagent/service/AuthSessionService.java) | **Set `true` once you are behind TLS.** Defaults to `false`. |
+| `SECURITY_COOKIE_SAME_SITE` | `application.properties:27` → [`AuthSessionService.java:44`](../../backend/src/main/java/com/dbaagent/service/AuthSessionService.java) | Defaults to `Lax`. Only change it if the UI and API are on different sites. |
+| `SECURITY_SESSION_ACCESS_MINUTES` | `application.properties:23` → [`JwtUtil.java`](../../backend/src/main/java/com/dbaagent/security/JwtUtil.java), `AuthSessionService.java` | Access-token lifetime. Default 15. |
+| `SECURITY_SESSION_REFRESH_DAYS` | `application.properties:24` → [`AuthSessionService.java`](../../backend/src/main/java/com/dbaagent/service/AuthSessionService.java) | Refresh-token lifetime. Default 7. |
+| `SPRING_PROFILES_ACTIVE` | [`docker-compose.yml:90`](../../docker-compose.yml) | `prod` for self-hosting. Compose and `install.sh` both default to it. |
+
+### The LLM
+
+[`LlmConfigResolver`](../../backend/src/main/java/com/dbaagent/llm/LlmConfigResolver.java)
+is the authority. It resolves two independent bundles, `chat` and `embedding`, from the
+database first and the environment second, and builds each environment variable name as
+`DEEPSQL_<ROLE>_<FIELD>` with `-` replaced by `_`
+([`LlmConfigResolver.java:112-129`](../../backend/src/main/java/com/dbaagent/llm/LlmConfigResolver.java)).
+
+**`DEEPSQL_<ROLE>_PROVIDER` gates the whole bundle.** With it unset, no other variable in
+that group is read at all (`LlmConfigResolver.java:113-115`). The fields it collects are
+listed at `LlmConfigResolver.java:31-33`: `api-key`, `endpoint`, `model`, `region`,
+`access-key-id`, `secret-access-key`, `api-version`, `use-responses-api`, `temperature`.
+
+| Variable | Notes |
+|---|---|
+| `DEEPSQL_CHAT_PROVIDER` | `openai` is the only id shipped. It covers OpenAI, Azure OpenAI, and any OpenAI-compatible server. |
+| `DEEPSQL_CHAT_API_KEY` | Required by `install.sh`. |
+| `DEEPSQL_CHAT_ENDPOINT` | Required by `install.sh` — chat has no working endpoint fallback, so set it explicitly even for OpenAI. |
+| `DEEPSQL_CHAT_MODEL` | Model id; for Azure, the *deployment* name. |
+| `DEEPSQL_CHAT_TEMPERATURE`, `DEEPSQL_CHAT_API_VERSION`, `DEEPSQL_CHAT_USE_RESPONSES_API` | Optional tuning. `_API_VERSION` is the Azure REST version; `_USE_RESPONSES_API` accepts `true` / `false` / `auto`. |
+| `DEEPSQL_EMBEDDING_PROVIDER`, `_API_KEY`, `_ENDPOINT`, `_MODEL` | Same shape. Optional: the app starts without them and retrieval stays keyword-only. If you set `_PROVIDER`, `install.sh` also requires `_API_KEY`. |
+| `EMBEDDING_FAIL_OPEN` | `application.properties:131` / `application-prod.properties:95` → [`EmbeddingService.java`](../../backend/src/main/java/com/dbaagent/service/EmbeddingService.java). `true` returns an empty vector when an embedding call fails and degrades retrieval silently; `false` propagates the error. The `prod` profile defaults to `false` — keep it there. |
+| `APP_CHAT_AGENTIC_ENABLED`, `APP_CHAT_AGENTIC_MAX_STEPS` | `application.properties:132-133` → [`AgentOrchestrator.java`](../../backend/src/main/java/com/dbaagent/service/agent/AgentOrchestrator.java). Step budget for agentic chat; default 6. |
+
+`AZURE_OPENAI_KEY`, `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_CHAT_DEPLOYMENT` still
+appear in `application.properties` but configure nothing in the chat path — the resolver
+does not consult them. Use an Azure endpoint through `DEEPSQL_CHAT_*` instead.
+
+### Vector store
+
+| Variable | Read by | Notes |
+|---|---|---|
+| `VECTOR_STORE_TYPE` | `application.properties:144` → [`PgVectorRagStoreInitializer.java`](../../backend/src/main/java/com/dbaagent/config/PgVectorRagStoreInitializer.java), [`PgVectorSearchService.java`](../../backend/src/main/java/com/dbaagent/service/PgVectorSearchService.java) | `pgvector` for self-hosting — embeddings stay in the vault DB, no external dependency. `azure` selects Azure AI Search. |
+| `VECTOR_STORE_EMBEDDING_DIMENSIONS` | same | Default 3072, matching `text-embedding-3-large`. **Changing this after ingestion invalidates the `rag_documents.embedding` column** — `install.sh` fails the install if the column type does not match. |
+| `SPRING_AUTOCONFIGURE_EXCLUDE` | Spring Boot; set at [`docker-compose.yml:92`](../../docker-compose.yml) | For pgvector mode, set to `org.springframework.ai.vectorstore.azure.autoconfigure.AzureVectorStoreAutoConfiguration`. `install.sh` sets it for you. |
+| `AZURE_SEARCH_ENABLED` | `application.properties:140` → [`VectorSearchService.java`](../../backend/src/main/java/com/dbaagent/service/VectorSearchService.java) | `false` in pgvector mode. |
+| `AZURE_SEARCH_ENDPOINT`, `AZURE_SEARCH_API_KEY`, `AZURE_SEARCH_INDEX_NAME` | `application.properties:137-139` → [`AzureSearchService.java`](../../backend/src/main/java/com/dbaagent/service/AzureSearchService.java) | Required only for `VECTOR_STORE_TYPE=azure`; `install.sh` enforces all three in that mode. |
+
+Switching modes requires a restart. Embeddings do not migrate between the two stores —
+connections have to be re-initialised.
+
+### Vault database and cache
+
+| Variable | Read by | Notes |
+|---|---|---|
+| `DB_PASSWORD` | [`docker-compose.yml:25,72`](../../docker-compose.yml) | Used for both the postgres container's `POSTGRES_PASSWORD` and the backend's datasource, so the two cannot drift. Changing it after first start does **not** change the password already stored in the volume. |
+| `DB_URL`, `DB_USERNAME` | `application.properties:52,54` | Compose pins these to its own `postgres` service ([`docker-compose.yml:70-71`](../../docker-compose.yml)) and its values win over `.env`. Only relevant when running the backend outside Compose. |
+| `DEEPSQL_VALKEY_PASSWORD` | [`docker-compose.yml:77`](../../docker-compose.yml) → `spring.data.redis.password` | Empty by default. The bundled `valkey` container has no password configured, so setting this alone will break the connection. |
+
+### Public URLs — the one that breaks `deepsql login`
+
+`APP_BASE_URL` and `APP_PUBLIC_URL` are **not in `.env.example`**. You have to add them,
+and getting them wrong fails in a way that is hard to trace back.
+
+| Variable | Read by | What it does |
+|---|---|---|
+| `APP_BASE_URL` | `application-prod.properties:47` → [`CliAuthorizationService.java:65`](../../backend/src/main/java/com/dbaagent/service/CliAuthorizationService.java) | The backend returns this **verbatim** as the CLI's `authorize_url` and `verification_uri`. |
+| `APP_PUBLIC_URL` | `application.properties:42`, `application-prod.properties:37` → [`AuthController.java:54`](../../backend/src/main/java/com/dbaagent/controller/AuthController.java), [`UserInviteService.java:31`](../../backend/src/main/java/com/dbaagent/service/UserInviteService.java) | Base for invitation emails and signup links. |
+
+Both default to `http://localhost:3000`. That default works for someone sitting on the
+VM, and fails for everyone else: `deepsql login` on a teammate's laptop opens
+`http://localhost:3000/...` on *their* machine, where nothing is listening. The same goes
+for an invitation email — the recipient gets a link to their own localhost.
+
+Set them to the URL your users actually type into a browser:
 
 ```env
-SPRING_PROFILES_ACTIVE=prod
-VECTOR_STORE_TYPE=pgvector
-AZURE_SEARCH_ENABLED=false
-CORS_ALLOWED_ORIGINS=http://localhost:3000
-
-# CRITICAL for `deepsql login` (CLI / MCP install) — must point at the
-# DeepSQL frontend your users open in their browser. The backend
-# returns this verbatim as the authorize_url; if you forget to set
-# these, the CLI's browser flow falls back to http://localhost:3000.
-# That works for someone running on the VM itself, but fails for
-# anyone connecting from their laptop (port-forwarding or otherwise) —
-# the redirect can't reach their machine.
-APP_BASE_URL=https://deepsql.your-company.com
-APP_PUBLIC_URL=https://deepsql.your-company.com
+APP_BASE_URL=https://deepsql.your-company.example
+APP_PUBLIC_URL=https://deepsql.your-company.example
 ```
 
-The backend logs the resolved `app.base-url` at startup:
+The backend logs the resolved value at startup
+([`CliAuthorizationService.java:82`](../../backend/src/main/java/com/dbaagent/service/CliAuthorizationService.java)):
 
 ```
 CLI auth flows will hand out authorize_url and verification_uri rooted at <url>
 ```
 
-Check that log line after restart — if it points anywhere other than
-your DeepSQL frontend, `deepsql login` on your team's laptops will
-open the wrong page. (We've seen this bite a customer once already;
-before 0.13.5 of the backend, the prod profile silently fell back to
-our hosted demo URL when `APP_BASE_URL` wasn't set.)
+Check that line after every restart that touches this configuration. An empty value logs
+an explicit error instead.
 
-`install.sh` automatically disables the Spring AI Azure vector-store auto-configuration when `VECTOR_STORE_TYPE=pgvector`, so the stack does not require Azure AI Search settings in self-host mode.
+### Ports and CORS
 
-### 2. Optional first-run admin bootstrap
+Every host port is overridable, and CORS has to be told about the origin you actually
+serve from.
 
-If you want `install.sh` to create the first admin account automatically, set:
-
-```env
-SECURITY_ADMIN_BOOTSTRAP_ENABLED=true
-ADMIN_BOOTSTRAP_SECRET=choose-a-one-time-bootstrap-secret
-DEEPSQL_INITIAL_ADMIN_EMAIL=admin@example.com
-DEEPSQL_INITIAL_ADMIN_PASSWORD=choose-a-strong-password
-```
-
-After the first successful login, set `SECURITY_ADMIN_BOOTSTRAP_ENABLED=false` and restart the stack.
-
-### 3. Install the stack
-
-```bash
-./scripts/self-host/install.sh
-```
-
-This script:
-- auto-generates security secrets if still placeholders
-- prompts for the LLM chat API key (and the embedding key, when an embedding provider is
-  selected) if still placeholders
-- requires `DEEPSQL_CHAT_PROVIDER`, `DEEPSQL_CHAT_API_KEY` and `DEEPSQL_CHAT_ENDPOINT`
-- validates the registry is accessible
-- pulls the frontend and backend images, unless `DEEPSQL_SKIP_IMAGE_PULL=true`
-- starts PostgreSQL, Valkey, backend, and frontend
-- waits for health checks
-- resets or creates the first admin user if bootstrap vars are present
-
-### 4. Verify the deployment
-
-```bash
-./scripts/self-host/status.sh
-./scripts/self-host/smoke-test.sh
-```
-
-Open the UI:
-- Frontend: `http://localhost:3000`
-- Backend API: `http://localhost:8080/api`
-
-## MCP From Another Machine
-
-Self-host V1 supports Claude Desktop and Codex running on separate client machines.
-
-Requirements on the client machine:
-
-- Node 20+
-- Network access to the customer-hosted DeepSQL backend over HTTPS
-- A DeepSQL MCP personal access token created in the self-hosted deployment
-
-Customer-facing examples are included here:
-
-- `mcp/README.md`
-- `mcp/claude_desktop_config.customer.example.json`
-- `mcp/codex_config.customer.example.toml`
-
-Typical client configuration:
-
-```env
-DEEPSQL_API_BASE_URL=https://customer-deepsql.example.com/api/
-DEEPSQL_AUTH_TOKEN=dsql_mcp_...
-```
-
-Then run the local stdio shim with:
-
-```bash
-npx -y @deepsql/mcp
-```
-
-## Slack Data Agent
-
-Slack V1 runs inside the backend with Slack Socket Mode, so customers do not need to expose a public inbound webhook endpoint.
-
-Required environment variables:
-
-```env
-SLACK_ENABLED=true
-SLACK_SOCKET_MODE_ENABLED=true
-SLACK_APP_TOKEN=xapp-...
-SLACK_BOT_TOKEN=xoxb-...
-SLACK_SIGNING_SECRET=...
-SLACK_DEEPSQL_BOT_USERNAME=slack-bot
-```
-
-Recommended DeepSQL setup:
-
-- Create a dedicated non-admin DeepSQL user for Slack
-- Store only Slack-approved database connections under that DeepSQL user
-- Use slash commands to bind a channel or DM to one of those allowed connections
-
-Runtime behavior:
-
-- `/deepsql-use <connection>` binds the default connection for a channel or DM
-- `/deepsql-reset` clears the binding
-- `/deepsql-help` shows usage and available Slack-owned connections
-- Channel mentions and DMs create or reuse one DeepSQL `chatId` per Slack thread and always reply in-thread
-
-Admin status endpoint:
-
-- `GET /api/admin/slack/status`
-
-If you override the host ports in `.env`, use those values instead.
-
-If the deployment is using an offline image archive, load it first and skip the registry pull:
-
-```bash
-gunzip -c deepsql-self-host-vX.Y.Z-images.tar.gz | docker load
-```
-
-Then set:
-
-```env
-DEEPSQL_SKIP_IMAGE_PULL=true
-```
-
-## Smoke test behavior
-
-`scripts/self-host/smoke-test.sh` validates the packaged deployment against the vault PostgreSQL database itself.
-
-It performs these checks:
-- login as the bootstrap admin user
-- create a PostgreSQL connection pointing to the internal `postgres` service
-- verify the connection is listed
-- fetch live schema metadata for that connection
-
-This is the recommended post-install sanity check before handing the deployment to a customer team.
-
-## Port configuration
-
-The stack exposes these host ports by default:
-- `3000` frontend
-- `8080` backend
-- `5432` PostgreSQL
-- `6379` Valkey
-
-Override them in `.env` if needed:
+| Variable | Default | Read by |
+|---|---|---|
+| `DEEPSQL_FRONTEND_PORT` | 3000 | [`docker-compose.yml:116`](../../docker-compose.yml) |
+| `DEEPSQL_BACKEND_PORT` | 8080 | [`docker-compose.yml:94`](../../docker-compose.yml) |
+| `DEEPSQL_POSTGRES_PORT` | 5432 | [`docker-compose.yml:32`](../../docker-compose.yml) |
+| `DEEPSQL_VALKEY_PORT` | 6379 | [`docker-compose.yml:47`](../../docker-compose.yml) |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | `application.properties:87` → [`SecurityConfig.java`](../../backend/src/main/java/com/dbaagent/config/SecurityConfig.java) |
 
 ```env
 DEEPSQL_FRONTEND_PORT=13000
-DEEPSQL_BACKEND_PORT=18080
-DEEPSQL_POSTGRES_PORT=15432
-DEEPSQL_VALKEY_PORT=16379
 CORS_ALLOWED_ORIGINS=http://localhost:13000
 ```
 
-## Vector Store Modes
+Behind a reverse proxy, `CORS_ALLOWED_ORIGINS` must list the **public** origin
+(`https://deepsql.your-company.example`), not the container port. Consider binding
+postgres and valkey to `127.0.0.1` on a public host, or dropping their `ports:` entries
+entirely — nothing outside the Compose network needs them.
 
-**Mode A — pgvector (default, fully local):**
+### Optional integrations
+
+**Slack.** The bot runs inside the backend over Socket Mode, so no inbound webhook has to
+be exposed. All six variables bind through
+[`SlackProperties.java`](../../backend/src/main/java/com/dbaagent/config/SlackProperties.java)
+(`@ConfigurationProperties(prefix = "slack")`) from `application.properties:290-295`:
+`SLACK_ENABLED`, `SLACK_SOCKET_MODE_ENABLED`, `SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN`,
+`SLACK_SIGNING_SECRET`, `SLACK_DEEPSQL_BOT_USERNAME`.
+
+Create a dedicated non-admin DeepSQL user for the bot and give it only the connections
+Slack is allowed to reach; `SLACK_DEEPSQL_BOT_USERNAME` names that user. The slash
+commands registered at
+[`SlackBotService.java:137-168`](../../backend/src/main/java/com/dbaagent/service/SlackBotService.java)
+are `/deepsql-use <connection>`, `/deepsql-reset` and `/deepsql-help`. Admin status is at
+`GET /api/admin/slack/status`
+([`SlackAdminController.java:20,30`](../../backend/src/main/java/com/dbaagent/controller/SlackAdminController.java)).
+
+**SMTP.** `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USERNAME`, `EMAIL_PASSWORD`, `EMAIL_FROM`
+(`application.properties:277-284`). These are fallback defaults; runtime settings stored
+in the database take priority. Without SMTP, invitation and OTP emails cannot be sent.
+
+**Telemetry.** Anonymous install and usage counters, off by default in practice: no
+PostHog project key ships with the repository, so the sink is a no-op unless you set
+`deepsql.telemetry.posthog-project-key` yourself
+([`TelemetryConfig.java:39`](../../backend/src/main/java/com/dbaagent/config/TelemetryConfig.java)).
+A truthy `DO_NOT_TRACK` or `DEEPSQL_TELEMETRY_DISABLED` disables it outright
+([`TelemetryConfig.java:32-33`](../../backend/src/main/java/com/dbaagent/config/TelemetryConfig.java)),
+as does the admin toggle. `DEEPSQL_COMPANY_NAME` labels the install and falls back to the
+admin email's domain ([`InstallTelemetryBootstrap.java:95,117`](../../backend/src/main/java/com/dbaagent/service/telemetry/InstallTelemetryBootstrap.java)).
+
+---
+
+## TLS and reverse proxy
+
+Nothing in the stack terminates TLS. For any deployment that is not `localhost`, put a
+TLS terminator in front of the frontend container and let it proxy to
+`DEEPSQL_FRONTEND_PORT`. The frontend's own nginx already forwards `/api/` to the backend
+([`docker/nginx/default.conf`](../../docker/nginx/default.conf)), so a single upstream is
+enough — you do not need to expose `DEEPSQL_BACKEND_PORT` publicly.
+
+Once TLS is in place, three settings must follow or authentication behaves oddly:
 
 ```env
-VECTOR_STORE_TYPE=pgvector
-AZURE_SEARCH_ENABLED=false
+SECURITY_COOKIE_SECURE=true
+CORS_ALLOWED_ORIGINS=https://deepsql.your-company.example
+APP_BASE_URL=https://deepsql.your-company.example
+APP_PUBLIC_URL=https://deepsql.your-company.example
 ```
 
-Embeddings stored in the local PostgreSQL vault DB. No external dependencies.
+[`nginx-production.conf`](../../nginx-production.conf) in the repository root is an
+**example vhost pair for a different topology** — one where the SPA is served from
+`/var/www/deepsql` on the host and the backend runs on `localhost:8080` outside Docker.
+Read it for the proxy settings worth copying: `proxy_http_version 1.1` with the `Upgrade`
+/ `Connection` headers, the `X-Forwarded-*` set, and 300-second connect/send/read timeouts
+for long-running queries. It listens on port 80 with the certbot TLS lines commented out,
+and its hostnames are placeholders (`api.example.com`, `app.example.com`) — replace them.
+Its `location /_next/static/` block is a leftover from a Next.js era; DeepSQL builds with
+Vite and never emits that path, so the block is inert.
 
-**Mode B — Azure AI Search (opt-in):**
+If you do terminate TLS at a separate proxy in front of the frontend container, make sure
+it also disables response buffering for `/api/`, or the streaming chat responses will
+arrive all at once. The bundled config already does this
+(`proxy_buffering off` in `docker/nginx/default.conf`).
 
-```env
-VECTOR_STORE_TYPE=azure
-AZURE_SEARCH_ENABLED=true
-AZURE_SEARCH_ENDPOINT=https://your-search-resource.search.windows.net
-AZURE_SEARCH_API_KEY=your-key
-AZURE_SEARCH_INDEX_NAME=dba-agent-training-data
-```
+---
 
-Restart the stack after changing. The app auto-configures based on `VECTOR_STORE_TYPE`.
+## Operating the stack
 
-## Operations
+### Project name (two stacks by accident)
 
-Start or update:
+`install.sh` and its sibling scripts run Compose with `--project-name deepsql-selfhost`.
+A bare `docker compose` in the repository directory uses the directory name instead, so
+`docker compose ps` will report an *empty, different* stack and `docker compose up -d`
+would build a second one. Either use the scripts, or pass the project name explicitly:
 
 ```bash
-./scripts/self-host/install.sh
+docker compose -p deepsql-selfhost ps
 ```
 
-Check status:
+or export `COMPOSE_PROJECT_NAME=deepsql-selfhost` in your shell. The same prefix appears
+on the volumes: `deepsql-selfhost_dba-agent-postgres`.
+
+### Health and status
 
 ```bash
 ./scripts/self-host/status.sh
 ```
 
-Stop and remove containers, preserving data:
+[`status.sh`](../../scripts/self-host/status.sh) prints `docker compose ps` and probes
+both HTTP endpoints. The underlying checks:
 
 ```bash
-./scripts/self-host/uninstall.sh
+curl -fsS http://localhost:8080/api/actuator/health
+curl -fsS http://localhost:3000
 ```
 
-Stop and remove everything, including persisted PostgreSQL and Valkey volumes:
+The backend actuator exposes `health`, `info`, `metrics`, `caches` and `prometheus`
+(`application-prod.properties:140-142`), with full health detail
+(`management.endpoint.health.show-details=always`). That is more than you may want on a
+publicly reachable port — another reason not to expose `DEEPSQL_BACKEND_PORT` directly.
+
+Compose runs its own health checks: `pg_isready` for postgres, `valkey-cli ping` for
+valkey, and the actuator endpoint for the backend with a 60-second start period. The
+frontend waits for the backend to be healthy before starting.
+
+### Logs
 
 ```bash
-./scripts/self-host/uninstall.sh --purge-data
+docker compose -p deepsql-selfhost logs -f backend
+docker compose -p deepsql-selfhost logs -f frontend
+docker compose -p deepsql-selfhost logs -f postgres
 ```
 
-View logs:
+The backend also writes files to `/app/logs` inside its container, persisted in the
+`dba-agent-logs` volume. See [`docs/LOGGING-GUIDE.md`](../LOGGING-GUIDE.md) for the log
+format and what to look for.
+
+### Smoke test
 
 ```bash
-docker compose logs -f backend
-docker compose logs -f frontend
-docker compose logs -f postgres
+./scripts/self-host/smoke-test.sh
 ```
 
-## Packaging for offline delivery
+[`smoke-test.sh`](../../scripts/self-host/smoke-test.sh) is a real end-to-end exercise,
+not a ping. Against the vault database itself it: verifies the `vector` and
+`pg_stat_statements` extensions, the `rag_documents` table and its ANN index; logs in as
+the admin; creates a PostgreSQL connection pointing at the internal `postgres` service;
+confirms it appears in the connection list; fetches live schema metadata; waits for brain
+initialisation to reach `COMPLETED` (up to 20 minutes by default); and finally asserts
+that pgvector actually holds embedded documents for that connection.
 
-Create a customer-deliverable bundle with offline image archive:
+It reads credentials from `DEEPSQL_INITIAL_ADMIN_EMAIL` / `DEEPSQL_INITIAL_ADMIN_PASSWORD`
+in `.env`, or from `DEEPSQL_SMOKE_EMAIL` / `DEEPSQL_SMOKE_PASSWORD`. Set
+`DEEPSQL_SMOKE_WAIT_FOR_INIT=false` to skip the brain-init wait, or
+`DEEPSQL_SMOKE_INIT_TIMEOUT_SECONDS` to change the budget.
+
+It leaves the connection it created behind. Delete it from the UI afterwards.
+
+### Upgrading
 
 ```bash
-./scripts/self-host/release.sh --tag vX.Y.Z --registry ghcr.io/deepsqlai --push
-./scripts/self-host/release.sh --tag vX.Y.Z --export-images
+git pull
+./scripts/self-host/install.sh
 ```
 
-That produces:
-- `dist/deepsql-self-host-vX.Y.Z.tar.gz` — runtime bundle
-- `dist/deepsql-self-host-vX.Y.Z-images.tar.gz` — Docker image archive
+or, driving Compose yourself:
 
-For offline installs, the customer loads the archive and sets `DEEPSQL_SKIP_IMAGE_PULL=true`.
+```bash
+git pull
+docker compose -p deepsql-selfhost up -d --build
+```
 
-## Security notes
+Prefer `install.sh`: it re-applies the scheduler table and `pg_stat_statements` (the
+`docker/postgres/init/` scripts do **not** re-run on an existing volume) and re-verifies
+the pgvector store afterwards. It will not re-prompt for values already set in `.env`.
 
-- ghcr.io packages are private (inherit from private repo visibility)
-- Customer `.env` files are gitignored — secrets never committed
-- Security secrets (JWT, encryption key, DB password) are auto-generated on first install
-- No shared LLM secrets: the customer supplies their own provider credentials, which never
-  pass through DeepSQL
-- All customer data stays local (vault DB, cache, embeddings with pgvector default)
-- Only outbound HTTPS to the LLM provider the customer configures — none at all if that is
-  a server on their own network
-- No inbound network exposure required
-- Self-host must run with `SPRING_PROFILES_ACTIVE=prod`
-- Do not leave admin bootstrap enabled after first-run setup
-- Pin image references to an explicit release tag for production. Do not deploy `latest`
-- Use a reverse proxy / TLS terminator in front of the frontend for any non-local deployment
-- Backup the PostgreSQL volume before upgrades and before running `--purge-data`
+Take a backup first. Schema migrations run automatically on backend startup and are not
+reversible.
 
-## Current limitation
+### Backup and restore
 
-This package is self-hosted for infrastructure and data plane, but it is not fully air-gapped
-by default: it calls out to whichever LLM provider you configure. Pointing
-`DEEPSQL_CHAT_ENDPOINT` / `DEEPSQL_EMBEDDING_ENDPOINT` at a self-hosted OpenAI-compatible
-server (vLLM, Ollama, LM Studio, TGI) keeps model traffic inside your network too.
+The vault database holds encrypted connection credentials, users, chat history, brain
+artefacts and — in pgvector mode — every embedding. A logical dump is the portable
+option:
+
+```bash
+# Backup
+docker compose -p deepsql-selfhost exec -T postgres \
+  pg_dump -U postgres -d dba_agent --format=custom > deepsql-vault-$(date +%F).dump
+
+# Restore into a freshly started, empty stack
+docker compose -p deepsql-selfhost exec -T postgres \
+  pg_restore -U postgres -d dba_agent --clean --if-exists < deepsql-vault-2026-01-01.dump
+```
+
+**Back up `.env` alongside it, and store it somewhere else.** A dump without
+`ENCRYPTION_KEY` / `ENCRYPTION_KEYS` is unusable — every stored database password in it is
+ciphertext that only that key can open. Losing the key means re-entering every connection
+credential by hand. Keeping the key in the same place as the dump defeats the encryption.
+
+For a volume-level snapshot instead, stop the stack first so postgres is not mid-write:
+
+```bash
+docker compose -p deepsql-selfhost stop
+docker run --rm -v deepsql-selfhost_dba-agent-postgres:/data -v "$PWD":/backup \
+  alpine tar czf /backup/deepsql-postgres-volume.tar.gz -C /data .
+docker compose -p deepsql-selfhost start
+```
+
+The valkey volume is a cache and does not need backing up.
+
+### Stopping and removing
+
+```bash
+./scripts/self-host/uninstall.sh                 # stop and remove containers, keep volumes
+./scripts/self-host/uninstall.sh --purge-data    # also delete the postgres and valkey volumes
+```
+
+`--purge-data` is `docker compose down --volumes`. It is irreversible and takes the vault
+with it. Back up first.
+
+---
+
+## Troubleshooting
+
+### Frontend container will not start: `host not found in upstream "deepsql-agent"`
+
+```
+nginx: [emerg] host not found in upstream "deepsql-agent" in /etc/nginx/conf.d/default.conf:82
+```
+
+[`docker/nginx/default.conf`](../../docker/nginx/default.conf) contains an `/agent-api/`
+location that proxies to `http://deepsql-agent:8787/`, for a separate agent runtime that
+**is not one of the four Compose services**. nginx resolves upstream hostnames when it
+loads its configuration, so if nothing on the Compose network answers to `deepsql-agent`,
+nginx refuses to start and the container crash-loops — `install.sh` then times out waiting
+for the frontend.
+
+Confirm it with `docker compose -p deepsql-selfhost logs frontend`. If that is what you
+see, remove the `location = /__agent_auth` and `location /agent-api/ { … }` blocks from
+`docker/nginx/default.conf` and rebuild the frontend:
+
+```bash
+docker compose -p deepsql-selfhost up -d --build frontend
+```
+
+Everything the web UI needs — the SPA and the `/api/` proxy — is unaffected; only the
+agent-runtime passthrough goes away.
+
+### Backend restarts every few minutes during brain init
+
+Exit code 0, no shutdown logs, and the restart cadence roughly matching how long brain
+initialisation gets before dying. That is the `-XX:+ExitOnOutOfMemoryError` heap
+exhaustion described under [Host requirements](#host-requirements), not an external kill.
+`docker stats` during initialisation will show the backend pinned near its limit.
+
+Give the host more memory, or raise the ceiling by editing the `-Xmx3g` flag in
+[`backend/Dockerfile`](../../backend/Dockerfile) and rebuilding. Large schemas — hundreds
+of tables — are what tips it over.
+
+### `deepsql login` opens the wrong page, or opens nothing
+
+`APP_BASE_URL` is unset or wrong. See
+[Public URLs](#public-urls--the-one-that-breaks-deepsql-login). Check the startup log
+line and fix the value; there is no client-side workaround, because the backend hands the
+URL to the CLI verbatim.
+
+### Cannot log in after a fresh `docker compose up`
+
+Expected. There is no seeded account and signup is disabled — see
+[First-run access](#first-run-access). Run `install.sh`, or perform the bootstrap by hand.
+
+### `Admin reset is only allowed from localhost`
+
+The bootstrap call did not originate inside the backend container. Curling
+`http://<host>:8080/api/users/admin/reset` from your laptop, or through the frontend
+nginx, both fail this check — there is no `X-Forwarded-For` handling. Use
+`docker compose exec backend` as shown in [First-run access](#first-run-access).
+
+### `Invalid bootstrap secret` even though the secret looks right
+
+`ADMIN_BOOTSTRAP_SECRET` is blank in the backend's environment, which fails every
+comparison regardless of the header you send
+([`UserController.java:151-158`](../../backend/src/main/java/com/dbaagent/controller/UserController.java)).
+Confirm what the container actually has:
+
+```bash
+docker compose -p deepsql-selfhost exec backend printenv ADMIN_BOOTSTRAP_SECRET
+```
+
+Editing `.env` is not enough — the backend must be restarted to pick it up.
+
+### `Missing encryption key; set ENCRYPTION_KEY or ENCRYPTION_KEYS`
+
+The backend refuses to start without one
+([`EncryptionService.java:208`](../../backend/src/main/java/com/dbaagent/security/EncryptionService.java)).
+A sibling error, `ENCRYPTION_KEY_ID is required when multiple keys are configured`
+(`EncryptionService.java:217`), means `ENCRYPTION_KEYS` holds more than one `id:key` pair
+without naming the active one.
+
+### `install.sh` fails on the pgvector verification
+
+The messages are specific about which check failed: missing `rag_documents` table, missing
+`vector` extension, an `embedding` column whose type is not `vector(3072)`, or a missing
+`idx_rag_docs_embedding` index. The type mismatch usually means
+`VECTOR_STORE_EMBEDDING_DIMENSIONS` was changed after the table was created; the others
+usually mean the postgres volume was initialised from something other than the
+`pgvector/pgvector` image.
+
+### RAG answers are vague, or retrieval only matches literal keywords
+
+No embedding provider is configured. `DEEPSQL_EMBEDDING_PROVIDER` gates the entire
+embedding bundle, and without it retrieval falls back to keyword matching — the app runs
+normally, just less well. `install.sh` prints a note when it detects this. Configure the
+embedding group and re-initialise the affected connections.
+
+### `docker compose ps` shows nothing after a successful install
+
+Project-name mismatch. See [Project name](#project-name-two-stacks-by-accident).
+
+---
+
+## Production checklist
+
+- [ ] `SPRING_PROFILES_ACTIVE=prod`
+- [ ] `SECURITY_AUTH_ENABLED` left at `true`
+- [ ] `SECURITY_ADMIN_BOOTSTRAP_ENABLED=false` after the first admin exists
+- [ ] `SECURITY_JWT_SECRET`, `ENCRYPTION_KEY` and `DB_PASSWORD` are generated values, not the `.env.example` placeholders
+- [ ] `ENCRYPTION_KEY` backed up somewhere other than where the database dumps live
+- [ ] TLS terminated in front of the frontend, with `SECURITY_COOKIE_SECURE=true`
+- [ ] `APP_BASE_URL` and `APP_PUBLIC_URL` set to the public URL, and the startup log line checked
+- [ ] `CORS_ALLOWED_ORIGINS` set to the public origin only
+- [ ] `EMBEDDING_FAIL_OPEN=false` (the `prod` default) so retrieval failures surface
+- [ ] Postgres and valkey not published to a public interface
+- [ ] `.env` never committed — it is gitignored, keep it that way
+- [ ] A backup taken before every upgrade
+- [ ] Model traffic reviewed: prompts go to whatever `DEEPSQL_CHAT_ENDPOINT` points at. Point it at a server on your own network if nothing may leave.
+
+---
+
+## Related documentation
+
+- [`README.md`](../../README.md) — overview, quick start, LLM configuration, development
+- [`.env.example`](../../.env.example) — inline documentation for every shipped variable
+- [`mcp/README.md`](../../mcp/README.md) — the `deepsql` CLI and MCP server, including client configuration for Claude Desktop and Codex
+- [`docs/root/MCP_PHASE1.md`](./MCP_PHASE1.md) — MCP tools and environment variables
+- [`docs/LOGGING-GUIDE.md`](../LOGGING-GUIDE.md) — log format
+- [`docs/RBAC_USAGE_GUIDE.md`](../RBAC_USAGE_GUIDE.md) — roles and permissions
+- [`docs/AZURE-AI-SEARCH.md`](../AZURE-AI-SEARCH.md) — the optional Azure vector backend

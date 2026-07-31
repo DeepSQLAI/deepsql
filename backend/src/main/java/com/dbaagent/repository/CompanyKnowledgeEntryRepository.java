@@ -41,7 +41,7 @@ public interface CompanyKnowledgeEntryRepository extends JpaRepository<CompanyKn
      *   <li>{@code linked_tables} element equals a focus token (bare-bare or qualified-qualified)</li>
      *   <li>{@code linked_tables} element ends in {@code .<focus>} (qualified entry, bare focus)</li>
      *   <li>{@code linked_columns} element contains {@code <focus>.} as a dot-bounded segment
-     *       (so {@code idb_database.HOTEL_PRICING.amount} matches focus {@code HOTEL_PRICING})</li>
+     *       (so {@code analytics_db.PRODUCT_PRICING.amount} matches focus {@code PRODUCT_PRICING})</li>
      * </ul>
      *
      * <p>{@code jsonb_array_elements_text} is used instead of {@code jsonb_exists_any} because

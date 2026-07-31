@@ -81,7 +81,7 @@ class QueryExecutionPolicyServiceTest {
         QueryExecutionPolicyException exception = assertThrows(
             QueryExecutionPolicyException.class,
             () -> service.enforce(
-                new QueryRequest("UPDATE hotels SET property_status = 'ACTIVE' WHERE hotel_id = 9", null, null),
+                new QueryRequest("UPDATE customers SET property_status = 'ACTIVE' WHERE customer_id = 9", null, null),
                 QueryExecutionContext.editor("admin", true, false),
                 "mysql"
             )
@@ -97,7 +97,7 @@ class QueryExecutionPolicyServiceTest {
         QueryExecutionPolicyException exception = assertThrows(
             QueryExecutionPolicyException.class,
             () -> service.enforce(
-                new QueryRequest("DELETE FROM hotels", null, null),
+                new QueryRequest("DELETE FROM customers", null, null),
                 QueryExecutionContext.editor("admin", true, true),
                 "mysql"
             )
@@ -112,7 +112,7 @@ class QueryExecutionPolicyServiceTest {
         QueryExecutionPolicyException exception = assertThrows(
             QueryExecutionPolicyException.class,
             () -> service.enforce(
-                new QueryRequest("UPDATE hotels SET property_status = 'ACTIVE' WHERE hotel_id = 9; DELETE FROM hotels WHERE hotel_id = 10", null, null),
+                new QueryRequest("UPDATE customers SET property_status = 'ACTIVE' WHERE customer_id = 9; DELETE FROM customers WHERE customer_id = 10", null, null),
                 QueryExecutionContext.editor("admin", true, true),
                 "mysql"
             )
@@ -141,7 +141,7 @@ class QueryExecutionPolicyServiceTest {
         QueryExecutionPolicyException exception = assertThrows(
             QueryExecutionPolicyException.class,
             () -> service.enforce(
-                new QueryRequest("EXPLAIN UPDATE hotels SET property_status = 'ACTIVE' WHERE hotel_id = 9", null, null),
+                new QueryRequest("EXPLAIN UPDATE customers SET property_status = 'ACTIVE' WHERE customer_id = 9", null, null),
                 QueryExecutionContext.chat(),
                 "mysql"
             )
@@ -171,7 +171,7 @@ class QueryExecutionPolicyServiceTest {
     @Test
     void editorConfirmedDeleteWithWhere_isAllowed() {
         QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
-            new QueryRequest("DELETE FROM hotels WHERE hotel_id = 9", null, null),
+            new QueryRequest("DELETE FROM customers WHERE customer_id = 9", null, null),
             QueryExecutionContext.editor("admin", true, true),
             "mysql"
         );
@@ -264,7 +264,7 @@ class QueryExecutionPolicyServiceTest {
         assertThat(createDecision.primaryQueryType()).isEqualTo("CREATE");
 
         QueryExecutionPolicyService.PolicyDecision alterDecision = service.enforce(
-            new QueryRequest("ALTER TABLE hotels ADD COLUMN tag VARCHAR(64)", null, null),
+            new QueryRequest("ALTER TABLE customers ADD COLUMN tag VARCHAR(64)", null, null),
             QueryExecutionContext.editor("admin", true, true),
             "mysql"
         );

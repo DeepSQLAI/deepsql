@@ -1093,10 +1093,10 @@ public class ChatService {
 
         // Ranking / top-N / bottom-N patterns
         if (q.matches(".*(top|bottom|least|most|highest|lowest|worst|best|slowest|fastest)\\s+\\d+.*")) return true;
-        if (q.matches(".*(top|bottom|least|most|highest|lowest|worst|best)\\s+(\\d+\\s+)?(accounts?|users?|customers?|orders?|records?|rows?|queries?|tables?|sessions?|transactions?|products?|bookings?|hotels?|properties?|tenants?|clients?).*")) return true;
+        if (q.matches(".*(top|bottom|least|most|highest|lowest|worst|best)\\s+(\\d+\\s+)?(accounts?|users?|customers?|orders?|records?|rows?|queries?|tables?|sessions?|transactions?|products?|bookings?|customers?|properties?|tenants?|clients?).*")) return true;
 
         // "Show me / list / give me / find" entity requests
-        if (q.matches(".*(show me|list|give me|find|fetch|retrieve|get me|display|return)\\s+.*\\b(accounts?|users?|customers?|orders?|records?|rows?|entries?|data|results?|transactions?|bookings?|hotels?|properties?).*")) return true;
+        if (q.matches(".*(show me|list|give me|find|fetch|retrieve|get me|display|return)\\s+.*\\b(accounts?|users?|customers?|orders?|records?|rows?|entries?|data|results?|transactions?|bookings?|customers?|properties?).*")) return true;
 
         // "Which X are / have / do" questions — expect data rows as answer
         if (q.matches(".*which\\s+\\w+\\s+(are|have|do|did|has|were|is).*")) return true;
@@ -2443,7 +2443,7 @@ public class ChatService {
         tables.add(stripSchemaPrefix(tableReference));
     }
 
-    /** Strip schema prefix (e.g., "idb_database.HOTEL_SERVICES" → "HOTEL_SERVICES") */
+    /** Strip schema prefix (e.g., "analytics_db.ORDER_ITEMS" → "ORDER_ITEMS") */
     private String stripSchemaPrefix(String name) {
         int dot = name.lastIndexOf('.');
         return dot >= 0 ? name.substring(dot + 1) : name;

@@ -30,8 +30,8 @@ const session = { baseUrl: "http://x", token: "t" };
 
 test("resolves UUID input as-is without a backend roundtrip", async () => {
   await withMockedRequest([], async ({ resolveConnectionId }) => {
-    const id = await resolveConnectionId(session, "a273f43a-a844-44a3-9026-1b0de1167e8f");
-    assert.equal(id, "a273f43a-a844-44a3-9026-1b0de1167e8f");
+    const id = await resolveConnectionId(session, "11111111-1111-1111-1111-111111111111");
+    assert.equal(id, "11111111-1111-1111-1111-111111111111");
   });
 });
 

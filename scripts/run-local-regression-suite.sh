@@ -15,7 +15,7 @@ fi
 
 set -o pipefail
 
-DEFAULT_CONNECTION_ID="a273f43a-a844-44a3-9026-1b0de1167e8f"
+DEFAULT_CONNECTION_ID=""
 BASE_URL="${1:-${LOCAL_REGRESSION_BASE_URL:-http://localhost:8080/api}}"
 FRONTEND_URL="${LOCAL_REGRESSION_FRONTEND_URL:-http://localhost:3000}"
 CONNECTION_ID="${2:-${LOCAL_REGRESSION_CONNECTION_ID:-${BRAIN_RETRIEVAL_CONNECTION_ID:-$DEFAULT_CONNECTION_ID}}}"
@@ -121,13 +121,6 @@ run_backend_smoke() {
   fi
 }
 
-run_brain_retrieval_smoke() {
-  cd "$ROOT_DIR" || return 1
-  BRAIN_RETRIEVAL_FIXTURE_FILE="$ROOT_DIR/tests/suites/brain-retrieval/brain-retrieval-smoke-test-cases.json" \
-  BRAIN_RETRIEVAL_REPORT_FILE="$ARTIFACT_DIR/brain-retrieval-smoke-report.json" \
-    bash "$ROOT_DIR/tests/suites/brain-retrieval/run-brain-retrieval-tests.sh" "$BASE_URL" "$CONNECTION_ID"
-}
-
 cleanup_old_artifacts
 echo "$$" >"$PID_FILE"
 write_status "RUNNING"
@@ -169,18 +162,10 @@ if [[ -n "$INTERNAL_TEST_TOKEN" ]]; then
   fi
 fi
 
-if [[ "$SKIP_BRAIN_SUITE" == "1" ]]; then
-  record_skip "Brain retrieval smoke suite"
-elif [[ -z "$CONNECTION_ID" ]]; then
-  if [[ "$STRICT_BRAIN" == "1" ]]; then
-    record_fail "Brain retrieval suite requires LOCAL_REGRESSION_CONNECTION_ID"
-  else
-    record_skip "Brain retrieval smoke suite"
-    echo "Brain retrieval suite skipped because no connection id was provided."
-  fi
-else
-  run_step "Brain retrieval smoke suite" run_brain_retrieval_smoke || true
-fi
+# The brain-retrieval fixture suite is not part of this repository; the regression
+# suite here covers the frontend build, service health probes, and the backend
+# ApiSmokeTest.
+record_skip "Brain retrieval smoke suite"
 
 print_section "Regression Summary"
 echo "Artifacts: $ARTIFACT_DIR"

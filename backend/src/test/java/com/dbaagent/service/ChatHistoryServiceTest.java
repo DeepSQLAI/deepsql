@@ -63,9 +63,9 @@ class ChatHistoryServiceTest {
         when(chatRepository.findById("chat-1")).thenReturn(Optional.of(chat));
         when(messageRepository.countByChatIdAndRole("chat-1", ChatMessage.MessageRole.USER)).thenReturn(1L);
 
-        chatHistoryService.addMessage("chat-1", ChatMessage.MessageRole.USER, "Show top hotels by revenue this month", null);
+        chatHistoryService.addMessage("chat-1", ChatMessage.MessageRole.USER, "Show top customers by revenue this month", null);
 
-        assertThat(chat.getTitle()).isEqualTo("Show top hotels by revenue this month");
+        assertThat(chat.getTitle()).isEqualTo("Show top customers by revenue this month");
     }
 
     @Test
@@ -76,7 +76,7 @@ class ChatHistoryServiceTest {
 
         when(chatRepository.findById("chat-1")).thenReturn(Optional.of(chat));
 
-        chatHistoryService.addMessage("chat-1", ChatMessage.MessageRole.USER, "Show top hotels by revenue this month", null);
+        chatHistoryService.addMessage("chat-1", ChatMessage.MessageRole.USER, "Show top customers by revenue this month", null);
 
         assertThat(chat.getTitle()).isEqualTo("Revenue debugging");
     }

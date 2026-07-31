@@ -61,7 +61,7 @@ class QueryGenerationPipelineTest {
 
     @Test
     void step1_lowSimilarity_returnsEmpty() {
-        var doc = mockQueryExample(0.85, "Show hotels", "SELECT * FROM hotels");
+        var doc = mockQueryExample(0.85, "Show customers", "SELECT * FROM customers");
         when(trainingService.cachedRetrieveRelevant(anyString(), anyString(), anyInt()))
             .thenReturn(List.of(doc));
 
@@ -94,23 +94,23 @@ class QueryGenerationPipelineTest {
     void step2_parsesResolvedContextFromJson() {
         String json = """
             {
-              "tables": ["bookings", "hotels"],
-              "columns": {"bookings": ["status"], "hotels": ["name"]},
+              "tables": ["bookings", "customers"],
+              "columns": {"bookings": ["status"], "customers": ["name"]},
               "filterColumns": [{"table": "bookings", "column": "status"}],
-              "joinConditions": ["bookings.hotel_id = hotels.id"],
+              "joinConditions": ["bookings.customer_id = customers.id"],
               "confidence": "HIGH"
             }
             """;
 
         var schemaMetadata = buildMockSchema(Map.of(
-            "bookings", List.of("status", "hotel_id"),
-            "hotels", List.of("name", "id"),
+            "bookings", List.of("status", "customer_id"),
+            "customers", List.of("name", "id"),
             "rooms", List.of("type")
         ));
 
         var result = pipeline.parseResolvedContext(json, schemaMetadata);
 
-        assertThat(result.tables()).containsExactly("bookings", "hotels");
+        assertThat(result.tables()).containsExactly("bookings", "customers");
         assertThat(result.filterColumns()).hasSize(1);
         assertThat(result.filterColumns().getFirst().qualifiedName()).isEqualTo("bookings.status");
         assertThat(result.confidence()).isEqualTo(ResolvedContext.Confidence.HIGH);
@@ -146,100 +146,100 @@ class QueryGenerationPipelineTest {
     void step2_removesHallucinatedJoinConditions() {
         String json = """
             {
-              "tables": ["bookings", "hotels"],
-              "columns": {"bookings": ["hotel_id"], "hotels": ["id"]},
+              "tables": ["bookings", "customers"],
+              "columns": {"bookings": ["customer_id"], "customers": ["id"]},
               "filterColumns": [],
               "joinConditions": [
-                "bookings.hotel_id = hotels.id",
-                "bookings.fake_id = hotels.id",
-                "bookings.hotel_id = ghost_table.id"
+                "bookings.customer_id = customers.id",
+                "bookings.fake_id = customers.id",
+                "bookings.customer_id = ghost_table.id"
               ],
               "confidence": "HIGH"
             }
             """;
 
         var schemaMetadata = buildMockSchema(Map.of(
-            "bookings", List.of("hotel_id"),
-            "hotels", List.of("id")
+            "bookings", List.of("customer_id"),
+            "customers", List.of("id")
         ));
 
         var result = pipeline.parseResolvedContext(json, schemaMetadata);
 
-        assertThat(result.joinConditions()).containsExactly("bookings.hotel_id = hotels.id");
+        assertThat(result.joinConditions()).containsExactly("bookings.customer_id = customers.id");
     }
 
     @Test
     void step2_deduplicatesTablesColumnsAndFilterColumns() {
         String json = """
             {
-              "tables": ["bookings", "bookings", "hotels"],
+              "tables": ["bookings", "bookings", "customers"],
               "columns": {
-                "bookings": ["status", "status", "hotel_id"],
-                "hotels": ["name", "name"]
+                "bookings": ["status", "status", "customer_id"],
+                "customers": ["name", "name"]
               },
               "filterColumns": [
                 {"table": "bookings", "column": "status"},
                 {"table": "bookings", "column": "status"}
               ],
               "joinConditions": [
-                "bookings.hotel_id = hotels.id",
-                "bookings.hotel_id = hotels.id"
+                "bookings.customer_id = customers.id",
+                "bookings.customer_id = customers.id"
               ],
               "confidence": "HIGH"
             }
             """;
 
         var schemaMetadata = buildMockSchema(Map.of(
-            "bookings", List.of("status", "hotel_id"),
-            "hotels", List.of("name", "id")
+            "bookings", List.of("status", "customer_id"),
+            "customers", List.of("name", "id")
         ));
 
         var result = pipeline.parseResolvedContext(json, schemaMetadata);
 
-        assertThat(result.tables()).containsExactly("bookings", "hotels");
-        assertThat(result.columns().get("bookings")).containsExactly("status", "hotel_id");
-        assertThat(result.columns().get("hotels")).containsExactly("name");
+        assertThat(result.tables()).containsExactly("bookings", "customers");
+        assertThat(result.columns().get("bookings")).containsExactly("status", "customer_id");
+        assertThat(result.columns().get("customers")).containsExactly("name");
         assertThat(result.filterColumns()).containsExactly(new FilterColumn("bookings", "status"));
-        assertThat(result.joinConditions()).containsExactly("bookings.hotel_id = hotels.id");
+        assertThat(result.joinConditions()).containsExactly("bookings.customer_id = customers.id");
     }
 
     @Test
     void step2_caseConflictingTablesPreferPopulatedCanonicalTable() {
         String json = """
             {
-              "tables": ["user_bookings"],
-              "columns": {"user_bookings": ["hotel_id", "booking_amount", "booking_made_on", "booking_source"]},
-              "filterColumns": [{"table": "user_bookings", "column": "booking_source"}],
-              "joinConditions": ["user_bookings.hotel_id = HOTEL.id"],
+              "tables": ["customer_orders"],
+              "columns": {"customer_orders": ["customer_id", "booking_amount", "booking_made_on", "booking_source"]},
+              "filterColumns": [{"table": "customer_orders", "column": "booking_source"}],
+              "joinConditions": ["customer_orders.customer_id = CUSTOMERS.id"],
               "confidence": "HIGH"
             }
             """;
 
         SchemaMetadata schemaMetadata = new SchemaMetadata();
         schemaMetadata.setTables(List.of(
-            new TableMetadata("user_bookings", null, "table", 0L, null, List.of(
-                new ColumnMetadata("hotel_id", "bigint", null, false, false, null, 1),
+            new TableMetadata("customer_orders", null, "table", 0L, null, List.of(
+                new ColumnMetadata("customer_id", "bigint", null, false, false, null, 1),
                 new ColumnMetadata("created_at", "timestamp", null, true, false, null, 2)
             ), List.of()),
-            new TableMetadata("USER_BOOKINGS", null, "table", 9_419_333L, null, List.of(
-                new ColumnMetadata("hotel_id", "bigint", null, false, false, null, 1),
+            new TableMetadata("CUSTOMER_ORDERS", null, "table", 9_419_333L, null, List.of(
+                new ColumnMetadata("customer_id", "bigint", null, false, false, null, 1),
                 new ColumnMetadata("booking_amount", "decimal", null, true, false, null, 2),
                 new ColumnMetadata("booking_made_on", "timestamp", null, true, false, null, 3),
                 new ColumnMetadata("booking_source", "varchar", null, true, false, null, 4)
             ), List.of()),
-            new TableMetadata("HOTEL", null, "table", 120L, null, List.of(
+            new TableMetadata("CUSTOMERS", null, "table", 120L, null, List.of(
                 new ColumnMetadata("id", "bigint", null, false, true, null, 1)
             ), List.of())
         ));
 
         var result = pipeline.parseResolvedContext(json, schemaMetadata);
 
-        assertThat(result.tables()).containsExactly("USER_BOOKINGS");
-        assertThat(result.columns()).containsKey("USER_BOOKINGS");
-        assertThat(result.columns().get("USER_BOOKINGS"))
-            .containsExactly("hotel_id", "booking_amount", "booking_made_on", "booking_source");
-        assertThat(result.filterColumns()).containsExactly(new FilterColumn("USER_BOOKINGS", "booking_source"));
-        assertThat(result.joinConditions()).containsExactly("USER_BOOKINGS.hotel_id = HOTEL.id");
+        assertThat(result.tables()).containsExactly("CUSTOMER_ORDERS");
+        assertThat(result.columns()).containsKey("CUSTOMER_ORDERS");
+        assertThat(result.columns().get("CUSTOMER_ORDERS"))
+            .containsExactly("customer_id", "booking_amount", "booking_made_on", "booking_source");
+        assertThat(result.filterColumns()).containsExactly(new FilterColumn("CUSTOMER_ORDERS", "booking_source"));
+        assertThat(result.joinConditions()).containsExactly("CUSTOMER_ORDERS.customer_id = CUSTOMERS.id");
     }
 
     @Test
@@ -259,7 +259,7 @@ class QueryGenerationPipelineTest {
             """;
 
         var schemaMetadata = buildMockSchema(Map.of(
-            "bookings", List.of("status", "hotel_id")
+            "bookings", List.of("status", "customer_id")
         ));
 
         var result = pipeline.parseResolvedContext(json, schemaMetadata);
@@ -270,17 +270,17 @@ class QueryGenerationPipelineTest {
     @Test
     void postProcessResolvedContext_addsValidatedJoinForRequestedCompanionEntity() {
         SchemaMetadata schema = buildMockSchema(Map.of(
-            "BOOKING_TAXES", List.of("booking_id", "tax_name"),
-            "USER_BOOKINGS", List.of("id", "booking_amount")
+            "ORDER_TAXES", List.of("booking_id", "tax_name"),
+            "CUSTOMER_ORDERS", List.of("id", "booking_amount")
         ));
-        when(semanticModelService.getSemanticJoins("conn-1", List.of("BOOKING_TAXES"))).thenReturn(List.of(
+        when(semanticModelService.getSemanticJoins("conn-1", List.of("ORDER_TAXES"))).thenReturn(List.of(
             SemanticJoinModel.builder()
                 .connectionId("conn-1")
-                .sourceTable("BOOKING_TAXES")
+                .sourceTable("ORDER_TAXES")
                 .sourceColumn("booking_id")
-                .targetTable("USER_BOOKINGS")
+                .targetTable("CUSTOMER_ORDERS")
                 .targetColumn("id")
-                .joinExpression("BOOKING_TAXES.booking_id = USER_BOOKINGS.id")
+                .joinExpression("ORDER_TAXES.booking_id = CUSTOMER_ORDERS.id")
                 .preferred(true)
                 .build()
         ));
@@ -289,10 +289,10 @@ class QueryGenerationPipelineTest {
             pipeline,
             "postProcessResolvedContext",
             "conn-1",
-            "Show booking taxes along with the booking amounts from USER_BOOKINGS",
+            "Show booking taxes along with the booking amounts from CUSTOMER_ORDERS",
             schema,
             new ResolvedContext(
-                List.of("BOOKING_TAXES"),
+                List.of("ORDER_TAXES"),
                 Map.of(),
                 List.of(),
                 List.of(),
@@ -300,33 +300,33 @@ class QueryGenerationPipelineTest {
             )
         );
 
-        assertThat(enhanced.tables()).contains("BOOKING_TAXES", "USER_BOOKINGS");
-        assertThat(enhanced.joinConditions()).contains("BOOKING_TAXES.booking_id = USER_BOOKINGS.id");
+        assertThat(enhanced.tables()).contains("ORDER_TAXES", "CUSTOMER_ORDERS");
+        assertThat(enhanced.joinConditions()).contains("ORDER_TAXES.booking_id = CUSTOMER_ORDERS.id");
     }
 
     @Test
     void postProcessResolvedContext_usesSchemaRelationshipWhenSemanticJoinModelIsMissing() {
         SchemaMetadata schemaMetadata = new SchemaMetadata();
         schemaMetadata.setTables(List.of(
-            new TableMetadata("USER_BOOKINGS", null, "table", 1000L, null, List.of(
+            new TableMetadata("CUSTOMER_ORDERS", null, "table", 1000L, null, List.of(
                 new ColumnMetadata("id", "varchar", null, false, true, null, 1),
                 new ColumnMetadata("booking_amount", "decimal", null, true, false, null, 2)
             ), List.of()),
-            new TableMetadata("GUEST_MAPPING", null, "table", 1000L, null, List.of(
+            new TableMetadata("CONTACT_MAPPING", null, "table", 1000L, null, List.of(
                 new ColumnMetadata("booking_id", "varchar", null, false, false, null, 1),
                 new ColumnMetadata("user_name", "varchar", null, true, false, null, 2),
                 new ColumnMetadata("email", "varchar", null, true, false, null, 3)
             ), List.of())
         ));
         schemaMetadata.setRelationships(List.of(
-            new RelationshipMetadata("guest_booking", "GUEST_MAPPING", "booking_id", "USER_BOOKINGS", "id", "many-to-one", "fk_guest_booking")
+            new RelationshipMetadata("guest_booking", "CONTACT_MAPPING", "booking_id", "CUSTOMER_ORDERS", "id", "many-to-one", "fk_guest_booking")
         ));
 
         when(semanticModelService.getSemanticJoins(eq("conn-1"), anyList())).thenReturn(List.of());
 
         ResolvedContext resolvedContext = new ResolvedContext(
-            List.of("USER_BOOKINGS"),
-            Map.of("USER_BOOKINGS", List.of("booking_amount")),
+            List.of("CUSTOMER_ORDERS"),
+            Map.of("CUSTOMER_ORDERS", List.of("booking_amount")),
             List.of(),
             List.of(),
             ResolvedContext.Confidence.MEDIUM
@@ -336,32 +336,32 @@ class QueryGenerationPipelineTest {
             pipeline,
             "postProcessResolvedContext",
             "conn-1",
-            "Show booking amounts with guest emails for each booking",
+            "Show order amounts with contact emails for each order",
             schemaMetadata,
             resolvedContext
         );
 
-        assertThat(result.tables()).contains("USER_BOOKINGS", "GUEST_MAPPING");
-        assertThat(result.joinConditions()).contains("GUEST_MAPPING.booking_id = USER_BOOKINGS.id");
+        assertThat(result.tables()).contains("CUSTOMER_ORDERS", "CONTACT_MAPPING");
+        assertThat(result.joinConditions()).contains("CONTACT_MAPPING.booking_id = CUSTOMER_ORDERS.id");
     }
 
     @Test
     void postProcessResolvedContext_prefersJoinedEntityDetailColumnsOverFactDuplicates() {
         SchemaMetadata schemaMetadata = new SchemaMetadata();
         schemaMetadata.setTables(List.of(
-            new TableMetadata("USER_BOOKINGS", null, "table", 1000L, null, List.of(
+            new TableMetadata("CUSTOMER_ORDERS", null, "table", 1000L, null, List.of(
                 new ColumnMetadata("id", "varchar", null, false, true, null, 1),
                 new ColumnMetadata("booking_amount", "decimal", null, true, false, null, 2),
                 new ColumnMetadata("user_email", "varchar", null, true, false, null, 3)
             ), List.of()),
-            new TableMetadata("GUEST_MAPPING", null, "table", 1000L, null, List.of(
+            new TableMetadata("CONTACT_MAPPING", null, "table", 1000L, null, List.of(
                 new ColumnMetadata("booking_id", "varchar", null, false, false, null, 1),
                 new ColumnMetadata("user_name", "varchar", null, true, false, null, 2),
                 new ColumnMetadata("email", "varchar", null, true, false, null, 3)
             ), List.of())
         ));
         schemaMetadata.setRelationships(List.of(
-            new RelationshipMetadata("guest_booking", "GUEST_MAPPING", "booking_id", "USER_BOOKINGS", "id", "many-to-one", "fk_guest_booking")
+            new RelationshipMetadata("guest_booking", "CONTACT_MAPPING", "booking_id", "CUSTOMER_ORDERS", "id", "many-to-one", "fk_guest_booking")
         ));
 
         when(semanticModelService.getSemanticJoins(eq("conn-1"), anyList())).thenReturn(List.of());
@@ -370,46 +370,46 @@ class QueryGenerationPipelineTest {
             pipeline,
             "postProcessResolvedContext",
             "conn-1",
-            "Show booking amounts with guest emails for each booking",
+            "Show order amounts with contact names and emails for each order",
             schemaMetadata,
             new ResolvedContext(
-                List.of("USER_BOOKINGS", "GUEST_MAPPING"),
+                List.of("CUSTOMER_ORDERS", "CONTACT_MAPPING"),
                 Map.of(
-                    "USER_BOOKINGS", List.of("id", "booking_amount", "user_email")
+                    "CUSTOMER_ORDERS", List.of("id", "booking_amount", "user_email")
                 ),
                 List.of(),
-                List.of("GUEST_MAPPING.booking_id = USER_BOOKINGS.id"),
+                List.of("CONTACT_MAPPING.booking_id = CUSTOMER_ORDERS.id"),
                 ResolvedContext.Confidence.MEDIUM
             )
         );
 
-        assertThat(result.columns().get("USER_BOOKINGS"))
+        assertThat(result.columns().get("CUSTOMER_ORDERS"))
             .contains("id", "booking_amount")
             .doesNotContain("user_email");
-        assertThat(result.columns().get("GUEST_MAPPING"))
+        assertThat(result.columns().get("CONTACT_MAPPING"))
             .contains("user_name", "email");
     }
 
     @Test
     void postProcessResolvedContext_promotesBaseFactTableOverDerivedSummaryForCounts() {
         SchemaMetadata schema = buildMockSchema(Map.of(
-            "NR_BOOKING", List.of("booking_count"),
-            "USER_BOOKINGS", List.of("id", "booking_amount")
+            "NR_ORDER_SUMMARY", List.of("order_count"),
+            "CUSTOMER_ORDERS", List.of("id", "booking_amount")
         ));
-        when(semanticModelService.findRelevantTables("conn-1", "How many bookings are there?", Set.of()))
+        when(semanticModelService.findRelevantTables("conn-1", "How many orders are there?", Set.of()))
             .thenReturn(List.of(
-                SemanticTableModel.builder().connectionId("conn-1").tableName("NR_BOOKING").tableRole("AGGREGATE").build(),
-                SemanticTableModel.builder().connectionId("conn-1").tableName("USER_BOOKINGS").tableRole("FACT").build()
+                SemanticTableModel.builder().connectionId("conn-1").tableName("NR_ORDER_SUMMARY").tableRole("AGGREGATE").build(),
+                SemanticTableModel.builder().connectionId("conn-1").tableName("CUSTOMER_ORDERS").tableRole("FACT").build()
             ));
 
         ResolvedContext enhanced = (ResolvedContext) ReflectionTestUtils.invokeMethod(
             pipeline,
             "postProcessResolvedContext",
             "conn-1",
-            "How many bookings are there?",
+            "How many orders are there?",
             schema,
             new ResolvedContext(
-                List.of("NR_BOOKING"),
+                List.of("NR_ORDER_SUMMARY"),
                 Map.of(),
                 List.of(),
                 List.of(),
@@ -417,29 +417,29 @@ class QueryGenerationPipelineTest {
             )
         );
 
-        assertThat(enhanced.tables()).containsExactly("USER_BOOKINGS");
+        assertThat(enhanced.tables()).containsExactly("CUSTOMER_ORDERS");
     }
 
     @Test
     void postProcessResolvedContext_promotesBaseFactTableOverAggregateMeasureSummaryForGroupedTotals() {
         SchemaMetadata schema = buildMockSchema(Map.of(
-            "NR_BOOKING", List.of("hotel_id", "total_booking_amount"),
-            "USER_BOOKINGS", List.of("id", "hotel_id", "booking_amount")
+            "NR_ORDER_SUMMARY", List.of("customer_id", "total_booking_amount"),
+            "CUSTOMER_ORDERS", List.of("id", "customer_id", "booking_amount")
         ));
-        when(semanticModelService.findRelevantTables("conn-1", "What is the total booking amount per hotel?", Set.of()))
+        when(semanticModelService.findRelevantTables("conn-1", "What is the total booking amount per customer?", Set.of()))
             .thenReturn(List.of(
-                SemanticTableModel.builder().connectionId("conn-1").tableName("NR_BOOKING").tableRole("FACT").build(),
-                SemanticTableModel.builder().connectionId("conn-1").tableName("USER_BOOKINGS").tableRole("FACT").build()
+                SemanticTableModel.builder().connectionId("conn-1").tableName("NR_ORDER_SUMMARY").tableRole("FACT").build(),
+                SemanticTableModel.builder().connectionId("conn-1").tableName("CUSTOMER_ORDERS").tableRole("FACT").build()
             ));
 
         ResolvedContext enhanced = (ResolvedContext) ReflectionTestUtils.invokeMethod(
             pipeline,
             "postProcessResolvedContext",
             "conn-1",
-            "What is the total booking amount per hotel?",
+            "What is the total booking amount per customer?",
             schema,
             new ResolvedContext(
-                List.of("NR_BOOKING"),
+                List.of("NR_ORDER_SUMMARY"),
                 Map.of(),
                 List.of(),
                 List.of(),
@@ -447,28 +447,28 @@ class QueryGenerationPipelineTest {
             )
         );
 
-        assertThat(enhanced.tables()).containsExactly("USER_BOOKINGS");
+        assertThat(enhanced.tables()).containsExactly("CUSTOMER_ORDERS");
     }
 
     @Test
     void postProcessResolvedContext_usesSchemaFallbackWhenSemanticRankingMissesBaseFactTable() {
         SchemaMetadata schema = buildMockSchema(Map.of(
-            "NR_BOOKING", List.of("hotel_id", "total_booking_amount"),
-            "USER_BOOKINGS", List.of("id", "hotel_id", "booking_amount")
+            "NR_ORDER_SUMMARY", List.of("customer_id", "total_booking_amount"),
+            "CUSTOMER_ORDERS", List.of("id", "customer_id", "booking_amount")
         ));
-        when(semanticModelService.findRelevantTables("conn-1", "What is the total booking amount per hotel?", Set.of()))
+        when(semanticModelService.findRelevantTables("conn-1", "What is the total booking amount per customer?", Set.of()))
             .thenReturn(List.of(
-                SemanticTableModel.builder().connectionId("conn-1").tableName("NR_BOOKING").tableRole("FACT").build()
+                SemanticTableModel.builder().connectionId("conn-1").tableName("NR_ORDER_SUMMARY").tableRole("FACT").build()
             ));
 
         ResolvedContext enhanced = (ResolvedContext) ReflectionTestUtils.invokeMethod(
             pipeline,
             "postProcessResolvedContext",
             "conn-1",
-            "What is the total booking amount per hotel?",
+            "What is the total booking amount per customer?",
             schema,
             new ResolvedContext(
-                List.of("NR_BOOKING"),
+                List.of("NR_ORDER_SUMMARY"),
                 Map.of(),
                 List.of(),
                 List.of(),
@@ -476,40 +476,40 @@ class QueryGenerationPipelineTest {
             )
         );
 
-        assertThat(enhanced.tables()).containsExactly("USER_BOOKINGS");
+        assertThat(enhanced.tables()).containsExactly("CUSTOMER_ORDERS");
     }
 
     @Test
     void step2_preservesValidMultiHopJoinChain() {
         String json = """
             {
-              "tables": ["guest_mapping", "bookings", "hotels"],
+              "tables": ["contact_mapping", "bookings", "customers"],
               "columns": {
-                "guest_mapping": ["booking_id", "user_name"],
-                "bookings": ["id", "hotel_id", "booking_amount"],
-                "hotels": ["id", "name"]
+                "contact_mapping": ["booking_id", "user_name"],
+                "bookings": ["id", "customer_id", "booking_amount"],
+                "customers": ["id", "name"]
               },
               "filterColumns": [{"table": "bookings", "column": "booking_amount"}],
               "joinConditions": [
-                "guest_mapping.booking_id = bookings.id",
-                "bookings.hotel_id = hotels.id"
+                "contact_mapping.booking_id = bookings.id",
+                "bookings.customer_id = customers.id"
               ],
               "confidence": "HIGH"
             }
             """;
 
         var schemaMetadata = buildMockSchema(Map.of(
-            "guest_mapping", List.of("booking_id", "user_name"),
-            "bookings", List.of("id", "hotel_id", "booking_amount"),
-            "hotels", List.of("id", "name")
+            "contact_mapping", List.of("booking_id", "user_name"),
+            "bookings", List.of("id", "customer_id", "booking_amount"),
+            "customers", List.of("id", "name")
         ));
 
         var result = pipeline.parseResolvedContext(json, schemaMetadata);
 
-        assertThat(result.tables()).containsExactly("guest_mapping", "bookings", "hotels");
+        assertThat(result.tables()).containsExactly("contact_mapping", "bookings", "customers");
         assertThat(result.joinConditions()).containsExactly(
-            "guest_mapping.booking_id = bookings.id",
-            "bookings.hotel_id = hotels.id"
+            "contact_mapping.booking_id = bookings.id",
+            "bookings.customer_id = customers.id"
         );
     }
 
@@ -534,26 +534,26 @@ class QueryGenerationPipelineTest {
     @Test
     void buildResolutionHints_formatsCorrectly() {
         var resolved = new ResolvedContext(
-            List.of("bookings", "hotels"),
-            Map.of("bookings", List.of("status"), "hotels", List.of("name")),
+            List.of("bookings", "customers"),
+            Map.of("bookings", List.of("status"), "customers", List.of("name")),
             List.of(new FilterColumn("bookings", "status")),
-            List.of("bookings.hotel_id = hotels.id"),
+            List.of("bookings.customer_id = customers.id"),
             ResolvedContext.Confidence.HIGH
         );
 
         String hints = pipeline.buildResolutionHints(resolved);
 
         assertThat(hints)
-            .contains("Tables identified as relevant: bookings, hotels")
-            .contains("bookings.hotel_id = hotels.id")
+            .contains("Tables identified as relevant: bookings, customers")
+            .contains("bookings.customer_id = customers.id")
             .contains("bookings.status");
     }
 
     @Test
     void step2_fastPath_singleTableInQuestion() {
         var schema = buildMockSchema(Map.of(
-            "bookings", List.of("status", "hotel_id"),
-            "hotels", List.of("name")
+            "bookings", List.of("status", "customer_id"),
+            "customers", List.of("name")
         ));
         var ctx = new PipelineContext(
             "conn-1", "Show all bookings by status", "POSTGRESQL",
@@ -569,10 +569,10 @@ class QueryGenerationPipelineTest {
     void step2_fastPath_multipleTablesSkipsFastPath() {
         var schema = buildMockSchema(Map.of(
             "bookings", List.of("status"),
-            "hotels", List.of("name")
+            "customers", List.of("name")
         ));
         var ctx = new PipelineContext(
-            "conn-1", "Show bookings with hotels", "POSTGRESQL",
+            "conn-1", "Show bookings with customers", "POSTGRESQL",
             "", schema, null, "", "", "", "", "",
             List.of(), PipelineProgressListener.NOOP
         );
@@ -600,7 +600,7 @@ class QueryGenerationPipelineTest {
     @Test
     void step2_fastPath_matchesUnderscoreTableNamesFromNaturalLanguage() {
         var schema = buildMockSchema(Map.of(
-            "guest_mapping", List.of("booking_id", "user_name"),
+            "contact_mapping", List.of("booking_id", "user_name"),
             "bookings", List.of("status")
         ));
         var ctx = new PipelineContext(
@@ -610,35 +610,35 @@ class QueryGenerationPipelineTest {
         );
 
         var result = pipeline.detectSingleTableFastPath(ctx);
-        assertThat(result).isPresent().hasValue("guest_mapping");
+        assertThat(result).isPresent().hasValue("contact_mapping");
     }
 
     @Test
     void step2_fastPath_deduplicatesCaseConflictingTableVariants() {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setTables(List.of(
-            new TableMetadata("hotel", null, "table", 0L, null, List.of(
+            new TableMetadata("customers", null, "table", 0L, null, List.of(
                 new ColumnMetadata("id", "bigint", null, false, false, null, 1),
                 new ColumnMetadata("created_at", "timestamp", null, true, false, null, 2)
             ), List.of()),
-            new TableMetadata("HOTEL", null, "table", 1_500L, null, List.of(
+            new TableMetadata("CUSTOMERS", null, "table", 1_500L, null, List.of(
                 new ColumnMetadata("id", "bigint", null, false, true, null, 1),
                 new ColumnMetadata("subscription_start_date", "timestamp", null, true, false, null, 2)
             ), List.of()),
-            new TableMetadata("HOTEL_SERVICES", null, "table", 50_000L, null, List.of(
-                new ColumnMetadata("hotel_id", "bigint", null, false, false, null, 1),
+            new TableMetadata("PRODUCT_SERVICES", null, "table", 50_000L, null, List.of(
+                new ColumnMetadata("customer_id", "bigint", null, false, false, null, 1),
                 new ColumnMetadata("last_updated", "timestamp", null, true, false, null, 2)
             ), List.of())
         ));
         var ctx = new PipelineContext(
-            "conn-1", "How many hotels are onboarded in the last 3 days?", "MYSQL",
+            "conn-1", "How many customers are onboarded in the last 3 days?", "MYSQL",
             "", schema, null, "", "", "", "", "",
             List.of(), PipelineProgressListener.NOOP
         );
 
         var result = pipeline.detectSingleTableFastPath(ctx);
 
-        assertThat(result).isPresent().hasValue("HOTEL");
+        assertThat(result).isPresent().hasValue("CUSTOMERS");
     }
 
     /** Helper: build a mock SchemaMetadata with given table→columns mapping */

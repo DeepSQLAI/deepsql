@@ -178,11 +178,11 @@ class AnswerVerificationServiceTest {
         MetadataRequestScope requestScope = new MetadataRequestScope(
             MetadataRequestScope.Mode.STRICT_FACT,
             MetadataRequestScope.FactType.TABLE_COLUMNS,
-            List.of("USER_BOOKINGS"),
+            List.of("CUSTOMER_ORDERS"),
             List.of(),
             false,
             true,
-            "What columns are there in USER_BOOKINGS table?"
+            "What columns are there in CUSTOMER_ORDERS table?"
         );
         EvidenceBundle evidence = EvidenceBundle.sufficient(
             PromptIntent.Domain.SCHEMA,

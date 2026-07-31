@@ -639,7 +639,7 @@ export default function AnalyticsTab({ connectionId }) {
                   </div>
                 </div>
                 <div className={styles.queryBox}>
-                  SELECT hotel_id, COUNT(*) FROM Bookings GROUP BY hotel_id
+                  SELECT customer_id, COUNT(*) FROM Bookings GROUP BY customer_id
                   HAVING COUNT(*) &gt; 1000;
                 </div>
                 <div className={styles.cardFooter}>
@@ -659,7 +659,7 @@ export default function AnalyticsTab({ connectionId }) {
                       openQueryDetail({
                         queryId: "demo-1",
                         queryText:
-                          "SELECT hotel_id, COUNT(*) FROM Bookings GROUP BY hotel_id HAVING COUNT(*) > 1000;",
+                          "SELECT customer_id, COUNT(*) FROM Bookings GROUP BY customer_id HAVING COUNT(*) > 1000;",
                         avgDuration: 4800,
                         executionCount: 1240,
                         severity: "HIGH",

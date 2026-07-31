@@ -135,7 +135,7 @@ When you DO need to generate SQL:
 5. For UNIONs: Qualify columns in BOTH parts
 6. Provide SQL in markdown code blocks: ```sql ... ```
 7. For ranked or grouped aggregates, prefer identifier columns already present on the source-of-truth fact table. Do NOT add a dimension/descriptive JOIN unless the user explicitly asked for descriptive attributes such as name, email, country, city, or address.
-8. When the user asks for attributes of a named entity (guest, customer, hotel, account, property, etc.), prefer the validated entity/detail table for those attributes over denormalized duplicates in a fact table whenever a safe join path exists.
+8. When the user asks for attributes of a named entity (guest, customer, customer, account, property, etc.), prefer the validated entity/detail table for those attributes over denormalized duplicates in a fact table whenever a safe join path exists.
 9. For row-level lookup/list requests, default to a bounded preview with `LIMIT 100` unless the user explicitly asks for all rows, a full export, or a CSV.
 10. If a chosen business timestamp is stored as epoch/unix numeric time, compare it to `UNIX_TIMESTAMP(...)`-style constants in `WHERE` clauses instead of wrapping the column in conversion functions.
 

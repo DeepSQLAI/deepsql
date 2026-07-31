@@ -1,21 +1,14 @@
--- Clean up legacy key column analysis data from before database filtering fix
--- This migration removes old system schema data that was incorrectly analyzed
--- for connection 6be6ae30-ba7e-4887-b72e-1a95da01f926 (idb_database)
+-- Placeholder migration.
+--
+-- This version slot previously held a one-off data cleanup that deleted stale
+-- key-column analysis rows for a single, specific connection id from before the
+-- database-filtering fix landed. That cleanup was deployment-specific and has no
+-- meaning for a fresh install, so it is intentionally a no-op here.
+--
+-- The version is retained rather than removed so the migration chain stays
+-- contiguous and existing deployments keep a stable Flyway history.
 
--- Delete old key column analysis data
-DELETE FROM key_column_analysis
-WHERE connection_id = '6be6ae30-ba7e-4887-b72e-1a95da01f926';
-
--- Delete old anti-pattern data
-DELETE FROM column_anti_pattern
-WHERE connection_id = '6be6ae30-ba7e-4887-b72e-1a95da01f926';
-
--- Delete old composite index recommendations
-DELETE FROM composite_index_recommendation
-WHERE connection_id = '6be6ae30-ba7e-4887-b72e-1a95da01f926';
-
--- Log completion
 DO $$
 BEGIN
-    RAISE NOTICE 'Cleaned up legacy key column analysis data for connection 6be6ae30-ba7e-4887-b72e-1a95da01f926';
+    RAISE NOTICE 'V25 is a no-op placeholder (legacy per-deployment cleanup removed).';
 END $$;

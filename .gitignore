@@ -39,8 +39,11 @@ next-env.d.ts
 # backend
 backend/data/
 backend/target/
-# Production property files contain real credentials — never commit
-backend/src/main/resources/application-prod.properties
+# application-prod.properties IS tracked: it is the self-host production profile
+# and is fully env-var driven (SelfHostPropertiesSafetyTest enforces that no
+# credential-shaped property carries a baked-in default). Operator-specific
+# deployment profiles must never be committed:
+backend/src/main/resources/application-*prod-local.properties
 backend/src/main/resources/application-azprod.properties
 backend/.mvn/
 # large test data (over GitHub 100MB limit)
@@ -87,3 +90,8 @@ optd-sidecar/target/
 # silently recreate them — real code lives under backend/src or src.
 /net/
 /org/
+
+# IDE / editor state — never belongs in the repo
+.idea/
+.vscode/
+*.iml

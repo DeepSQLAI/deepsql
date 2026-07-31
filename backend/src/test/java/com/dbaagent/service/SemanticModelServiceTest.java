@@ -282,18 +282,18 @@ class SemanticModelServiceTest {
         when(semanticTableModelRepository.findByConnectionIdOrderByTableNameAsc("conn-1")).thenReturn(List.of(
             SemanticTableModel.builder()
                 .connectionId("conn-1")
-                .tableName("HOTEL")
+                .tableName("CUSTOMERS")
                 .tableRole("DIMENSION")
-                .businessDescription("Core hotel entity. subscription_start_date marks when the hotel contract starts.")
-                .businessTerms("hotel, property")
+                .businessDescription("Core customer entity. subscription_start_date marks when the customer contract starts.")
+                .businessTerms("customer, property")
                 .timeColumns(List.of("subscription_start_date"))
                 .confidenceScore(BigDecimal.valueOf(92))
                 .build(),
             SemanticTableModel.builder()
                 .connectionId("conn-1")
-                .tableName("HOTEL_SERVICES")
+                .tableName("PRODUCT_SERVICES")
                 .tableRole("FACT")
-                .businessDescription("Operational service records for each hotel")
+                .businessDescription("Operational service records for each customer")
                 .timeColumns(List.of("last_updated"))
                 .confidenceScore(BigDecimal.valueOf(90))
                 .build()
@@ -301,12 +301,12 @@ class SemanticModelServiceTest {
 
         List<SemanticTableModel> relevant = semanticModelService.findRelevantTables(
             "conn-1",
-            "How many hotels are onboarded in the last 3 days?",
+            "How many customers are onboarded in the last 3 days?",
             java.util.Set.of()
         );
 
         assertThat(relevant).isNotEmpty();
-        assertThat(relevant.getFirst().getTableName()).isEqualTo("HOTEL");
+        assertThat(relevant.getFirst().getTableName()).isEqualTo("CUSTOMERS");
     }
 
     @Test
@@ -314,7 +314,7 @@ class SemanticModelServiceTest {
         when(semanticTableModelRepository.findByConnectionIdOrderByTableNameAsc("conn-1")).thenReturn(List.of(
             SemanticTableModel.builder()
                 .connectionId("conn-1")
-                .tableName("USER_BOOKINGS")
+                .tableName("CUSTOMER_ORDERS")
                 .tableRole("FACT")
                 .businessDescription("Booking facts per reservation")
                 .metricColumns(List.of("booking_amount"))
@@ -325,7 +325,7 @@ class SemanticModelServiceTest {
                 .connectionId("conn-1")
                 .tableName("USER_LOGS")
                 .tableRole("EVENT_LOG")
-                .businessDescription("Usage activity and event logs for hotels and users")
+                .businessDescription("Usage activity and event logs for customers and users")
                 .businessTerms("usage, activity, logs")
                 .timeColumns(List.of("event_occurred_at"))
                 .filterColumns(List.of(Map.of("column", "action_type")))
@@ -335,7 +335,7 @@ class SemanticModelServiceTest {
 
         List<SemanticTableModel> relevant = semanticModelService.findRelevantTables(
             "conn-1",
-            "what are the hotels most likely churn? usage steeply dropped recently",
+            "what are the customers most likely churn? usage steeply dropped recently",
             java.util.Set.of()
         );
 
@@ -348,7 +348,7 @@ class SemanticModelServiceTest {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
         schema.setTables(List.of(
-            table("HOTEL",
+            table("CUSTOMERS",
                 column("id", "bigint", true),
                 column("subscription_start_date", "timestamp", false),
                 column("last_updated", "timestamp", false)
@@ -359,7 +359,7 @@ class SemanticModelServiceTest {
         when(tableClassificationRepository.findLatestByConnectionIdOrderByTableNameAsc("conn-1")).thenReturn(List.of(
             TableClassification.builder()
                 .connectionId("conn-1")
-                .tableName("HOTEL")
+                .tableName("CUSTOMERS")
                 .tableRole("DIMENSION")
                 .businessDomain("SUPPLY")
                 .build()
@@ -369,7 +369,7 @@ class SemanticModelServiceTest {
                 .connectionId("conn-1")
                 .objectType(SchemaDocumentation.DocumentationType.COLUMN)
                 .objectName("subscription_start_date")
-                .parentObject("idb_database.HOTEL")
+                .parentObject("analytics_db.CUSTOMERS")
                 .description("Date/time when the property's subscription or commercial agreement started.")
                 .businessTerms("onboarded, subscription start")
                 .source(DocumentationSource.USER)
@@ -388,33 +388,33 @@ class SemanticModelServiceTest {
         ArgumentCaptor<Iterable<SemanticTableModel>> tableCaptor = ArgumentCaptor.forClass(Iterable.class);
         verify(semanticTableModelRepository).saveAll(tableCaptor.capture());
         List<SemanticTableModel> savedTables = toList(tableCaptor.getValue());
-        SemanticTableModel hotel = savedTables.stream()
-            .filter(tableModel -> "HOTEL".equals(tableModel.getTableName()))
+        SemanticTableModel customer = savedTables.stream()
+            .filter(tableModel -> "CUSTOMERS".equals(tableModel.getTableName()))
             .findFirst()
             .orElseThrow();
 
-        assertThat(hotel.getBusinessDescription()).contains("subscription_start_date");
-        assertThat(hotel.getBusinessTerms()).contains("onboarded");
-        assertThat(hotel.getTimeColumns()).contains("subscription_start_date");
+        assertThat(customer.getBusinessDescription()).contains("subscription_start_date");
+        assertThat(customer.getBusinessTerms()).contains("onboarded");
+        assertThat(customer.getTimeColumns()).contains("subscription_start_date");
     }
 
     @Test
     void rebuildSemanticModel_matchesSchemaQualifiedDocumentationForCurrentTable() throws Exception {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
-        TableMetadata hotel = table("HOTEL",
+        TableMetadata customer = table("CUSTOMERS",
             column("id", "bigint", true),
             column("subscription_start_date", "timestamp", false),
             column("onboarding_status", "varchar", false)
         );
-        hotel.setSchema("idb_database");
-        schema.setTables(List.of(hotel));
+        customer.setSchema("analytics_db");
+        schema.setTables(List.of(customer));
 
         when(schemaScannerService.scanSchema("conn-1")).thenReturn(schema);
         when(tableClassificationRepository.findLatestByConnectionIdOrderByTableNameAsc("conn-1")).thenReturn(List.of(
             TableClassification.builder()
                 .connectionId("conn-1")
-                .tableName("HOTEL")
+                .tableName("CUSTOMERS")
                 .tableRole("DIMENSION")
                 .businessDomain("SUPPLY")
                 .build()
@@ -423,9 +423,9 @@ class SemanticModelServiceTest {
             SchemaDocumentation.builder()
                 .connectionId("conn-1")
                 .objectType(SchemaDocumentation.DocumentationType.TABLE)
-                .objectName("idb_database.HOTEL")
-                .description("Core hotel entity used for onboarding and commercial lifecycle tracking.")
-                .businessTerms("hotel, property")
+                .objectName("analytics_db.CUSTOMERS")
+                .description("Core customer entity used for onboarding and commercial lifecycle tracking.")
+                .businessTerms("customer, property")
                 .source(DocumentationSource.AI_GENERATED)
                 .createdAt(LocalDateTime.now())
                 .build(),
@@ -433,8 +433,8 @@ class SemanticModelServiceTest {
                 .connectionId("conn-1")
                 .objectType(SchemaDocumentation.DocumentationType.COLUMN)
                 .objectName("onboarding_status")
-                .parentObject("idb_database.HOTEL")
-                .description("Lifecycle status of the hotel onboarding flow.")
+                .parentObject("analytics_db.CUSTOMERS")
+                .description("Lifecycle status of the customer onboarding flow.")
                 .businessTerms("active, inactive, onboarding status")
                 .source(DocumentationSource.AI_GENERATED)
                 .createdAt(LocalDateTime.now())
@@ -453,11 +453,11 @@ class SemanticModelServiceTest {
         verify(semanticTableModelRepository).saveAll(tableCaptor.capture());
         List<SemanticTableModel> savedTables = toList(tableCaptor.getValue());
         SemanticTableModel savedHotel = savedTables.stream()
-            .filter(model -> "HOTEL".equals(model.getTableName()))
+            .filter(model -> "CUSTOMERS".equals(model.getTableName()))
             .findFirst()
             .orElseThrow();
 
-        assertThat(savedHotel.getBusinessDescription()).contains("Core hotel entity");
+        assertThat(savedHotel.getBusinessDescription()).contains("Core customer entity");
         assertThat(savedHotel.getBusinessTerms()).contains("property");
         assertThat(savedHotel.getTimeColumns()).contains("subscription_start_date");
         assertThat(savedHotel.getFilterColumns())
@@ -470,7 +470,7 @@ class SemanticModelServiceTest {
         SchemaMetadata schema = new SchemaMetadata();
         schema.setDbType("mysql");
         schema.setTables(List.of(
-            table("USER_BOOKINGS",
+            table("CUSTOMER_ORDERS",
                 column("id", "bigint", true),
                 column("booking_amount", "numeric", false),
                 column("booking_made_on", "bigint", false),
@@ -482,7 +482,7 @@ class SemanticModelServiceTest {
         when(tableClassificationRepository.findLatestByConnectionIdOrderByTableNameAsc("conn-1")).thenReturn(List.of(
             TableClassification.builder()
                 .connectionId("conn-1")
-                .tableName("USER_BOOKINGS")
+                .tableName("CUSTOMER_ORDERS")
                 .tableRole("FACT")
                 .timestampColumns(List.of(
                     Map.of("column", "booking_amount"),
@@ -495,7 +495,7 @@ class SemanticModelServiceTest {
                 .connectionId("conn-1")
                 .objectType(SchemaDocumentation.DocumentationType.COLUMN)
                 .objectName("booking_amount")
-                .parentObject("USER_BOOKINGS")
+                .parentObject("CUSTOMER_ORDERS")
                 .description("Revenue amount for the booking.")
                 .businessTerms("amount, revenue")
                 .source(DocumentationSource.USER)
@@ -505,7 +505,7 @@ class SemanticModelServiceTest {
                 .connectionId("conn-1")
                 .objectType(SchemaDocumentation.DocumentationType.COLUMN)
                 .objectName("booking_made_on")
-                .parentObject("USER_BOOKINGS")
+                .parentObject("CUSTOMER_ORDERS")
                 .description("Timestamp when the booking event occurred.")
                 .businessTerms("booking timestamp, booking time")
                 .source(DocumentationSource.USER)
@@ -525,7 +525,7 @@ class SemanticModelServiceTest {
         verify(semanticTableModelRepository).saveAll(tableCaptor.capture());
         List<SemanticTableModel> savedTables = toList(tableCaptor.getValue());
         SemanticTableModel bookings = savedTables.stream()
-            .filter(model -> "USER_BOOKINGS".equals(model.getTableName()))
+            .filter(model -> "CUSTOMER_ORDERS".equals(model.getTableName()))
             .findFirst()
             .orElseThrow();
 

@@ -1697,7 +1697,7 @@ public class ChatContextAssembler {
 
             // Extract bare table names mentioned in the question by tokenizing on spaces.
             // Exact token matching avoids false positives from suffix variants (e.g. "booking"
-            // from THREAD_BOOKING matching inside "user_bookings") and short alias names.
+            // from THREAD_BOOKING matching inside "customer_orders") and short alias names.
             String normalizedQuestion = question == null ? "" :
                 question.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_]", " ").replaceAll("\\s+", " ").trim();
             Set<String> questionTokens = java.util.Arrays.stream(normalizedQuestion.split(" "))

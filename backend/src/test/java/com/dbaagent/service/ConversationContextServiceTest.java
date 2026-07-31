@@ -52,14 +52,14 @@ class ConversationContextServiceTest {
         related.setCurrentQuestion("show me all the properties that are onboarded in the last 3 days and are active");
         related.setQuestionSummary("onboarded active properties");
         related.setAnswerSummary("Returned a list of active onboarded properties.");
-        related.setChainSummary("Active onboarded hotel properties selected from the HOTEL table.");
+        related.setChainSummary("Active onboarded customer properties selected from the CUSTOMERS table.");
         related.setResolvedContextJson("""
-            {"tables":["hotel"],"entities":["property"],"filters":["active"],"timeframe":"last 3 days"}
+            {"tables":["customer"],"entities":["property"],"filters":["active"],"timeframe":"last 3 days"}
             """);
         related.setSelectedEntitiesJson("""
-            [{"displayLabel":"Hotel Alpha","entityType":"property","table":"hotel"},{"displayLabel":"Hotel Beta","entityType":"property","table":"hotel"}]
+            [{"displayLabel":"Hotel Alpha","entityType":"property","table":"customer"},{"displayLabel":"Hotel Beta","entityType":"property","table":"customer"}]
             """);
-        related.setTopicSignature("hotel property onboarded active last 3 days selected properties");
+        related.setTopicSignature("customer property onboarded active last 3 days selected properties");
         related.setRouteType("BI_QUERY");
         related.setStateStatus("RESOLVED");
 
@@ -92,8 +92,8 @@ class ConversationContextServiceTest {
         assertTrue(resolved.hasMatchedContext());
         assertEquals("ctx-related", resolved.matchedContextId());
         assertEquals("show me all the properties that are onboarded in the last 3 days and are active", resolved.anchorQuestion());
-        assertTrue(resolved.chainSummary().contains("hotel properties"));
-        assertEquals("hotel", ((List<?>) resolved.resolvedContext().get("tables")).getFirst());
+        assertTrue(resolved.chainSummary().contains("customer properties"));
+        assertEquals("customer", ((List<?>) resolved.resolvedContext().get("tables")).getFirst());
         assertFalse(resolved.selectedEntities().isEmpty());
     }
 
@@ -112,7 +112,7 @@ class ConversationContextServiceTest {
         slowQueryTurn.setResolvedContextJson("""
             {"tables":["CM_LOGS_NEW"],"metric":"slow query ranking"}
             """);
-        slowQueryTurn.setSourceSql("SELECT * FROM CM_LOGS_NEW WHERE hotel_id = 42 ORDER BY update_time DESC");
+        slowQueryTurn.setSourceSql("SELECT * FROM CM_LOGS_NEW WHERE customer_id = 42 ORDER BY update_time DESC");
         slowQueryTurn.setTopicSignature("slow query ranking full sql scan rows performance");
         slowQueryTurn.setRouteType("BRAIN_METADATA");
         slowQueryTurn.setStateStatus("RESOLVED");
@@ -145,7 +145,7 @@ class ConversationContextServiceTest {
 
         assertTrue(resolved.hasMatchedContext());
         assertEquals("ctx-slow-query", resolved.matchedContextId());
-        assertEquals("SELECT * FROM CM_LOGS_NEW WHERE hotel_id = 42 ORDER BY update_time DESC", resolved.sourceSql());
+        assertEquals("SELECT * FROM CM_LOGS_NEW WHERE customer_id = 42 ORDER BY update_time DESC", resolved.sourceSql());
         assertTrue(resolved.chainSummary().toLowerCase().contains("slow queries"));
     }
 
@@ -156,27 +156,27 @@ class ConversationContextServiceTest {
             "BI_QUERY",
             "RESOLVED",
             "show me all the properties that are onboarded in the last 3 days and are active",
-            "Active onboarded hotel properties selected from HOTEL.",
+            "Active onboarded customer properties selected from CUSTOMERS.",
             Map.of(
-                "tables", List.of("hotel"),
+                "tables", List.of("customer"),
                 "filters", List.of("active"),
                 "timeframe", "last 3 days"
             ),
-            List.of(Map.of("displayLabel", "Hotel Alpha", "entityType", "property", "table", "hotel")),
+            List.of(Map.of("displayLabel", "Hotel Alpha", "entityType", "property", "table", "customer")),
             Map.of("rowCount", 5),
-            "SELECT hotel_id, property_name FROM hotel WHERE active = 1",
+            "SELECT customer_id, property_name FROM customer WHERE active = 1",
             List.of(),
             0.74d
         );
 
         QueryResult queryResult = new QueryResult(
-            List.of("hotel_id", "property_name", "booking_count"),
+            List.of("customer_id", "property_name", "booking_count"),
             List.of(List.of(101, "Hotel Alpha", 18)),
             1,
             1L,
             false,
             25L,
-            "SELECT hotel_id, property_name, COUNT(*) AS booking_count FROM user_bookings"
+            "SELECT customer_id, property_name, COUNT(*) AS booking_count FROM customer_orders"
         );
 
         when(chatTurnContextRepository.findByAssistantMessageId("a-3")).thenReturn(Optional.empty());
@@ -192,7 +192,7 @@ class ConversationContextServiceTest {
             "Hotel Alpha has 18 bookings.",
             "BI_QUERY",
             "UNIVERSAL_CHAT",
-            "SELECT hotel_id, property_name, COUNT(*) AS booking_count FROM user_bookings",
+            "SELECT customer_id, property_name, COUNT(*) AS booking_count FROM customer_orders",
             queryResult,
             0.91d,
             null,
@@ -207,8 +207,8 @@ class ConversationContextServiceTest {
         assertEquals("ctx-parent", saved.getParentContextId());
         assertEquals("show me all the properties that are onboarded in the last 3 days and are active", saved.getAnchorQuestion());
         assertTrue(saved.getSelectedEntitiesJson().contains("Hotel Alpha"));
-        assertTrue(saved.getResolvedContextJson().contains("hotel"));
-        assertTrue(saved.getSourceSql().contains("user_bookings"));
+        assertTrue(saved.getResolvedContextJson().contains("customer"));
+        assertTrue(saved.getSourceSql().contains("customer_orders"));
         assertEquals("RESOLVED", saved.getStateStatus());
     }
 
@@ -221,9 +221,9 @@ class ConversationContextServiceTest {
         AgentRunTraceResponse.StepDto step = new AgentRunTraceResponse.StepDto();
         AgentRunTraceResponse.ObservationDto observation = new AgentRunTraceResponse.ObservationDto();
         observation.setData(Map.of(
-            "resolvedTables", List.of("GUEST_MAPPING", "USER_BOOKINGS"),
-            "chosenTemporalColumn", "USER_BOOKINGS.booking_made_on",
-            "chosenJoinPath", List.of("GUEST_MAPPING.booking_id = USER_BOOKINGS.id")
+            "resolvedTables", List.of("CONTACT_MAPPING", "CUSTOMER_ORDERS"),
+            "chosenTemporalColumn", "CUSTOMER_ORDERS.booking_made_on",
+            "chosenJoinPath", List.of("CONTACT_MAPPING.booking_id = CUSTOMER_ORDERS.id")
         ));
         step.setObservation(observation);
         trace.setSteps(List.of(step));
@@ -264,7 +264,7 @@ class ConversationContextServiceTest {
             "Show booking revenue trend",
             "Need one clarification: which date range should define the trend?",
             Map.of(
-                "tables", List.of("USER_BOOKINGS"),
+                "tables", List.of("CUSTOMER_ORDERS"),
                 "metric", "booking revenue",
                 "timeframe", "last 30 days"
             ),
@@ -283,7 +283,7 @@ class ConversationContextServiceTest {
 
         assertEquals(ConversationCarryoverDecision.ReuseMode.ANSWER_CLARIFICATION, decision.reuseMode());
         assertTrue(decision.reusesPriorScope());
-        assertEquals("user_bookings", decision.preferredTables().getFirst());
+        assertEquals("customer_orders", decision.preferredTables().getFirst());
     }
 
     @Test
@@ -292,21 +292,21 @@ class ConversationContextServiceTest {
             "ctx-bi",
             "BI_QUERY",
             "RESOLVED",
-            "Show total bookings by hotel",
-            "Booking totals by hotel from USER_BOOKINGS joined to HOTEL.",
+            "Show total bookings by customer",
+            "Booking totals by customer from CUSTOMER_ORDERS joined to CUSTOMERS.",
             Map.of(
-                "tables", List.of("USER_BOOKINGS", "HOTEL"),
+                "tables", List.of("CUSTOMER_ORDERS", "CUSTOMERS"),
                 "metric", "bookings"
             ),
             List.of(),
             Map.of(),
-            "SELECT * FROM USER_BOOKINGS",
+            "SELECT * FROM CUSTOMER_ORDERS",
             List.of(),
             0.79d
         );
 
         ConversationCarryoverDecision decision = service.decideCarryover(
-            "What columns are there in HOTEL table?",
+            "What columns are there in CUSTOMERS table?",
             new ChatQuestionRoutingService.QuestionRoute(ChatQuestionRoutingService.RouteType.BRAIN_METADATA, ChatQuestionRoutingService.BrainTopic.SCHEMA),
             context
         );
