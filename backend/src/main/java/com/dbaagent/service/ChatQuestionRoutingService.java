@@ -58,7 +58,11 @@ public class ChatQuestionRoutingService {
         Pattern.CASE_INSENSITIVE);
 
     private static final Pattern PERFORMANCE_PATTERN = Pattern.compile(
-        ".*(slow quer|performance|latency|bottleneck|regress|regression|missing index|unused index|index recommendation|execution plan|query health|critical performance|top \\d+ slow|active quer|wait event|waiting|pressure|cardinality|statistics|plan quality|hot tables?|hottest|usage|roi|cost benefit|fix suggestions?|performance actions?|top actions?|query plans?).*",
+        // "usage" is deliberately qualified. On its own it also matches ordinary business
+        // language — "customers churning because usage dropped" is a BI question about a
+        // product metric, not a request for index-usage statistics, and routing it to
+        // brain metadata answers the wrong question entirely.
+        ".*(slow quer|performance|latency|bottleneck|regress|regression|missing index|unused index|index recommendation|execution plan|query health|critical performance|top \\d+ slow|active quer|wait event|waiting|pressure|cardinality|statistics|plan quality|hot tables?|hottest|index usage|table usage|usage stats?|roi|cost benefit|fix suggestions?|performance actions?|top actions?|query plans?).*",
         Pattern.CASE_INSENSITIVE);
 
     private static final Pattern WORKLOAD_PATTERN = Pattern.compile(
@@ -237,7 +241,12 @@ public class ChatQuestionRoutingService {
         if (!normalized.matches(".*\\b(table|tables|view|views|column|columns|fields|schema|structure|describe|definition)\\b.*")) {
             return false;
         }
-        if (normalized.matches(".*\\b(least|most|best|worst|top|bottom|largest|smallest|used|unused|slow|growth|performance|fact|dimension|pattern|relationship|join)\\b.*")) {
+        // Superlatives and rankings are not exact-schema lookups; neither is design advice.
+        // "Which tables should I use to build an accounts module?" names tables but wants
+        // reasoning over the schema, not a listing of it — answering it from cached
+        // metadata drops exactly the part the user asked for.
+        if (normalized.matches(".*\\b(least|most|best|worst|top|bottom|largest|smallest|used|unused|slow|growth|performance|fact|dimension|pattern|relationship|join)\\b.*")
+            || normalized.matches(".*\\b(should|build|design|model|recommend|suggest|architect)\\b.*")) {
             return false;
         }
         return normalized.matches(".*\\b(what|which|show|list|display|describe|structure|schema)\\b.*\\b(columns?|fields?|tables?|views?)\\b.*")
