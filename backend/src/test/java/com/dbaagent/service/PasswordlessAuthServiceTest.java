@@ -61,10 +61,13 @@ class PasswordlessAuthServiceTest {
         when(authLoginChallengeRepository.save(any(AuthLoginChallenge.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
         when(systemConfigService.getBoolean("security.workspace.email2fa.enabled")).thenReturn(true);
-        when(securityEventRepository.countByEmailIgnoreCaseAndEventTypeAndCreatedAtAfter(
+        // lenient: these two describe the "no rate limit in force" baseline. Tests that
+        // never reach the rate-limit check leave them unused, and strict stubbing turns
+        // that into a failure of the class rather than of anything being asserted.
+        lenient().when(securityEventRepository.countByEmailIgnoreCaseAndEventTypeAndCreatedAtAfter(
             anyString(), eq(SecurityEventType.PASSWORD_LOGIN_FAILURE.name()), any(LocalDateTime.class))
         ).thenReturn(0L);
-        when(securityEventRepository.countByClientIpAndEventTypeAndCreatedAtAfter(
+        lenient().when(securityEventRepository.countByClientIpAndEventTypeAndCreatedAtAfter(
             anyString(), eq(SecurityEventType.PASSWORD_LOGIN_FAILURE.name()), any(LocalDateTime.class))
         ).thenReturn(0L);
     }

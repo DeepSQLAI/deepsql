@@ -246,6 +246,26 @@ ENCRYPTION_KEY_ID=<id-1>
 
 - **Backend**: 143 tests, ~31 min. `mvn test` from `backend/`.
 - **Integration tests**: Require `TEST_CONNECTION_ID` in `application-test.properties`.
+  Four more requirements are not optional, and each fails in a way that points somewhere
+  else entirely — all four were diagnosed the hard way:
+  1. **`ENCRYPTION_KEYS` must contain the key id the app used when it saved the
+     connections**, not just the one `application-test.properties` pins
+     (`ENCRYPTION_KEY_ID=local-2025-01`). The id is embedded in each ciphertext envelope,
+     so a test JVM that knows only a different id cannot decrypt any stored credential.
+     Symptom: dozens of `No encryption key configured for id: <id>`, surfacing to the
+     caller as "DeepSQL can't access this database connection right now". Pass both:
+     `ENCRYPTION_KEYS=local-2025-01:$KEY,<app-key-id>:$KEY`.
+  2. **A reachable Redis/Valkey.** Redis failure is graceful for *caching*, but not on
+     this path — with nothing at `localhost:6379` the connection-access lookup fails and
+     reports itself as a database-connectivity problem. Set `SPRING_DATA_REDIS_HOST`.
+  3. **LLM credentials** (`DEEPSQL_CHAT_*`). Chat integration tests make real model
+     calls; without them the agent runtime fails and every chat assertion reports "the
+     agent runtime hit an internal execution failure". Note this costs real tokens.
+  4. **Stop the running backend first.** It and the test JVM open the same `dba_agent`
+     database with `ddl-auto=update`. The test JVM's `ALTER TABLE` needs ACCESS EXCLUSIVE
+     on a table the live app is inserting into, every later insert queues behind the
+     pending ALTER, and the suite **hangs indefinitely with no error** — observed as a
+     42-minute stall on `rag_documents`. Run `docker compose stop backend` first.
 - **`application-test.properties` no longer bakes in credentials either** (same
   `SelfHostPropertiesSafetyTest` guard scans it). Any test that boots the full Spring
   context under `@ActiveProfiles("test")` (e.g. `ApiSmokeTest`) requires

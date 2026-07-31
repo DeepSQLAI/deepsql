@@ -60,6 +60,34 @@ class TrainingServiceRelationshipTest {
         ReflectionTestUtils.setField(trainingService, "objectMapper", objectMapper);
     }
 
+    /**
+     * Calls the private production method and returns the number of documents it created.
+     *
+     * <p>Both halves of this have to be reflective. The method is private, and it returns
+     * {@code EmbeddingBatchSummary} — a record declared private inside
+     * {@link TrainingService} — so the test cannot name the type to unwrap it.
+     *
+     * <p>Routing all call sites through here is the point: the method previously took two
+     * arguments and returned {@code int}, then gained a run id and a richer return type.
+     * Because the call is reflective, every call site kept compiling and only failed at
+     * runtime with "Method not found" — the tests looked fine and tested nothing. One
+     * adapter means the next signature change breaks in exactly one place.
+     */
+    private int embedRelationshipDocuments(String connectionId, SchemaMetadata schema) {
+        return relationshipSummaryField(connectionId, schema, "documentsCreated");
+    }
+
+    /** As above, but reports how many of those documents received a real vector. */
+    private int embeddedRelationshipDocuments(String connectionId, SchemaMetadata schema) {
+        return relationshipSummaryField(connectionId, schema, "embeddedDocuments");
+    }
+
+    private int relationshipSummaryField(String connectionId, SchemaMetadata schema, String field) {
+        Object summary = ReflectionTestUtils.invokeMethod(
+                trainingService, "embedRelationshipDocuments", connectionId, schema, "test-run");
+        return ReflectionTestUtils.invokeMethod(summary, field);
+    }
+
     @Nested
     class EmbedRelationshipDocuments {
 
@@ -83,8 +111,7 @@ class TrainingServiceRelationshipTest {
                     .thenAnswer(inv -> inv.getArgument(0));
 
             // When
-            int result = ReflectionTestUtils.invokeMethod(trainingService,
-                    "embedRelationshipDocuments", connectionId, schema);
+            int result = embedRelationshipDocuments(connectionId, schema);
 
             // Then: 2 RELATIONSHIP docs (one for "orders", one for "customers")
             assertThat(result).isEqualTo(2);
@@ -149,8 +176,7 @@ class TrainingServiceRelationshipTest {
                     .thenAnswer(inv -> inv.getArgument(0));
 
             // When
-            int result = ReflectionTestUtils.invokeMethod(trainingService,
-                    "embedRelationshipDocuments", connectionId, schema);
+            int result = embedRelationshipDocuments(connectionId, schema);
 
             // Then: only tables from valid rel appear, rejected rel excluded
             assertThat(result).isEqualTo(2); // orders + products
@@ -197,8 +223,7 @@ class TrainingServiceRelationshipTest {
                     .thenReturn(List.of(lowConfRel));
 
             // When
-            int result = ReflectionTestUtils.invokeMethod(trainingService,
-                    "embedRelationshipDocuments", connectionId, schema);
+            int result = embedRelationshipDocuments(connectionId, schema);
 
             // Then: no docs created (low confidence filtered out, no FKs)
             assertThat(result).isEqualTo(0);
@@ -215,8 +240,7 @@ class TrainingServiceRelationshipTest {
             when(azureSearchService.isEnabled()).thenReturn(false);
 
             // When
-            int result = ReflectionTestUtils.invokeMethod(trainingService,
-                    "embedRelationshipDocuments", connectionId, schema);
+            int result = embedRelationshipDocuments(connectionId, schema);
 
             // Then
             assertThat(result).isEqualTo(0);
@@ -237,8 +261,7 @@ class TrainingServiceRelationshipTest {
                     .thenReturn(List.of());
 
             // When
-            int result = ReflectionTestUtils.invokeMethod(trainingService,
-                    "embedRelationshipDocuments", connectionId, schema);
+            int result = embedRelationshipDocuments(connectionId, schema);
 
             // Then
             assertThat(result).isEqualTo(0);
@@ -263,11 +286,12 @@ class TrainingServiceRelationshipTest {
                     .thenThrow(new RuntimeException("embedding service unavailable"));
 
             // When: should not throw
-            int result = ReflectionTestUtils.invokeMethod(trainingService,
-                    "embedRelationshipDocuments", connectionId, schema);
+            int embedded = embeddedRelationshipDocuments(connectionId, schema);
 
-            // Then: returns 0 (non-fatal)
-            assertThat(result).isEqualTo(0);
+            // Then: the failure is non-fatal and yields no vector. The document itself is
+            // still written — it stays keyword-searchable without an embedding, which is
+            // why the count to assert here is embeddedDocuments and not documentsCreated.
+            assertThat(embedded).isEqualTo(0);
         }
 
         @Test
@@ -293,8 +317,7 @@ class TrainingServiceRelationshipTest {
                     .thenReturn("customers");
 
             // When
-            int result = ReflectionTestUtils.invokeMethod(trainingService,
-                    "embedRelationshipDocuments", connectionId, schema);
+            int result = embedRelationshipDocuments(connectionId, schema);
 
             // Then
             assertThat(result).isEqualTo(2);

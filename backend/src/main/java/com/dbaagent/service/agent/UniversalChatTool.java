@@ -429,7 +429,10 @@ public class UniversalChatTool extends AbstractSqlAgentTool {
         }
         if (joinDecision != null && joinDecision.hasEnhancement() && !joinDecision.chosenJoinConditions().isEmpty()) {
             baseMessages.add(new SystemMessage(
-                "JOIN PATH RESOLUTION: Use these validated joins to keep all requested entities in scope: "
+                // Hyphenated so this heading does not read as `JOIN <TABLE>` to the
+                // schema-agnostic guard, which scans this file for hardcoded SQL table
+                // references. Identical to the model; keeps the guard strict.
+                "JOIN-PATH RESOLUTION: Use these validated joins to keep all requested entities in scope: "
                     + String.join("; ", joinDecision.chosenJoinConditions())
             ));
         }

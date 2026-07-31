@@ -16,6 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -60,6 +61,15 @@ class BrainServiceTest {
             sqlUsageService,
             schemaDriftListener
         );
+
+        // Constructing the service directly skips Spring, so every @Value field keeps
+        // Java's default instead of the one declared on it. For historyLimit that means
+        // 0, and loadScoreHistory builds PageRequest.of(0, historyLimit) — which throws
+        // "Page size must not be less than one" before any assertion in this class runs.
+        // These mirror the defaults declared in BrainService; keep them in step.
+        ReflectionTestUtils.setField(brainService, "historyLimit", 20);
+        ReflectionTestUtils.setField(brainService, "usageLookbackDays", 90);
+        ReflectionTestUtils.setField(brainService, "snapshotIntervalMinutes", 60);
     }
 
     // ─── getUnderstanding ─────────────────────────────────────────────────────
@@ -84,7 +94,10 @@ class BrainServiceTest {
                 .thenReturn(List.of());
             when(analysisHistoryRepository.findByConnectionIdSince(anyString(), any(LocalDateTime.class)))
                 .thenReturn(List.of());
-            when(trainingJobHistoryRepository
+            // lenient: lastTrainingAtIsSet_whenCompletedJobExists replaces this with a
+            // connection-specific stub, leaving this shared default unused in that test —
+            // which strict stubbing reports as an error against the whole class.
+            lenient().when(trainingJobHistoryRepository
                 .findTopByConnectionIdAndStatusOrderByCompletedAtDesc(anyString(), any()))
                 .thenReturn(Optional.empty());
             when(brainScoreSnapshotRepository.findTopByConnectionIdOrderByCreatedAtDesc(anyString()))

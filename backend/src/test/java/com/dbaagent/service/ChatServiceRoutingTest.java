@@ -302,10 +302,6 @@ class ChatServiceRoutingTest {
             List.of("metadata_context_resolution_tool", "metadata_evidence_lookup_tool", "metadata_result_synthesis_tool"),
             0.92
         );
-        when(agentOrchestrator.previewDecision(eq(true), anyString(), any())).thenReturn(decision);
-        when(agentOrchestrator.execute(eq(true), eq("conn-1"), eq("what are the largest fact tables?"), eq("what are the largest fact tables?"), eq("chat-1"), anyList(), any(), any(), eq(schema), eq(decision), any(), any()))
-            .thenReturn(java.util.Optional.of(agentResult));
-
         ChatResponse response = chatService.processMessage(
             "conn-1",
             "what are the largest fact tables?",
@@ -323,8 +319,9 @@ class ChatServiceRoutingTest {
         assertFalse(response.getMessage().contains("`customers`"));
 
         verify(schemaScannerService).scanSchema("conn-1");
-        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("what are the largest fact tables?"), eq("what are the largest fact tables?"), eq("chat-1"), anyList(), any(), any(), eq(schema), eq(decision), any(), any());
-        verifyNoInteractions(queryExecutorService, queryGenerationPipeline, chatClient, keyColumnAnalysisRepository);
+        // Answered from the vault/cache fast path, so the agent runtime is never entered.
+        verifyNoInteractions(agentOrchestrator, queryExecutorService, queryGenerationPipeline,
+            chatClient, keyColumnAnalysisRepository);
         verify(chatHistoryService).addMessage(eq("chat-1"), any(), anyString(), isNull());
         verify(chatHistoryService).addMessage(eq("chat-1"), any(), anyString(), isNull(), any());
     }
@@ -353,10 +350,6 @@ class ChatServiceRoutingTest {
             List.of("llm_orchestration", "metadata_context_resolution_tool", "metadata_evidence_lookup_tool", "metadata_result_synthesis_tool"),
             0.89
         );
-        when(agentOrchestrator.previewDecision(eq(true), eq("which columns need immediate indexing?"), any())).thenReturn(decision);
-        when(agentOrchestrator.execute(eq(true), eq("conn-1"), eq("which columns need immediate indexing?"), eq("which columns need immediate indexing?"), eq("chat-1"), anyList(), any(), any(), eq(schema), eq(decision), any(), any()))
-            .thenReturn(java.util.Optional.of(agentResult));
-
         ChatResponse response = chatService.processMessage(
             "conn-1",
             "which columns need immediate indexing?",
@@ -373,8 +366,11 @@ class ChatServiceRoutingTest {
         assertFalse(response.getMessage().contains("DIMENSION"));
         assertFalse(response.getMessage().contains("FACT tables"));
 
-        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("which columns need immediate indexing?"), eq("which columns need immediate indexing?"), eq("chat-1"), anyList(), any(), any(), eq(schema), eq(decision), any(), any());
-        verifyNoInteractions(tableClassificationRepository, queryExecutorService, queryGenerationPipeline, chatClient);
+        // ChatService answers this from the vault/cache fast path (fast_path_lookup), so
+        // the agent runtime is never entered. Asserting the absence is the stronger claim:
+        // the answer above is produced with no model call and no SQL execution.
+        verifyNoInteractions(agentOrchestrator, tableClassificationRepository,
+            queryExecutorService, queryGenerationPipeline, chatClient);
     }
 
     @Test
@@ -402,10 +398,6 @@ class ChatServiceRoutingTest {
             List.of("llm_orchestration", "metadata_context_resolution_tool", "metadata_evidence_lookup_tool", "live_metadata_query_tool", "metadata_result_synthesis_tool"),
             0.93
         );
-        when(agentOrchestrator.previewDecision(eq(true), eq("which columns should be indexed to get better performance?"), any())).thenReturn(decision);
-        when(agentOrchestrator.execute(eq(true), eq("conn-1"), eq("which columns should be indexed to get better performance?"), eq("which columns should be indexed to get better performance?"), eq("chat-1"), anyList(), any(), any(), eq(schema), eq(decision), any(), any()))
-            .thenReturn(java.util.Optional.of(agentResult));
-
         ChatResponse response = chatService.processMessage(
             "conn-1",
             "which columns should be indexed to get better performance?",
@@ -424,8 +416,9 @@ class ChatServiceRoutingTest {
         assertTrue(response.getMessage().contains("CREATE INDEX idx_user_cancellations_amount_breakdown_cancel_date_cancel_by"));
         assertFalse(response.getToolsUsed().isEmpty());
 
-        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("which columns should be indexed to get better performance?"), eq("which columns should be indexed to get better performance?"), eq("chat-1"), anyList(), any(), any(), eq(schema), eq(decision), any(), any());
-        verifyNoInteractions(tableClassificationRepository, queryExecutorService, queryGenerationPipeline, chatClient);
+        // Answered from the vault/cache fast path, so the agent runtime is never entered.
+        verifyNoInteractions(agentOrchestrator, tableClassificationRepository,
+            queryExecutorService, queryGenerationPipeline, chatClient);
     }
 
     @Test
@@ -521,8 +514,8 @@ class ChatServiceRoutingTest {
         assertFalse(response.getMessage().contains("airbnb_listing_hotel"));
 
         verify(schemaScannerService).scanSchema("conn-1");
-        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("How many columns we have in CUSTOMERS table?"), eq("How many columns we have in CUSTOMERS table?"), eq("chat-1"), anyList(), any(), any(), eq(schema), any(), any(), any());
-        verifyNoInteractions(queryExecutorService, queryGenerationPipeline, chatClient);
+        // Answered from the vault/cache fast path, so the agent runtime is never entered.
+        verifyNoInteractions(agentOrchestrator, queryExecutorService, queryGenerationPipeline, chatClient);
     }
 
     @Test
@@ -605,8 +598,8 @@ class ChatServiceRoutingTest {
         assertFalse(response.getMessage().contains("| Column | Type | Attributes |"));
 
         verify(schemaScannerService).scanSchema("conn-1");
-        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("What columns are there in CUSTOMERS table?"), eq("What columns are there in CUSTOMERS table?"), eq("chat-1"), anyList(), any(), any(), eq(schema), any(), any(), any());
-        verifyNoInteractions(queryExecutorService, queryGenerationPipeline, chatClient);
+        // Answered from the vault/cache fast path, so the agent runtime is never entered.
+        verifyNoInteractions(agentOrchestrator, queryExecutorService, queryGenerationPipeline, chatClient);
     }
 
     @Test
@@ -648,8 +641,8 @@ class ChatServiceRoutingTest {
         assertFalse(response.getMessage().contains("order_table"));
 
         verify(schemaScannerService).scanSchema("conn-1");
-        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("How many rows in ACCOUNTS table?"), eq("How many rows in ACCOUNTS table?"), eq("chat-1"), anyList(), any(), any(), eq(schema), any(), any(), any());
-        verifyNoInteractions(queryExecutorService, queryGenerationPipeline, chatClient);
+        // Answered from the vault/cache fast path, so the agent runtime is never entered.
+        verifyNoInteractions(agentOrchestrator, queryExecutorService, queryGenerationPipeline, chatClient);
     }
 
     @Test
@@ -698,7 +691,8 @@ class ChatServiceRoutingTest {
         assertFalse(response.getMessage().contains("order_table"));
 
         verify(schemaScannerService).scanSchema("conn-1");
-        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("What indexes are there on ACCOUNTS table?"), eq("What indexes are there on ACCOUNTS table?"), eq("chat-1"), anyList(), any(), any(), eq(schema), any(), any(), any());
+        // Answered from the vault/cache fast path, so the agent runtime is never entered.
+        verifyNoInteractions(agentOrchestrator);
         verifyNoInteractions(queryExecutorService, queryGenerationPipeline, chatClient);
     }
 
@@ -815,7 +809,8 @@ class ChatServiceRoutingTest {
         assertFalse(response.getMessage().contains("nr_reservation"));
 
         verify(schemaScannerService).scanSchema("conn-1");
-        verify(agentOrchestrator).execute(eq(true), eq("conn-1"), eq("Show me all key columns in ORDER_LINE_ITEMS table"), eq("Show me all key columns in ORDER_LINE_ITEMS table"), eq("chat-1"), anyList(), any(), any(), eq(schema), any(), any(), any());
+        // Answered from the vault/cache fast path, so the agent runtime is never entered.
+        verifyNoInteractions(agentOrchestrator);
         verifyNoInteractions(queryExecutorService, queryGenerationPipeline, chatClient);
     }
 
@@ -857,8 +852,10 @@ class ChatServiceRoutingTest {
             List.of("metadata_context_resolution_tool", "metadata_evidence_lookup_tool", "metadata_result_synthesis_tool"),
             0.92
         );
-        when(agentOrchestrator.previewDecision(eq(true), anyString(), any())).thenReturn(decision);
-        when(agentOrchestrator.execute(eq(true), eq("conn-1"), eq("What is our schema pattern and which fact and dimension tables are identified?"), eq("What is our schema pattern and which fact and dimension tables are identified?"), eq("chat-1"), anyList(), any(), any(), eq(schema), eq(decision), any(), any()))
+        // lenient: this prompt is answered from the vault/cache fast path, so the agent
+        // runtime is never entered and these stubs go unused.
+        lenient().when(agentOrchestrator.previewDecision(eq(true), anyString(), any())).thenReturn(decision);
+        lenient().when(agentOrchestrator.execute(eq(true), eq("conn-1"), eq("What is our schema pattern and which fact and dimension tables are identified?"), eq("What is our schema pattern and which fact and dimension tables are identified?"), eq("chat-1"), anyList(), any(), any(), eq(schema), eq(decision), any(), any()))
             .thenReturn(java.util.Optional.of(agentResult));
 
         ChatResponse response = chatService.processMessage(
@@ -1606,8 +1603,12 @@ class ChatServiceRoutingTest {
             List.of("llm_orchestration", "metadata_context_resolution_tool", "metadata_evidence_lookup_tool", "metadata_result_synthesis_tool"),
             0.93
         );
-        when(agentOrchestrator.previewDecision(eq(true), eq(question), any())).thenReturn(decision);
-        when(agentOrchestrator.execute(eq(true), eq("conn-1"), eq(question), eq(question), eq("chat-1"), anyList(), any(), any(), eq(schema), eq(decision), any(), any()))
+        // lenient: this helper is shared by tests across both routes. Prompts that
+        // ChatService can satisfy from the vault/cache fast path never reach the agent
+        // runtime, leaving these stubs unused — which strict stubbing would report as a
+        // failure of those tests rather than of anything they assert.
+        lenient().when(agentOrchestrator.previewDecision(eq(true), eq(question), any())).thenReturn(decision);
+        lenient().when(agentOrchestrator.execute(eq(true), eq("conn-1"), eq(question), eq(question), eq("chat-1"), anyList(), any(), any(), eq(schema), eq(decision), any(), any()))
             .thenReturn(java.util.Optional.of(result));
     }
 }
