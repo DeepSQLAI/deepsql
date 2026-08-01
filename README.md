@@ -17,6 +17,36 @@ reasoning behind it.
 
 ---
 
+## What it does
+
+Your 24/7 DBA and data engineer. It answers BI questions, fixes slow queries, and watches
+your schema — all from one shared brain.
+
+- **Answers BI questions.** Ask in plain English. The agent loads your business context,
+  resolves the schema, drafts and validates SQL, then executes it read-only — with every
+  step you can inspect. The hand-written SQL editor is the only path that can mutate, and
+  only for a confirming admin.
+- **Fixes slow queries.** Reads `pg_stat_statements` or the MySQL slow log, groups queries
+  by fingerprint, ranks them by cost, and flags regressions against their baseline.
+- **Index recommendations.** Advises, and can apply them for you — `CREATE INDEX
+  CONCURRENTLY` on PostgreSQL, so no table lock.
+- **Watches your schema.** Tracks what changed and what needs attention, so drift surfaces
+  before it breaks a query or a dashboard.
+- **A brain that knows your business.** Teach it your metrics, rules and conventions once —
+  MRR, active accounts, currency handling — and every query, dashboard and recommendation
+  uses the same governed definitions.
+- **Dashboards without the analyst backlog.** An agent writes a single self-contained HTML
+  document, rendered in a sandboxed iframe with no network access. It reads data only
+  through a read-only query bridge back to the backend — the agent gets creative freedom,
+  the database keeps its guard rail.
+- **Ask it from anywhere.** The web UI, your terminal, or a Slack channel. The MCP server
+  gives coding agents (Claude Code, Cursor, Codex, Claude Desktop) the same capabilities
+  over stdio.
+- **Postgres and MySQL, in your infra.** One dialect registry, read-only execution, and SSH
+  tunnelling to reach databases behind a bastion.
+
+---
+
 ## Quick start
 
 There are no prebuilt images and no container registry. Docker Compose builds the backend
@@ -143,25 +173,7 @@ version), `_USE_RESPONSES_API` (`true` / `false` / `auto`).
 
 ---
 
-## What it does
-
-- **Ask in English.** Schema questions, business questions, "why is this slow" questions.
-  SQL that the assistant or an agent generates is validated and executed read-only; the
-  hand-written SQL editor is the only path that can mutate, and only for a confirming admin.
-- **Slow query analysis.** Ingests and groups slow queries, attributes cost, and explains
-  what is actually expensive.
-- **Index recommendations.** Advises, and can apply them for you — `CREATE INDEX
-  CONCURRENTLY` on PostgreSQL, so no table lock.
-- **Generated dashboards.** An agent writes a single self-contained HTML document, rendered
-  in a sandboxed iframe with no network access. It reads data only through a read-only query
-  bridge back to the backend — the agent gets creative freedom, the database keeps its guard
-  rail.
-- **MCP server.** Gives coding agents (Claude Code, Cursor, Codex, Claude Desktop) the same
-  capabilities over stdio.
-- **SSH tunnelling.** Reach databases behind a bastion without exposing them.
-- **PostgreSQL and MySQL**, behind one dialect registry.
-
-### MCP server
+## MCP server
 
 The server lives in `mcp/` and exposes 44 tools that wrap the backend API, so agents reuse
 the same orchestration, retrieval and guardrails instead of getting raw database
