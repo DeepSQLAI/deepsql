@@ -45,7 +45,12 @@ backend/target/
 # deployment profiles must never be committed:
 backend/src/main/resources/application-*prod-local.properties
 backend/src/main/resources/application-azprod.properties
-backend/.mvn/
+# backend/.mvn/ is deliberately NOT ignored: it carries the Maven wrapper
+# properties that pin CI and every contributor to one Maven version. Ignoring it
+# would make `commit mvnw` silently half-complete — the scripts would land and the
+# version pin would not, which is the failure the wrapper exists to prevent.
+# Ignore only the local state Maven writes into that directory itself.
+backend/.mvn/timing.properties
 # large test data (over GitHub 100MB limit)
 backend/test_data_inserts.sql
 backend/comprehensive_test_data_mysql.sql

@@ -1,0 +1,56 @@
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so a newly published query catches an old vulnerability that was
+    # not a finding on the day the code merged. Scanning only on change would
+    # never re-examine code that has stopped being touched.
+    - cron: '27 4 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    # Code scanning is free on public repositories; on a private one it requires
+    # GitHub Advanced Security, which this organisation's free plan does not
+    # include. Without this guard every run fails with a 403 until the repository
+    # is public, and a permanently red workflow trains people to stop reading CI.
+    # DELETE THIS LINE once the repository is public — from then on a failure
+    # here is a real finding rather than a billing state.
+    if: github.event.repository.visibility == 'public'
+    permissions:
+      # Required to upload results to the code-scanning API.
+      security-events: write
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: java-kotlin
+          - language: javascript-typescript
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # `none` extracts from source instead of observing a compiler. Chosen
+          # deliberately for the Java half: an autobuild would have to reproduce
+          # the JDK 25 toolchain and full Maven dependency resolution, so it
+          # fails for build reasons far more often than it finds a vulnerability.
+          # The JavaScript half never has a build mode.
+          build-mode: none
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}

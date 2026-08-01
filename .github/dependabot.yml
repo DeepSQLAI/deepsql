@@ -1,0 +1,66 @@
+version: 2
+
+# Directories here are the ones that actually contain a manifest — verified
+# against the tree rather than assumed. In particular there is no Dockerfile
+# under /docker (it holds nginx and postgres config only); the images build from
+# /Dockerfile and /backend/Dockerfile.
+updates:
+  # ── Java backend ────────────────────────────────────────────────────────────
+  - package-ecosystem: maven
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+
+  # ── Frontend ────────────────────────────────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # Dev tooling moves constantly and carries no runtime risk. Grouping it
+      # keeps this to one PR a week instead of a dozen nobody reviews properly —
+      # review fatigue is how a real security bump gets rubber-stamped.
+      dev-dependencies:
+        dependency-type: development
+
+  # ── MCP server / DeepSQL CLI ────────────────────────────────────────────────
+  # A separately published npm package, so its manifest is not covered by the
+  # root entry above.
+  - package-ecosystem: npm
+    directory: /mcp
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+
+  # ── Container base images ───────────────────────────────────────────────────
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+
+  # ── GitHub Actions ──────────────────────────────────────────────────────────
+  # Monthly is enough: actions change slowly, and a pinned action is a supply
+  # chain dependency like any other.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"

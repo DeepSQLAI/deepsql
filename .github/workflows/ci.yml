@@ -1,0 +1,150 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A force-push or a rapid second push should not leave two runs racing; the older
+# one is cancelled rather than burning a runner on a commit nobody will merge.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only by default. Nothing here writes to the repository, and a fork-based
+# pull request must never hold a writable token.
+permissions:
+  contents: read
+
+jobs:
+  # ── Required checks ────────────────────────────────────────────────────────
+  # Everything in this group passes on main today. Only checks that are green
+  # from the first run belong here: a required check that always fails is
+  # indistinguishable from a broken merge queue and teaches people to ignore CI.
+
+  frontend:
+    name: frontend (build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+  backend:
+    name: backend (compile + package)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      # No database service here on purpose: with tests skipped nothing opens a
+      # connection, so this job stays fast and has exactly one failure mode —
+      # the code does not compile, or does not package.
+      - run: ./mvnw -B -ntp -DskipTests verify
+        working-directory: backend
+
+  mcp:
+    name: mcp (syntax)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # Every JS file in the package, not just the entrypoint: the server is a
+      # thin shim over lib and command modules, and a syntax error in any of them
+      # surfaces only when an agent loads that path at runtime.
+      - name: Syntax-check MCP sources
+        run: find mcp -name '*.js' -not -path '*/node_modules/*' -print0 | xargs -0 -n1 node --check
+
+  compose-build:
+    name: docker compose build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Catches the case where the code compiles but the image does not. Our
+      # distribution path is "clone and build", so an unbuildable image is a
+      # total outage for a new user even when every test passes.
+      - name: Synthesize .env
+        run: |
+          cp .env.example .env
+          printf 'SECURITY_JWT_SECRET=%s\n' "$(openssl rand -base64 64 | tr -d '\n')" >> .env
+          printf 'ENCRYPTION_KEY=%s\n' "$(openssl rand -base64 32)" >> .env
+      - run: docker compose build
+
+  # ── Advisory checks ────────────────────────────────────────────────────────
+  # These run on every pull request and report, but do not block. They are staged
+  # this way because both are red on main right now (backend: 77 of 1293 tests
+  # failing; frontend: 41 eslint errors). Promote each to a required check in
+  # branch protection the day its suite goes green — that promotion is the point
+  # of running them, not an afterthought.
+
+  backend-tests:
+    name: backend tests (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      postgres:
+        # pgvector, not stock postgres: rag_documents.embedding is vector(3072)
+        # and the schema will not create against an image without the extension.
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dba_agent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      # Generated per run and discarded with the runner, rather than written into
+      # this file or held as a repository secret. Nothing in the test suite needs
+      # a key that outlives the job, so nothing should own one. The id must be
+      # local-2025-01: application-test.properties pins ENCRYPTION_KEY_ID to it.
+      - name: Generate ephemeral encryption key
+        run: echo "ENCRYPTION_KEYS=local-2025-01:$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+      - run: ./mvnw -B -ntp test
+        working-directory: backend
+        env:
+          TEST_DB_URL: jdbc:postgresql://localhost:5432/dba_agent?sslmode=disable
+          TEST_DB_USERNAME: postgres
+          TEST_DB_PASSWORD: postgres
+          AZURE_SEARCH_API_KEY: dummy-test-key
+      - name: Publish test summary
+        if: always()
+        run: |
+          echo '### Backend test results' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -ho 'Tests run:.*' backend/target/surefire-reports/*.txt 2>/dev/null \
+            | tail -5 >> "$GITHUB_STEP_SUMMARY" \
+            || echo 'no surefire reports produced' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  lint:
+    name: frontend lint (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint

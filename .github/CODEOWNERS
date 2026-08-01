@@ -1,0 +1,64 @@
+# Code owners for DeepSQL.
+#
+# GitHub applies LAST MATCH WINS — only the final matching pattern's owners are
+# requested. Order therefore matters: the catch-all is first and the narrow
+# security paths are last, so a change under backend/.../security/ is routed to
+# @DeepSQLAI/security and not merely to the maintainers.
+#
+# A caveat worth stating in the file itself, because the process document implies
+# otherwise: CODEOWNERS cannot require a DIFFERENT NUMBER of approvals for
+# particular paths. Branch protection carries one repo-wide approval count. What
+# CODEOWNERS does guarantee is WHO must approve. The two-approval rule on the
+# vault, auth and SQL-execution paths is therefore a reviewer convention here,
+# not a machine-enforced gate — see the note in SECURITY.md.
+#
+# Teams, not usernames, on purpose: a permissions change is then one edit to the
+# team roster rather than a sweep across this file.
+
+*                                                       @DeepSQLAI/maintainers
+
+# ── Build, packaging and self-host surface ──────────────────────────────────
+# A broken first run is a severe defect for us: the product is distributed as
+# "clone and build", so these files are the install experience.
+/Dockerfile                                             @DeepSQLAI/maintainers
+/docker/                                                @DeepSQLAI/maintainers
+/docker-compose.yml                                     @DeepSQLAI/maintainers
+/backend/Dockerfile                                     @DeepSQLAI/maintainers
+/backend/pom.xml                                        @DeepSQLAI/maintainers
+/backend/mvnw                                           @DeepSQLAI/maintainers
+/backend/mvnw.cmd                                       @DeepSQLAI/maintainers
+/backend/.mvn/                                          @DeepSQLAI/maintainers
+/scripts/self-host/                                     @DeepSQLAI/maintainers
+/.github/                                               @DeepSQLAI/maintainers
+
+# Renaming anything here silently breaks every operator's .env on upgrade.
+/.env.example                                           @DeepSQLAI/maintainers
+
+# ── Security-critical: convention is two maintainer approvals ───────────────
+# Credential vault, encryption key handling, authentication and JWT. The vault
+# holds an AES-GCM key whose loss is unrecoverable.
+/backend/src/main/java/com/dbaagent/security/           @DeepSQLAI/security
+/backend/src/main/java/com/dbaagent/service/security/   @DeepSQLAI/security
+
+# Read-only SQL execution enforcement. This is the guardrail standing between a
+# generated statement and a customer's production database.
+/backend/src/main/java/com/dbaagent/service/McpSqlGuardService.java              @DeepSQLAI/security
+/backend/src/main/java/com/dbaagent/service/QueryExecutionContext.java           @DeepSQLAI/security
+/backend/src/main/java/com/dbaagent/service/QueryExecutionPolicyService.java     @DeepSQLAI/security
+/backend/src/main/java/com/dbaagent/service/QueryExecutionPolicyException.java   @DeepSQLAI/security
+/backend/src/main/java/com/dbaagent/model/McpReadOnlyQueryRequest.java           @DeepSQLAI/security
+/backend/src/main/java/com/dbaagent/model/McpReadOnlyExplainRequest.java         @DeepSQLAI/security
+/backend/src/main/java/com/dbaagent/model/QueryExecutionOrigin.java              @DeepSQLAI/security
+/backend/src/main/java/com/dbaagent/provider/api/QueryExecutionProvider.java     @DeepSQLAI/security
+
+# SSH tunnelling: reaches into networks the operator has not otherwise exposed.
+/backend/src/main/java/com/dbaagent/service/SshTunnelService.java                @DeepSQLAI/security
+
+# The dashboard sandbox and its read-only query bridge. The public controller is
+# reachable unauthenticated for as long as a dashboard is shared.
+/backend/src/main/java/com/dbaagent/controller/DashboardQueryController.java     @DeepSQLAI/security
+/backend/src/main/java/com/dbaagent/controller/PublicDashboardController.java    @DeepSQLAI/security
+/src/components/DashboardArtifact.jsx                                           @DeepSQLAI/security
+
+# The MCP tool surface and its authorisation: an agent-facing remote surface.
+/mcp/                                                   @DeepSQLAI/security
