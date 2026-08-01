@@ -2,7 +2,7 @@
 
 ![DeepSQL CLI showing suggested DBA, BI and Guardian prompts, connected databases, and brain initialization progress](docs/assets/deepsql-cli.png)
 
-**An AI database performance assistant you run yourself.** Point it at PostgreSQL or
+**The database agent for Postgres and MySQL** Point it at PostgreSQL or
 MySQL and ask questions in plain English — schema exploration, query generation, slow
 query analysis, index recommendations, generated dashboards. Bring your own LLM: OpenAI,
 Azure OpenAI, or any OpenAI-compatible endpoint, including one running on your own
