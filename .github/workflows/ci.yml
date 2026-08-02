@@ -85,11 +85,16 @@ jobs:
   # failing; frontend: 41 eslint errors). Promote each to a required check in
   # branch protection the day its suite goes green — that promotion is the point
   # of running them, not an afterthought.
+  #
+  # `continue-on-error` belongs on the STEP, never on the job. At job level the
+  # workflow run goes green but GitHub still reports the individual check as
+  # failed, which paints a red X on every pull request whatever it contains. That
+  # makes a genuinely broken change indistinguishable from a healthy one and
+  # trains reviewers to merge through red — the exact habit CI exists to prevent.
 
   backend-tests:
     name: backend tests (advisory)
     runs-on: ubuntu-latest
-    continue-on-error: true
     services:
       postgres:
         # pgvector, not stock postgres: rag_documents.embedding is vector(3072)
@@ -120,6 +125,7 @@ jobs:
       - name: Generate ephemeral encryption key
         run: echo "ENCRYPTION_KEYS=local-2025-01:$(openssl rand -base64 32)" >> "$GITHUB_ENV"
       - run: ./mvnw -B -ntp test
+        continue-on-error: true
         working-directory: backend
         env:
           TEST_DB_URL: jdbc:postgresql://localhost:5432/dba_agent?sslmode=disable
@@ -139,7 +145,6 @@ jobs:
   lint:
     name: frontend lint (advisory)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -148,3 +153,4 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+        continue-on-error: true
