@@ -31,7 +31,7 @@
     "react-is": "^19.2.3",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^3.0.6",
-    "react-router-dom": "^7.11.0",
+    "react-router-dom": "^7.18.2",
     "react-window": "^2.3.0",
     "recharts": "^3.6.0",
     "remark-gfm": "^4.0.1",
