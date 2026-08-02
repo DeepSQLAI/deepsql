@@ -237,7 +237,7 @@
         <dependency>
             <groupId>com.openai</groupId>
             <artifactId>openai-java</artifactId>
-            <version>4.16.1</version>
+            <version>4.45.0</version>
         </dependency>
 
         <!-- Apache Commons Text for similarity -->
