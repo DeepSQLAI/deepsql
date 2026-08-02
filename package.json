@@ -35,7 +35,7 @@
     "react-window": "^2.2.4",
     "recharts": "^3.6.0",
     "remark-gfm": "^4.0.1",
-    "sql-formatter": "^15.6.12",
+    "sql-formatter": "^15.8.2",
     "xlsx": "^0.18.5",
     "zustand": "^5.0.11"
   },
