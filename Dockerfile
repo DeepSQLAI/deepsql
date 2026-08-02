@@ -29,7 +29,7 @@ ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build:production
 
 # ── Stage 2: Serve ────────────────────────────────────────────────────────────
-FROM nginx:1.27-alpine AS runtime
+FROM nginx:1.31-alpine AS runtime
 
 # Copy built assets
 COPY --from=builder /app/dist /usr/share/nginx/html
