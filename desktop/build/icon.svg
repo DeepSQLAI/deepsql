@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- DeepSQL app icon: the web app's database glyph (public/favicon.svg) knocked
+       out of the same #0d0d0d tile used by the sidebar logo in AppSidebar.module.css. -->
+  <rect width="1024" height="1024" rx="228" fill="#0d0d0d"/>
+  <g transform="translate(512 512) scale(30.5) translate(-12 -12)"
+     fill="none" stroke="#ffffff" stroke-width="1.9"
+     stroke-linecap="round" stroke-linejoin="round">
+    <ellipse cx="12" cy="5" rx="9" ry="3"/>
+    <path d="M3 5V19A9 3 0 0 0 21 19V5"/>
+    <path d="M3 12A9 3 0 0 0 21 12"/>
+  </g>
+</svg>
