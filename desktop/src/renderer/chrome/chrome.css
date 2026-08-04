@@ -1,0 +1,227 @@
+/* Workspace top chrome. 44px tall; the error banner adds 36px and the main
+   process grows the view to match (see Workspace.layout). */
+
+body {
+  background: var(--color-white);
+}
+
+.bar {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  background: var(--color-white);
+  border-bottom: 1px solid var(--color-border);
+  -webkit-app-region: drag;
+}
+
+.bar button,
+.identity,
+.health {
+  -webkit-app-region: no-drag;
+}
+
+/* Room for the macOS traffic lights, which sit over our content. */
+.mac-inset {
+  width: 68px;
+  flex-shrink: 0;
+}
+
+.nav {
+  display: flex;
+  gap: 1px;
+  flex-shrink: 0;
+}
+
+.icon-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 7px;
+  color: var(--color-light-6);
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--color-light-2);
+  color: var(--color-text);
+}
+
+.text-btn {
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: var(--color-light-6);
+}
+
+/* ── Connection identity ─────────────────────────────────────────────── */
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px 0 6px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  min-width: 0;
+  color: var(--color-text);
+}
+
+.identity:hover {
+  background: var(--color-light-2);
+  border-color: var(--color-light-3);
+}
+
+.identity-mark {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: var(--color-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.identity-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+
+.tag {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: var(--radius-button);
+  background: var(--color-light-2);
+  color: var(--color-light-6);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tag.tag-warn {
+  background: var(--color-warning-soft);
+  color: #92400e;
+}
+
+.chevron {
+  flex-shrink: 0;
+  color: var(--color-light-5);
+}
+
+/* ── Health ──────────────────────────────────────────────────────────── */
+.health {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  font-size: 11.5px;
+  color: var(--color-light-5);
+  flex-shrink: 0;
+}
+
+.health-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-light-4);
+}
+
+.health-dot.is-ok {
+  background: var(--color-success);
+}
+
+.health-dot.is-slow {
+  background: var(--color-warning);
+}
+
+.health-dot.is-down {
+  background: var(--color-danger);
+}
+
+.health-text {
+  font-variant-numeric: tabular-nums;
+}
+
+.spacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* ── Windows / Linux window controls ─────────────────────────────────── */
+.window-controls {
+  display: flex;
+  margin-left: 6px;
+  margin-right: -10px;
+  flex-shrink: 0;
+}
+
+.win-btn {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 0;
+  color: var(--color-light-8);
+}
+
+.win-btn:hover:not(:disabled) {
+  background: var(--color-light-2);
+}
+
+.win-close:hover:not(:disabled) {
+  background: var(--color-danger-dark);
+  color: #fff;
+}
+
+/* ── Error banner ────────────────────────────────────────────────────── */
+.banner {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  background: var(--color-danger-soft);
+  border-bottom: 1px solid var(--color-danger-border);
+  color: var(--color-danger-text);
+  font-size: 12.5px;
+}
+
+.banner span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.banner-action {
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 12px;
+  border-radius: var(--radius-button);
+  background: var(--color-white);
+  border: 1px solid var(--color-danger-border);
+  color: var(--color-danger-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.banner-action:hover {
+  background: #fff;
+  color: var(--color-danger-dark);
+}

@@ -93,6 +93,72 @@ mcp/                # DeepSQL Phase 1 MCP server (Node stdio wrapper around back
 agent/              # DeepSQL Agent customization (persona, skills, skins; customized Hermes runtime)
 ```
 
+## Desktop Client (`desktop/`)
+
+Cross-platform Electron client for a self-hosted DeepSQL VM. **Separate npm
+project** — `cd desktop && npm install`, not part of the root `package.json`.
+
+```bash
+cd desktop
+npm start                 # run     npm run dev          # run with DevTools
+npm run dist:mac          # dmg + zip (arm64 + x64), also :win / :linux
+npm run smoke -- --url https://deepsql.example.com   # headless connection check
+npm run selftest:tunnel   # end-to-end SSH tunnel test (in-process SSH server)
+```
+
+**It is a thin client and deliberately does not bundle the React frontend.** It
+navigates a `WebContentsView` at the real DeepSQL origin, so the UI is always the
+version the VM is running — no bundle/backend skew, and no second copy of 40+
+tabs to maintain. This works with **zero backend changes** because
+`docker/nginx/default.conf` already serves the SPA, `/api` and `/agent-api` from
+one origin: cookies, CORS and SSE behave exactly as in a browser. Do not
+"improve" this by bundling `dist/` — that reintroduces CORS, `SameSite`, and
+version-skew problems the current design does not have.
+
+**Two transports, one abstraction.** Both resolve to an *origin*, so nothing
+downstream of `desktop/src/main/transport.js` knows which is in use:
+
+- **Direct TLS** — the VM's HTTPS origin. Four certificate modes (`system`,
+  `pinned`, `custom-ca`, `insecure`/TOFU), applied to **both** the Node health
+  probe and the Chromium session (`tls.applyToSession`). Applying it to only one
+  gives a connection that tests green but renders a certificate error.
+- **SSH tunnel** — `ssh2` local forward, loopback-bound, no `ssh` binary needed.
+  The local port is *sticky* across launches on purpose: the origin includes the
+  port, and a fresh random port would silently reset the web app's
+  `localStorage`. `http://127.0.0.1:*` is a Chromium secure context, so the
+  backend's `Secure` cookies still work over the tunnel. **Forward to the
+  frontend container (3000), not a host reverse proxy on :80** — that proxy
+  matches on `server_name`, a tunnel arrives with `Host: 127.0.0.1:<port>`,
+  and the request lands on the default vhost as a 404 that reads like a broken
+  backend. The container's nginx uses `server_name _` and answers any Host.
+
+Three non-obvious things, all found the hard way:
+
+1. **`Client.connect({ privateKey })` must get the raw key material, not the
+   object `sshUtils.parseKey` returns.** Handed a parsed key, ssh2 silently
+   never offers the publickey method and the server replies with a bare
+   authentication failure — a symptom that points at the VM's `authorized_keys`
+   rather than at a type mismatch on our side. `loadPrivateKey` parses only to
+   produce good error messages and returns the buffer.
+2. **Authentication succeeding says nothing about forwarding being allowed.**
+   A hardened sshd (`AllowTcpForwarding no`) accepts the login and refuses every
+   `direct-tcpip` channel; the failure otherwise surfaces as "socket hang up" on
+   the first browser request, pointing nowhere near sshd. `verifyForwarding()`
+   opens and closes one channel right after auth and classifies the refusal by
+   SSH reason code — 1 (`ADMINISTRATIVELY_PROHIBITED`, verified against real
+   OpenSSH) names `AllowTcpForwarding`, 2 (`CONNECT_FAILED`) means nothing is
+   listening on the remote port.
+3. **Only a session that once reached `ready` may be reconnected.** Gating
+   reconnects on `everReady` is what stops a connect that fails on
+   authentication from retrying forever behind a caller that already surfaced
+   the error.
+
+Secrets (key passphrases, SSH passwords) are stored as `safeStorage` ciphertext;
+where no OS keychain exists nothing is written to disk and the launcher says so.
+Each profile gets its own session partition, so two DeepSQL servers never share
+cookies. `.github/workflows/desktop-release.yml` builds all three platforms on
+their native runners. See `desktop/README.md` for the full picture.
+
 ## MCP Server
 
 - `mcp/deepsql-phase1-server.js` implements a Phase 1 stdio MCP server for internal rollout.
