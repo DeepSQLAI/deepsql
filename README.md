@@ -2,18 +2,212 @@
 
 ![DeepSQL CLI showing suggested DBA, BI and Guardian prompts, connected databases, and brain initialization progress](docs/assets/deepsql-cli.png)
 
-**The database agent for Postgres and MySQL** Point it at PostgreSQL or
-MySQL and ask questions in plain English — schema exploration, query generation, slow
-query analysis, index recommendations, generated dashboards. Bring your own LLM: OpenAI,
-Azure OpenAI, or any OpenAI-compatible endpoint, including one running on your own
-hardware. No vendor account is required and no model provider is hardcoded.
+**The database agent for Postgres and MySQL.** Point it at PostgreSQL or MySQL and ask
+questions in plain English — schema exploration, query generation, slow query analysis,
+index recommendations, generated dashboards.
 
-Everything runs in your environment. Database credentials are encrypted in a local vault,
-and nothing leaves the machines you control except the prompts you send to the LLM
-endpoint you configured.
+**You bring the model.** DeepSQL ships with no model provider of its own and no vendor
+account to sign up for. You point it at OpenAI, Azure OpenAI, a LiteLLM proxy, or a model
+running on your own hardware, and it uses that. Everything else runs in your environment:
+database credentials are encrypted in a local vault, and nothing leaves the machines you
+control except the prompts you send to the endpoint you chose.
 
 📄 **[Read the whitepaper](https://deepsql.ai/whitepaper)** — the architecture and the
 reasoning behind it.
+
+---
+
+## Quick start
+
+Five steps, in order. Budget about fifteen minutes, most of it waiting on the first build.
+
+### 1. Check you have what you need
+
+- **Docker Engine** with Compose v2 **and buildx** — verify with `docker compose version`
+  and `docker buildx version`. Compose delegates builds to buildx and refuses anything
+  older than 0.17.0.
+- **`git`**, **`curl`** and **`openssl`**
+- **~4 GB of memory available to Docker.** The backend JVM is configured with a 3 GB max
+  heap, so a smaller allocation fails in ways that look unrelated.
+- **An API key for a model provider.** See step 3 — you need this before you start, not
+  after.
+
+**On a fresh server, one command does all of that:**
+
+```bash
+sudo ./scripts/self-host/bootstrap-server.sh
+```
+
+It handles Debian/Ubuntu and Amazon Linux 2023 / RHEL, installs whatever is missing, and
+verifies the result before exiting. Worth running even where Docker is already present: a
+stock `dnf install docker` on Amazon Linux 2023 ships **neither** the Compose plugin
+**nor** a buildx new enough to build, and the resulting failure surfaces much later, at
+`docker compose up --build`, naming neither.
+
+### 2. Get the code
+
+There are no prebuilt images and no container registry. Compose builds the backend and
+frontend from your checkout.
+
+```bash
+git clone https://github.com/DeepSQLAI/deepsql.git
+cd deepsql
+cp .env.example .env
+```
+
+### 3. Choose your model
+
+This is the step that matters, and the one thing DeepSQL cannot decide for you.
+
+Open `.env` and set the chat group. Whatever you pick, the provider id stays `openai` —
+there is one provider implementation and it speaks OpenAI, Azure OpenAI, and every
+OpenAI-compatible server. It dispatches on the **shape of your endpoint**, not on a name
+you configure.
+
+| Variable | What to put in it |
+|---|---|
+| `DEEPSQL_CHAT_PROVIDER` | `openai` — always, for every provider below |
+| `DEEPSQL_CHAT_API_KEY` | Your key. For a local model, any non-empty string. |
+| `DEEPSQL_CHAT_ENDPOINT` | The base URL. **No working default — set it explicitly.** |
+| `DEEPSQL_CHAT_MODEL` | Model name, or your Azure *deployment* name |
+
+Pick the one that matches you:
+
+<details open>
+<summary><b>OpenAI</b></summary>
+
+```env
+DEEPSQL_CHAT_PROVIDER=openai
+DEEPSQL_CHAT_API_KEY=sk-your-key
+DEEPSQL_CHAT_ENDPOINT=https://api.openai.com/v1
+DEEPSQL_CHAT_MODEL=gpt-4o
+```
+</details>
+
+<details>
+<summary><b>Azure OpenAI</b></summary>
+
+An `.azure.com` or `.azure-api.net` endpoint switches authentication to the `api-key`
+header automatically. `_MODEL` is your **deployment** name, not the model name.
+
+```env
+DEEPSQL_CHAT_PROVIDER=openai
+DEEPSQL_CHAT_API_KEY=your-azure-openai-key
+DEEPSQL_CHAT_ENDPOINT=https://your-resource.cognitiveservices.azure.com/
+DEEPSQL_CHAT_MODEL=your-deployment-name
+```
+</details>
+
+<details>
+<summary><b>Anthropic</b></summary>
+
+Anthropic serves an OpenAI-compatible `/v1/chat/completions`, so it needs no gateway. It
+publishes no embeddings API, so pair it with another provider for embeddings (step 4).
+
+```env
+DEEPSQL_CHAT_PROVIDER=openai
+DEEPSQL_CHAT_API_KEY=sk-ant-your-key
+DEEPSQL_CHAT_ENDPOINT=https://api.anthropic.com/v1
+DEEPSQL_CHAT_MODEL=claude-haiku-4-5-20251001
+```
+</details>
+
+<details>
+<summary><b>Ollama, vLLM, LM Studio, TGI — your own hardware</b></summary>
+
+Anything speaking the OpenAI wire format. No key is required, but the variable must be
+non-empty.
+
+```env
+DEEPSQL_CHAT_PROVIDER=openai
+DEEPSQL_CHAT_API_KEY=ollama
+DEEPSQL_CHAT_ENDPOINT=http://host.docker.internal:11434/v1
+DEEPSQL_CHAT_MODEL=llama3.1
+```
+</details>
+
+<details>
+<summary><b>LiteLLM proxy</b></summary>
+
+Point at the proxy, authenticate with a virtual key, use your own alias. Chat, embeddings
+and brain initialisation are verified end to end against a self-hosted LiteLLM.
+
+```env
+DEEPSQL_CHAT_PROVIDER=openai
+DEEPSQL_CHAT_API_KEY=sk-your-litellm-virtual-key
+DEEPSQL_CHAT_ENDPOINT=http://litellm:4000/v1
+DEEPSQL_CHAT_MODEL=your-alias
+```
+
+**Name your alias carefully.** `_USE_RESPONSES_API` defaults to `auto`, which decides from
+the **model name** rather than from what your endpoint implements. An alias beginning
+`gpt-5`, `o1`, `o3`, `o4` or `codex` selects the Responses API. If your gateway does not
+serve `/v1/responses`, avoid those prefixes or set `DEEPSQL_CHAT_USE_RESPONSES_API=false`.
+</details>
+
+> `DEEPSQL_CHAT_PROVIDER` gates the whole group: with it unset, **no other `DEEPSQL_CHAT_*`
+> variable is read**. That is the most common reason a carefully filled-in `.env` appears to
+> be ignored.
+
+### 4. Add embeddings (recommended)
+
+Configured independently of chat, so they can point at a different provider, key or
+endpoint — which is exactly what you need when your chat model has no embeddings API.
+
+```env
+DEEPSQL_EMBEDDING_PROVIDER=openai
+DEEPSQL_EMBEDDING_API_KEY=sk-your-key
+DEEPSQL_EMBEDDING_ENDPOINT=https://api.openai.com/v1
+DEEPSQL_EMBEDDING_MODEL=text-embedding-3-large
+```
+
+Skipping this is survivable — the app starts and retrieval falls back to keyword-only — but
+answer quality drops noticeably, so treat it as part of setup rather than an extra.
+
+**Your embedding model must produce 3072-dimension vectors.** `rag_documents.embedding` is a
+single `vector(3072)` column shared by every connection, so `text-embedding-3-small` (1536)
+is rejected. Changing width means migrating the column.
+
+### 5. Install and log in
+
+```bash
+./scripts/self-host/install.sh
+```
+
+The installer generates your JWT secret, the credential-vault encryption key and the vault
+DB password, prompts for the first admin account, builds both images, starts the stack, and
+verifies pgvector is live.
+
+**The first build takes several minutes** — it compiles the Spring Boot backend with Maven
+inside the container and bundles the frontend with Vite. It has not hung. Later builds reuse
+the Docker layer cache.
+
+Then open **http://localhost:3000** and log in with the admin email and password you entered.
+
+> **Back up `ENCRYPTION_KEY` from `.env` now.** It encrypts every database credential you
+> store. Lose it and you re-enter all of them — there is no recovery path.
+
+---
+
+<details>
+<summary><b>Prefer to drive Compose yourself?</b></summary>
+
+`.env.example` ships two values empty on purpose — they are validated secrets, not free
+text, and the backend refuses to start without them.
+
+```bash
+printf 'SECURITY_JWT_SECRET=%s\n' "$(openssl rand -base64 64 | tr -d '\n')" >> .env
+printf 'ENCRYPTION_KEY=%s\n'      "$(openssl rand -base64 32)"             >> .env
+
+docker compose up -d --build
+```
+
+That builds and starts everything but leaves you unable to log in: there is no seeded
+account, self-service signup is disabled, and the wizard's `POST /setup/initialize` is
+disabled. The first user is created through a **localhost-only bootstrap endpoint** — set
+`SECURITY_ADMIN_BOOTSTRAP_ENABLED=true` and `ADMIN_BOOTSTRAP_SECRET` in `.env` and call it
+yourself. `install.sh` does exactly this, then turns the flag back off.
+</details>
 
 ---
 
@@ -47,184 +241,6 @@ your schema — all from one shared brain.
 
 ---
 
-## Quick start
-
-There are no prebuilt images and no container registry. Docker Compose builds the backend
-and frontend from this checkout.
-
-```bash
-git clone <this-repo> deepsql
-cd deepsql
-cp .env.example .env      # required — compose reads .env and will not start without it
-$EDITOR .env              # set DEEPSQL_CHAT_* — see "Bring your own LLM" below
-
-./scripts/self-host/install.sh
-```
-
-`install.sh` generates the JWT secret, the credential-vault encryption key and the vault DB
-password, prompts for your LLM key and the first admin account, builds both images, starts
-the stack, and verifies pgvector is live. Then open http://localhost:3000 and log in with
-the admin email and password you entered.
-
-**The first build takes several minutes.** It compiles the Spring Boot backend with Maven
-inside the container and bundles the frontend with Vite. It has not hung — later builds
-reuse the Docker layer cache and are fast.
-
-Prefer to drive Compose yourself?
-
-```bash
-# .env.example ships these two empty on purpose — they are validated secrets,
-# not free text, and the backend refuses to start without them.
-printf 'SECURITY_JWT_SECRET=%s\n' "$(openssl rand -base64 64 | tr -d '\n')" >> .env
-printf 'ENCRYPTION_KEY=%s\n'      "$(openssl rand -base64 32)"             >> .env
-
-docker compose up -d --build
-```
-
-Back up `ENCRYPTION_KEY`. It encrypts every database credential you store, and losing it
-means re-entering all of them.
-
-That builds and starts everything, but leaves you without a way to log in: there is no
-seeded account, self-service signup is disabled, and the setup wizard's
-`POST /setup/initialize` is disabled. The first user is created through a localhost-only
-bootstrap endpoint — set `SECURITY_ADMIN_BOOTSTRAP_ENABLED=true` and `ADMIN_BOOTSTRAP_SECRET`
-in `.env` and call it yourself, or run `install.sh`, which does exactly that and then turns
-the flag back off.
-
-### Requirements
-
-- Docker Engine with Docker Compose v2 (`docker compose version`)
-- `curl` and `openssl` (used by `install.sh`)
-- About 4 GB of memory available to Docker — the backend JVM is configured with a 3 GB max heap
-
----
-
-## Bring your own LLM
-
-Chat and embeddings are configured independently, so they can point at different providers,
-keys, or endpoints. One provider id ships today — `openai` — and it is the only one you
-need: it speaks OpenAI, Azure OpenAI, and any OpenAI-compatible server.
-
-```env
-DEEPSQL_CHAT_PROVIDER=openai
-DEEPSQL_CHAT_API_KEY=sk-your-key
-DEEPSQL_CHAT_ENDPOINT=https://api.openai.com/v1
-DEEPSQL_CHAT_MODEL=gpt-4o
-
-DEEPSQL_EMBEDDING_PROVIDER=openai
-DEEPSQL_EMBEDDING_API_KEY=sk-your-key
-DEEPSQL_EMBEDDING_ENDPOINT=https://api.openai.com/v1
-DEEPSQL_EMBEDDING_MODEL=text-embedding-3-large
-```
-
-`_PROVIDER` gates the rest: with it unset, no other variable in that group is read.
-`_ENDPOINT` has no working fallback for chat, so set it explicitly even for OpenAI.
-Embeddings are optional in the sense that the app still starts without them — retrieval
-just stays keyword-only until they are configured.
-
-**Azure OpenAI** — an `.azure.com` or `.azure-api.net` endpoint switches authentication to
-the `api-key` header automatically, and `_MODEL` is your *deployment* name:
-
-```env
-DEEPSQL_CHAT_PROVIDER=openai
-DEEPSQL_CHAT_API_KEY=your-azure-openai-key
-DEEPSQL_CHAT_ENDPOINT=https://your-resource.cognitiveservices.azure.com/
-DEEPSQL_CHAT_MODEL=your-deployment-name
-```
-
-**Ollama, vLLM, LM Studio, TGI** — anything that speaks the OpenAI wire format:
-
-```env
-DEEPSQL_CHAT_PROVIDER=openai
-DEEPSQL_CHAT_API_KEY=ollama
-DEEPSQL_CHAT_ENDPOINT=http://host.docker.internal:11434/v1
-DEEPSQL_CHAT_MODEL=llama3.1
-```
-
-**LiteLLM proxy** — point at the proxy, authenticate with a virtual key, and use your own
-model alias. Chat, embeddings and brain initialisation have been verified end to end
-against a self-hosted LiteLLM:
-
-```env
-DEEPSQL_CHAT_PROVIDER=openai
-DEEPSQL_CHAT_API_KEY=sk-your-litellm-virtual-key
-DEEPSQL_CHAT_ENDPOINT=http://litellm:4000/v1
-DEEPSQL_CHAT_MODEL=your-alias
-
-DEEPSQL_EMBEDDING_PROVIDER=openai
-DEEPSQL_EMBEDDING_API_KEY=sk-your-litellm-virtual-key
-DEEPSQL_EMBEDDING_ENDPOINT=http://litellm:4000/v1
-DEEPSQL_EMBEDDING_MODEL=your-embedding-alias
-```
-
-One thing to know about alias naming: `_USE_RESPONSES_API` defaults to `auto`, which
-decides from the **model name**, not from what your endpoint actually implements. An alias
-beginning `gpt-5`, `o1`, `o3`, `o4` or `codex` selects the Responses API. If your gateway
-does not serve `/v1/responses`, either avoid those prefixes or set
-`DEEPSQL_CHAT_USE_RESPONSES_API=false`. Aliases that look nothing like an OpenAI model —
-the usual case — resolve to chat completions on their own.
-
-Optional tuning, same prefix, all defaulted: `_TEMPERATURE`, `_API_VERSION` (the Azure REST
-version), `_USE_RESPONSES_API` (`true` / `false` / `auto`).
-
-> Environment variables are the way to configure the LLM. The onboarding wizard in the UI
-> writes a different, older set of config keys that the resolver does not read — it will not
-> configure a provider for you.
-
----
-
-## MCP server
-
-The server lives in `mcp/` and exposes 44 tools that wrap the backend API, so agents reuse
-the same orchestration, retrieval and guardrails instead of getting raw database
-credentials. SQL execution is read-only-enforced before it reaches the backend.
-
-```bash
-DEEPSQL_API_BASE_URL=http://localhost:8080/api/ \
-DEEPSQL_AUTH_TOKEN=<your-deepsql-token> \
-npm run mcp:phase1
-```
-
-It has no npm dependencies of its own — `npm run mcp:phase1` is just
-`node mcp/deepsql-phase1-server.js`, so it runs straight from a fresh clone.
-
-See [`mcp/README.md`](mcp/README.md) for the CLI, editor configuration and the full tool
-table, and [`docs/root/MCP_PHASE1.md`](docs/root/MCP_PHASE1.md) for the rollout notes.
-
----
-
-## Development
-
-Run the stateful dependencies in Docker — PostgreSQL needs the **pgvector** extension, which
-is tedious to install by hand — and everything else natively for hot reload.
-
-```bash
-docker compose up -d postgres valkey    # requires .env to exist
-
-cd backend && mvn spring-boot:run       # http://localhost:8080/api
-npm install && npm run dev              # http://localhost:3000
-```
-
-You will need **JDK 25** and **Maven 3.9+** (there is no Maven wrapper in the repo), and
-**Node 22**, which is what the frontend image builds with.
-
-The backend needs the same environment as the container: at minimum `DB_URL`, `DB_USERNAME`,
-`DB_PASSWORD`, `SECURITY_JWT_SECRET`, `ENCRYPTION_KEY`, and the `DEEPSQL_CHAT_*` group.
-Authentication is on by default in every profile and there is no `admin`/`admin` shortcut:
-either create the first account through the bootstrap flow above, or set
-`SECURITY_AUTH_ENABLED=false` to let the backend accept unauthenticated API calls while you
-work on it.
-
-Useful commands:
-
-```bash
-npm run lint             # eslint
-npm run build            # production frontend bundle
-cd backend && mvn test   # backend test suite
-```
-
----
-
 ## Operating the stack
 
 ```bash
@@ -234,7 +250,7 @@ cd backend && mvn test   # backend test suite
 ./scripts/self-host/uninstall.sh --purge-data    # also drop the volumes
 ```
 
-To pick up new code, pull and rebuild:
+Upgrading:
 
 ```bash
 git pull && docker compose up -d --build
@@ -251,12 +267,13 @@ git pull && docker compose up -d --build
 
 ### Configuration reference
 
-Everything lives in `.env`, which is documented inline. The variables that matter most:
+Everything lives in `.env`, documented inline. The variables that matter most:
 
 | Variable | Purpose |
 |---|---|
 | `DEEPSQL_CHAT_PROVIDER`, `_API_KEY`, `_ENDPOINT`, `_MODEL` | The chat model. Required. |
 | `DEEPSQL_EMBEDDING_PROVIDER`, `_API_KEY`, `_ENDPOINT`, `_MODEL` | Embeddings for retrieval. Optional; without them retrieval is keyword-only. |
+| `DEEPSQL_CHAT_TEMPERATURE`, `_API_VERSION`, `_USE_RESPONSES_API` | Optional chat tuning. `_USE_RESPONSES_API` is `true` / `false` / `auto`. |
 | `SECURITY_JWT_SECRET` | Signs session tokens. Generate with `openssl rand -base64 64`. |
 | `ENCRYPTION_KEY` — or `ENCRYPTION_KEYS` + `ENCRYPTION_KEY_ID` | AES-GCM key(s) for the credential vault. The backend refuses to start without one. |
 | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | The vault database. Compose points these at its own `postgres` service. |
@@ -277,6 +294,56 @@ ships with this repository**, so the sink is a no-op unless you configure
 
 ---
 
+## MCP server
+
+`mcp/` exposes 44 tools wrapping the backend API, so agents reuse the same orchestration,
+retrieval and guardrails instead of getting raw database credentials. SQL execution is
+read-only-enforced before it reaches the backend.
+
+```bash
+DEEPSQL_API_BASE_URL=http://localhost:8080/api/ \
+DEEPSQL_AUTH_TOKEN=<your-deepsql-token> \
+npm run mcp:phase1
+```
+
+It has no npm dependencies of its own — `npm run mcp:phase1` is just
+`node mcp/deepsql-phase1-server.js`, so it runs straight from a fresh clone.
+
+See [`mcp/README.md`](mcp/README.md) for the CLI, editor configuration and the full tool
+table, and [`docs/root/MCP_PHASE1.md`](docs/root/MCP_PHASE1.md) for rollout notes.
+
+---
+
+## Development
+
+Run the stateful dependencies in Docker — PostgreSQL needs the **pgvector** extension, which
+is tedious to install by hand — and everything else natively for hot reload.
+
+```bash
+docker compose up -d postgres valkey    # requires .env to exist
+
+cd backend && ./mvnw spring-boot:run    # http://localhost:8080/api
+npm install && npm run dev              # http://localhost:3000
+```
+
+You need **JDK 25** and **Node 22**. Maven comes from the wrapper (`./mvnw`), which pins the
+same version CI uses — no separate install.
+
+The backend needs the same environment as the container: at minimum `DB_URL`, `DB_USERNAME`,
+`DB_PASSWORD`, `SECURITY_JWT_SECRET`, `ENCRYPTION_KEY`, and the `DEEPSQL_CHAT_*` group.
+Authentication is on by default in every profile and there is no `admin`/`admin` shortcut:
+either create the first account through the bootstrap flow, or set
+`SECURITY_AUTH_ENABLED=false` to let the backend accept unauthenticated API calls while you
+work on it.
+
+```bash
+npm run lint                # eslint
+npm run build               # production frontend bundle
+cd backend && ./mvnw test   # backend test suite
+```
+
+---
+
 ## Stack
 
 Spring Boot 4 on Java 25 · React 19 + Vite · PostgreSQL with pgvector · Valkey for
@@ -288,6 +355,7 @@ caching · nginx.
 - [`docs/README.md`](docs/README.md) — documentation index
 - [`AGENTS.md`](AGENTS.md) — codebase map
 - [`mcp/README.md`](mcp/README.md) — CLI and MCP server
+- [`SECURITY.md`](SECURITY.md) — reporting a vulnerability
 
 ## License
 
