@@ -79,7 +79,20 @@ fi
 base="http://localhost:${DEEPSQL_BACKEND_PORT}/api"
 cookie_jar="$(mktemp)"
 trap 'rm -f "$cookie_jar"' EXIT
-login_json="$(curl -fsS -c "$cookie_jar" -H 'Content-Type: application/json' -X POST "$base/auth/login" -d "{\"email\":\"${DEEPSQL_SMOKE_EMAIL}\",\"password\":\"${DEEPSQL_SMOKE_PASSWORD}\"}")"
+# Retried rather than attempted once. The backend answers /actuator/health UP before it
+# serves logins, so this script -- the command install.sh recommends running next -- used
+# to abort on a perfectly good install with a bare `curl: (22) 401`. Because curl runs
+# under `set -e` with -f, that exit happened before the error message below could print,
+# so the failure named neither the endpoint nor the reason.
+login_json=""
+login_deadline=$((SECONDS + 120))
+while (( SECONDS < login_deadline )); do
+  if login_json="$(curl -fsS -c "$cookie_jar" -H 'Content-Type: application/json' -X POST "$base/auth/login" -d "{\"email\":\"${DEEPSQL_SMOKE_EMAIL}\",\"password\":\"${DEEPSQL_SMOKE_PASSWORD}\"}" 2>/dev/null)"; then
+    break
+  fi
+  echo "Waiting for the backend to accept logins..."
+  sleep 5
+done
 
 if [[ "$login_json" != *"\"email\""* ]]; then
   echo "Error: login failed during smoke test." >&2

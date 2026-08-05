@@ -28,6 +28,41 @@ require_env_value() {
   fi
 }
 
+# Write NAME='value' into $ENV_FILE, single-quoted with embedded quotes escaped.
+#
+# Every self-host script does `set -a; source .env`, so an unquoted value containing a
+# space is executed as a command: answering the company-name prompt with "Acme Corp"
+# produced `DEEPSQL_COMPANY_NAME=Acme Corp`, and then `line 216: Corp: command not found`
+# from install.sh, status.sh and smoke-test.sh alike — naming neither the variable nor
+# the prompt that set it. Docker Compose strips the surrounding quotes when it reads the
+# same file, so this is safe for both readers.
+write_env_value() {
+  local name="$1" value="$2" quoted
+  # Close the quote, emit an escaped quote, reopen: ' -> '\''. Built from variables
+  # because writing the replacement inline is easy to get subtly wrong -- the first
+  # attempt produced O\'\\'\'Brien, which made `source .env` die on an unterminated
+  # string, exactly the class of breakage this function exists to prevent.
+  local sq="'" esc="'\\''"
+  quoted="${sq}${value//${sq}/${esc}}${sq}"
+  if grep -q "^${name}=" "$ENV_FILE" 2>/dev/null; then
+    # Literal replacement rather than a sed expression: the value may contain |, & or \,
+    # each of which sed would otherwise interpret.
+    NAME="$name" QUOTED="$quoted" python3 - "$ENV_FILE" <<'PY'
+import os, re, sys
+path = sys.argv[1]
+name, quoted = os.environ["NAME"], os.environ["QUOTED"]
+text = open(path).read()
+text = re.sub(rf"(?m)^{re.escape(name)}=.*$", lambda _: f"{name}={quoted}", text)
+open(path, "w").write(text)
+PY
+  else
+    printf '%s=%s\n' "$name" "$quoted" >> "$ENV_FILE"
+  fi
+  # No eval: `eval export NAME=$value` re-parses the value, so a password containing
+  # $(...) or a backtick would execute rather than be stored.
+  export "${name}=${value}"
+}
+
 generate_secret() {
   local name="$1"
   local cmd="$2"
@@ -35,8 +70,7 @@ generate_secret() {
   if is_placeholder "$value"; then
     local generated
     generated="$(eval "$cmd")"
-    sed_inplace "s|^${name}=.*|${name}=${generated}|" "$ENV_FILE"
-    eval "export ${name}=${generated}"
+    write_env_value "$name" "$generated"
     echo "Auto-generated $name."
   fi
 }
@@ -52,8 +86,7 @@ prompt_env_value() {
       echo "Error: '$name' is required." >&2
       exit 1
     fi
-    sed_inplace "s|^${name}=.*|${name}=${value}|" "$ENV_FILE"
-    eval "export ${name}=${value}"
+    write_env_value "$name" "$value"
   fi
 }
 
@@ -69,8 +102,7 @@ prompt_secret_env_value() {
       echo "Error: '$name' is required." >&2
       exit 1
     fi
-    sed_inplace "s|^${name}=.*|${name}=${value}|" "$ENV_FILE"
-    eval "export ${name}=${value}"
+    write_env_value "$name" "$value"
   fi
 }
 
@@ -86,12 +118,9 @@ prompt_optional_env_value() {
     printf '%s: ' "$label"
     read -r value
     if [[ -n "$value" ]]; then
-      if grep -q "^${name}=" "$ENV_FILE" 2>/dev/null; then
-        sed_inplace "s|^${name}=.*|${name}=${value}|" "$ENV_FILE"
-      else
-        printf '%s=%s\n' "$name" "$value" >> "$ENV_FILE"
-      fi
-      eval "export ${name}=\"\${value}\""
+      # This is the prompt that first exposed the quoting bug: "Company / organization
+      # name" invites an answer with a space, and almost every real one has one.
+      write_env_value "$name" "$value"
     fi
   fi
 }
@@ -235,9 +264,37 @@ bootstrap_admin() {
   if [[ "$response" == *"Admin reset successfully"* || "$response" == *"Admin created successfully"* ]]; then
     echo "Admin bootstrap complete. Login username: admin"
   else
-    echo "Warning: admin bootstrap did not return a success message." >&2
+    # Previously a warning that the install continued past, so install.sh exited 0 while
+    # leaving no account to log in with. An installer that cannot create the only user
+    # has not succeeded, and saying so here beats an opaque 401 from the next command.
+    echo "Error: admin bootstrap did not return a success message." >&2
     echo "$response" >&2
+    return 1
   fi
+}
+
+# Poll until the credentials just created actually authenticate.
+#
+# Health being UP is not the same as being able to log in: install.sh flips
+# SECURITY_ADMIN_BOOTSTRAP_ENABLED back to false and restarts the backend afterwards, and
+# a login issued in the seconds after that restart returns 401. That is what made
+# smoke-test.sh -- the very next command install.sh recommends -- fail on a good install.
+wait_for_login() {
+  local url="http://localhost:${DEEPSQL_BACKEND_PORT:-8080}/api/auth/login"
+  local payload deadline=$((SECONDS + 120))
+  payload="$(printf '{"email":"%s","password":"%s"}' \
+    "${DEEPSQL_INITIAL_ADMIN_EMAIL}" "${DEEPSQL_INITIAL_ADMIN_PASSWORD}")"
+  while (( SECONDS < deadline )); do
+    if curl -fsS -o /dev/null -H 'Content-Type: application/json' \
+         -X POST "$url" --data "$payload" 2>/dev/null; then
+      echo "Login verified for ${DEEPSQL_INITIAL_ADMIN_EMAIL}."
+      return 0
+    fi
+    sleep 5
+  done
+  echo "Error: the admin account was created but could not log in within 120s." >&2
+  echo "Check 'docker compose logs backend' before running smoke-test.sh." >&2
+  return 1
 }
 
 build_application_images() {
@@ -372,6 +429,11 @@ sed_inplace "s|^SECURITY_ADMIN_BOOTSTRAP_ENABLED=.*|SECURITY_ADMIN_BOOTSTRAP_ENA
 export SECURITY_ADMIN_BOOTSTRAP_ENABLED=false
 compose up -d backend >/dev/null
 wait_for_http "http://localhost:${DEEPSQL_BACKEND_PORT}/api/actuator/health" "Backend"
+
+# The restart above is why this exists: health returns UP before logins are served, so
+# without it the installer declares success on a stack that rejects the credentials it
+# just printed.
+wait_for_login
 
 echo
 
