@@ -54,9 +54,21 @@ public class AgentChatClient {
      * when present, otherwise create a fresh session and auto-approve its read-only
      * tool surface (channels are non-interactive). Returns null on failure.
      */
+    /**
+     * Why a session could not be created, for callers that surface a reason to the user.
+     * {@code sessionId} non-null means success and {@code failureReason} is null.
+     */
+    public record SessionAttempt(String sessionId, String failureReason) {
+        boolean ok() { return sessionId != null; }
+    }
+
     public String ensureSession(String profile, String existingSessionId) {
+        return ensureSessionDetailed(profile, existingSessionId).sessionId();
+    }
+
+    public SessionAttempt ensureSessionDetailed(String profile, String existingSessionId) {
         if (existingSessionId != null && !existingSessionId.isBlank()) {
-            return existingSessionId;
+            return new SessionAttempt(existingSessionId, null);
         }
         try {
             JsonNode created = postJson("/api/session/new", Map.of(
@@ -66,7 +78,8 @@ public class AgentChatClient {
             if (sessionId == null) sessionId = text(created.path("session_id"));
             if (sessionId == null) {
                 log.warn("Agent session/new returned no session_id for profile {}", profile);
-                return null;
+                return new SessionAttempt(null,
+                    "the agent runtime accepted the request but returned no session id");
             }
             // Best-effort: auto-approve read-only tools so the turn doesn't block on approval.
             try {
@@ -74,10 +87,17 @@ public class AgentChatClient {
             } catch (Exception e) {
                 log.debug("session/yolo failed for {}: {}", sessionId, e.getMessage());
             }
-            return sessionId;
+            return new SessionAttempt(sessionId, null);
         } catch (Exception e) {
-            log.warn("Could not create agent session for profile {}: {}", profile, e.getMessage());
-            return null;
+            // toString(), not getMessage(): a NullPointerException or a connect failure
+            // carries a null message, and "Could not create agent session: null" says
+            // nothing at all. The class name alone distinguishes "refused to connect"
+            // from "rejected the request". The exception is attached so the stack is
+            // available at DEBUG without making the common case unreadable.
+            log.warn("Could not create agent session for profile {} at {}: {}",
+                profile, webuiUrl, e.toString());
+            log.debug("agent session/new failure detail", e);
+            return new SessionAttempt(null, describe(e));
         }
     }
 
@@ -163,9 +183,39 @@ public class AgentChatClient {
             .build();
         HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() / 100 != 2) {
-            throw new RuntimeException("POST " + path + " -> HTTP " + resp.statusCode());
+            // The body carries the reason the status code alone does not. An agent
+            // runtime hardened to require a login answers
+            // {"detail":"Unauthorized","reason":"no_cookie"} — without that, a 401 is
+            // indistinguishable from the agent being down, which sends whoever is
+            // debugging after the wrong fix. Truncated so an HTML error page cannot
+            // land whole in the log.
+            String detail = resp.body() == null ? "" : resp.body().strip();
+            if (detail.length() > 300) detail = detail.substring(0, 300) + "…";
+            throw new RuntimeException("POST " + path + " -> HTTP " + resp.statusCode()
+                + (detail.isEmpty() ? "" : " " + detail));
         }
         return objectMapper.readTree(resp.body());
+    }
+
+    /**
+     * A one-line reason fit to show an operator. The two failures look identical from
+     * the outside and have opposite fixes: nothing is listening (start the runtime, or
+     * agent.webui-url points at the wrong place) versus something answered and said no
+     * (authenticate to it, or its API changed).
+     */
+    private String describe(Exception e) {
+        if (e instanceof java.net.ConnectException || e instanceof java.net.UnknownHostException) {
+            return "cannot reach the agent runtime at " + webuiUrl
+                + " — is it running, and is agent.webui-url correct?";
+        }
+        if (e instanceof java.net.http.HttpTimeoutException) {
+            return "the agent runtime at " + webuiUrl + " did not respond in time";
+        }
+        String msg = e.getMessage();
+        if (msg == null || msg.isBlank()) {
+            return "the agent runtime at " + webuiUrl + " failed with " + e.getClass().getSimpleName();
+        }
+        return "the agent runtime at " + webuiUrl + " rejected the request: " + msg;
     }
 
     private String text(JsonNode node) {

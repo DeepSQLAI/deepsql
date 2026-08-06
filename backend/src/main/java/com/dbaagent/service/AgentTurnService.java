@@ -53,11 +53,17 @@ public class AgentTurnService {
         }
 
         String existingSession = conv == null ? null : conv.getAgentSessionId();
-        String sessionId = agentChatClient.ensureSession(profile, existingSession);
-        if (sessionId == null) {
+        // Detailed variant: "unavailable right now" reads as a transient outage and sends
+        // people away to wait, when the real causes — the runtime is not running, the URL
+        // is wrong, or it demands a login the backend never performs — stay broken until
+        // somebody acts. Report what actually happened.
+        AgentChatClient.SessionAttempt attempt =
+            agentChatClient.ensureSessionDetailed(profile, existingSession);
+        if (attempt.sessionId() == null) {
             return new TurnResult(false, null, List.of(), conv == null ? null : conv.getId(),
-                "the DeepSQL agent is unavailable right now");
+                "DeepSQL agent unavailable: " + attempt.failureReason());
         }
+        String sessionId = attempt.sessionId();
 
         if (conv == null) {
             conv = conversationService.create(connectionId, sessionId, deriveTitle(message));

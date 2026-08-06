@@ -6,7 +6,17 @@
 name: deepsql-agent
 version: 0.1.0
 description: "DeepSQL DBA agent — grounded, read-only database assistant over the DeepSQL MCP tools (BI queries, schema exploration, index advice, slow-query optimization, workload analysis)."
-hermes_requires: ">=0.12.0"
+# The upper bound is evidence, not caution: verified on 2026-08-06 against upstream
+# v0.20.0 (2026.8.3), where every agent API call answers
+# 401 {"detail":"Unauthorized","reason":"no_cookie"}. That release requires a login
+# cookie on /api/session/new and friends, and AgentChatClient authenticates in no way
+# at all — the Compose deployment relies on a reverse proxy injecting
+# X-DeepSQL-User / X-DeepSQL-Token, which does not exist on a native run.
+#
+# The floor stays at 0.12.0 because nothing below it has been tested; it is not a
+# claim that 0.12.0 works. Raise the ceiling only once the backend authenticates to
+# the runtime and a real turn has been seen to complete.
+hermes_requires: ">=0.12.0,<0.20.0"
 author: "DeepSQL"
 license: "proprietary"
 
