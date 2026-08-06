@@ -221,9 +221,20 @@ only covers cloud-specific, non-obvious caveats.
   `docker/postgres/init/*.sql`. In the native (non-Docker) setup those were applied by hand;
   they persist in the snapshot. If you ever recreate the vault DB, re-apply
   `docker/postgres/init/*.sql` or db-scheduler logs `relation "scheduled_tasks" does not exist`.
-- **LLM is unconfigured by default** (no key shipped). The backend boots fine and non-AI
-  features (connections, schema browsing, SQL editor) work; chat/dashboards/brain throw
-  `LlmNotConfiguredException` until `DEEPSQL_CHAT_*` is set in `.env`.
+- **LLM (Azure OpenAI) is configured in the local gitignored `.env`** (not committed). Working
+  values for this environment: `DEEPSQL_CHAT_PROVIDER=openai`,
+  `DEEPSQL_CHAT_ENDPOINT=https://deepsql-selfhost-resource.cognitiveservices.azure.com/`,
+  `DEEPSQL_CHAT_MODEL=gpt-5.4` (deployment name), plus matching `DEEPSQL_EMBEDDING_*` with
+  `text-embedding-3-large`. Also set `AZURE_OPENAI_KEY` / `AZURE_OPENAI_ENDPOINT` aliases —
+  `hermes/install.sh` reads those. After changing LLM env, restart the backend
+  (`scripts/start-backend.sh`); `/api/setup/status` should show `hasLlmConfig: true`.
+- **Agent tab (Hermes) is optional but required for the in-app Agent chat UI.** Install via
+  `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-setup`,
+  symlink `~/.hermes/hermes-agent/.venv` → `venv` (DeepSQL's `hermes/install.sh` expects `.venv`),
+  then `bash hermes/install.sh`. Start the webui with
+  `HERMES_WEBUI_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000`
+  (without this, Vite's Origin header makes Hermes return **403** "Cross-origin mismatch").
+  Webui listens on `:8787`; Vite proxies `/agent-api` → there.
 - **Before running backend tests that boot the Spring context** (e.g. `ApiSmokeTest`), stop
   the running backend first — both use `ddl-auto=update` on the same `dba_agent` DB and can
   deadlock on an `ALTER TABLE`. Test env vars are documented in `CLAUDE.md` (Testing).
