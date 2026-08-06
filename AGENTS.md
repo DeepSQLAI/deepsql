@@ -177,10 +177,19 @@ only covers cloud-specific, non-obvious caveats.
   Redis degrades gracefully but the local `.env` points at it.
 - **Backend** (port 8080, base path `/api`): `bash scripts/start-backend.sh` (wraps
   `./mvnw spring-boot:run`; it strips `SPRING_PROFILES_ACTIVE=prod` for local runs → dev mode).
+<<<<<<< HEAD
 - **Frontend** (port 3000): `npm run dev` (Vite proxies `/api` → 8080 and `/agent-api` → 8787).
 - **DeepSQL Agent API** (port 8787, optional): needed for the sidebar **Agent** tab.
   Runtime is a customized Nous Hermes Agent; see caveats below for install +
   `HERMES_WEBUI_ALLOWED_ORIGINS` (upstream env name).
+=======
+- **Frontend** (port 3000): prefer `npx vite --host 0.0.0.0 --port 3000` (or `npm run dev`
+  with `server.host` set). Plain `npm run dev` can bind **IPv6-only** (`::1:3000`) in this
+  VM so `curl http://127.0.0.1:3000` fails even though Vite looks healthy. Vite proxies
+  `/api` → 8080 and `/agent-api` → 8787.
+- **Hermes Agent webui** (port 8787, optional): needed only for the sidebar **Agent** tab.
+  See caveats below for install + `HERMES_WEBUI_ALLOWED_ORIGINS`.
+>>>>>>> 7dacaac (docs(agents): note Vite IPv4 bind and Spring CORS loopback hosts)
 - A demo target DB `demo_shop` (same Postgres server, sample `customers`/`products`/`orders`)
   exists for exercising connection/schema features without an external database.
 
@@ -232,7 +241,19 @@ only covers cloud-specific, non-obvious caveats.
   `http://deepsql-agent:8788/provision`) with `AGENT_PROVISION_SECRET`. In this VM run
   `python3 scripts/local-agent-provisioner.py` (needs those two env vars in `.env`).
   Without it, Spring logs `agent.provision-secret is unset — skipping…` and the
+<<<<<<< HEAD
   `u-admin` agent profile is never created/token-refreshed.
+=======
+  `u-admin` Hermes profile is never created/token-refreshed.
+- **Hermes webui Origin allowlist for Vite.** Start Hermes with
+  `HERMES_WEBUI_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000` or browser
+  requests via the Vite `/agent-api` proxy return **403** "Cross-origin mismatch".
+  Webui listens on `:8787`.
+- **Spring CORS must allow both loopback hosts.** Set
+  `CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000` in `.env`. Opening
+  the UI as `http://127.0.0.1:3000` while only `localhost` is allowlisted yields **403**
+  on `POST /api/agent/session` (and other cookie-auth APIs).
+>>>>>>> 7dacaac (docs(agents): note Vite IPv4 bind and Spring CORS loopback hosts)
 - **Before running backend tests that boot the Spring context** (e.g. `ApiSmokeTest`), stop
   the running backend first — both use `ddl-auto=update` on the same `dba_agent` DB and can
   deadlock on an `ALTER TABLE`. Test env vars are documented in `CLAUDE.md` (Testing).
