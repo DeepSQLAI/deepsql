@@ -1,10 +1,11 @@
-// Client for the native "Agent" chat tab.
+// Client for the native "Agent" chat tab (AgentChatPanel — DeepSQL's own React UI).
 //
 // Two hops:
 //  1. POST /api/agent/session  → Spring backend (cookie auth) resolves/provisions
 //     the user's agent profile and returns { profile }.
-//  2. /agent-api/*             → DeepSQL Agent chat service (Vite-proxied to :8787):
-//     create a session, start a turn, stream it over SSE.
+//  2. /agent-api/*             → the DeepSQL Agent HTTP API (Vite-proxied to :8787;
+//     customized Hermes runtime): profile/switch, session/new, chat/start, then
+//     chat/stream over SSE.
 //
 // SSE event shapes:
 //   token          { text }
@@ -38,6 +39,20 @@ async function postJson(url, body, _retried = false) {
   return res.json();
 }
 
+/**
+ * Bind the agent API to this user's profile via the upstream `hermes_profile` cookie.
+ *
+ * The agent scopes session visibility to the active profile. Spring returns
+ * `u-<username>` from /api/agent/session; if we create a session under that
+ * profile but never switch, subsequent /api/session/yolo and /api/chat/start
+ * calls 404 with "Session not found" (the Agent tab surfaces this as a boot
+ * failure / early 500). credentials:"include" sends the Set-Cookie back.
+ */
+async function switchAgentProfile(profile) {
+  if (!profile) return;
+  await postJson(`${AGENT_BASE}/api/profile/switch`, { name: profile });
+}
+
 /** Prepend a one-line connection context so the agent grounds on the active DB
  *  without the user pasting a UUID (the provisioned USER.md isn't injected into
  *  webui sessions). Sent to the agent only — the UI displays the raw message. */
@@ -50,11 +65,24 @@ export function withConnectionContext(message, connectionId, connectionName) {
 export const agentChatAPI = {
   /** Resolve/provision the current user's agent profile (via Spring → cookie auth). */
   async bootstrap(connectionId) {
-    return postJson("/api/agent/session", { connectionId });
+    const data = await postJson("/api/agent/session", { connectionId });
+    // Must happen before any session/new / resume path that hits /agent-api.
+    try {
+      await switchAgentProfile(data?.profile);
+    } catch {
+      /* older agent / missing profile — newSession may still work on default */
+    }
+    return data;
   },
 
   /** Create a lean DBA chat session for this profile; returns the session id. */
   async newSession(profile) {
+    // Idempotent re-bind in case bootstrap's switch was skipped or the cookie aged out.
+    try {
+      await switchAgentProfile(profile);
+    } catch {
+      /* non-fatal */
+    }
     const data = await postJson(`${AGENT_BASE}/api/session/new`, {
       profile,
       enabled_toolsets: ["deepsql", "skills"],

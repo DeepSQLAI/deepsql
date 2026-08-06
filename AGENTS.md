@@ -211,16 +211,28 @@ only covers cloud-specific, non-obvious caveats.
   `agent/install.sh` reads those. After changing LLM env, restart the backend
   (`scripts/start-backend.sh`); `/api/setup/status` should show `hasLlmConfig: true`.
 - **Agent tab is optional but required for the in-app Agent chat UI.** The Agent tab
-  is DeepSQL’s own React (`AgentChatPanel`); it talks to the DeepSQL Agent HTTP API
-  on `:8787` (a heavily customized [Nous Hermes Agent](https://hermes-agent.nousresearch.com/)
-  runtime — see [`agent/README.md`](agent/README.md)). Install upstream via
+  is DeepSQL’s own React (`AgentChatPanel` via `agentClient.js`); it talks to the
+  DeepSQL Agent HTTP API on `:8787` (a heavily customized
+  [Nous Hermes Agent](https://hermes-agent.nousresearch.com/) runtime — see
+  [`agent/README.md`](agent/README.md)). Not a skin on the upstream webui.
+  Flow: `POST /api/agent/session` (Spring provisions `u-<user>`) →
+  `/agent-api/api/profile/switch` (sets upstream `hermes_profile` cookie) →
+  `session/new` / `chat/start` / SSE `chat/stream`. Without the profile switch,
+  the agent API 404s with "Session not found" (UI surfaces as a boot failure /
+  early 500). Install upstream via
   `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-setup`,
   symlink `~/.hermes/hermes-agent/.venv` → `venv` (DeepSQL’s `agent/install.sh` expects `.venv`),
   then `bash agent/install.sh`. Start the agent API/webui with
   `HERMES_WEBUI_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000`
   (upstream env var; without it Vite’s Origin header yields **403** “Cross-origin mismatch”).
-  Listens on `:8787`; Vite proxies `/agent-api` → there. Profile cookie name
-  `hermes_profile` is an upstream contract — do not rename it in DeepSQL clients.
+  Listens on `:8787`; Vite proxies `/agent-api` → there. Do not rename the
+  `hermes_profile` cookie in DeepSQL clients — it is an upstream contract.
+- **Local provisioner required for native (non-Compose) runs.**
+  `AgentBridgeService` POSTs to `AGENT_PROVISIONER_URL` (default Compose:
+  `http://deepsql-agent:8788/provision`) with `AGENT_PROVISION_SECRET`. In this VM run
+  `python3 scripts/local-agent-provisioner.py` (needs those two env vars in `.env`).
+  Without it, Spring logs `agent.provision-secret is unset — skipping…` and the
+  `u-admin` agent profile is never created/token-refreshed.
 - **Before running backend tests that boot the Spring context** (e.g. `ApiSmokeTest`), stop
   the running backend first — both use `ddl-auto=update` on the same `dba_agent` DB and can
   deadlock on an `ALTER TABLE`. Test env vars are documented in `CLAUDE.md` (Testing).
