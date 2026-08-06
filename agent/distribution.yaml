@@ -1,7 +1,8 @@
-# DeepSQL Agent profile distribution.
+# DeepSQL Agent profile distribution (runs on the Nous Hermes Agent profile CLI).
 # Enterprises install this per user:  hermes profile install <git-url|dir> --name <profile>
 # `hermes profile update <profile>` refreshes SOUL.md + skills/ WITHOUT touching
 # the user's memory, sessions, .env, or config.yaml (their identity + history).
+# `hermes_requires` is an upstream schema key — do not rename it.
 name: deepsql-agent
 version: 0.1.0
 description: "DeepSQL DBA agent — grounded, read-only database assistant over the DeepSQL MCP tools (BI queries, schema exploration, index advice, slow-query optimization, workload analysis)."

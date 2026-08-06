@@ -4,6 +4,7 @@
 # so the clone's files can be regenerated after a re-pull.
 #
 # Usage: ./apply-overlay.sh [path-to-webui]   (default: ~/.hermes/hermes-webui)
+# Default path is the upstream Hermes webui install location (HERMES_HOME contract).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

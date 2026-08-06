@@ -2609,7 +2609,8 @@ export const llmAPI = {
   },
 };
 
-// Dashboard generation, delegated server-side to the embedded Hermes agent. The
+// Dashboard generation, delegated server-side to the embedded DeepSQL Agent.
+// (Customized Hermes runtime — see agent/README.md.) The
 // agent grounds on the brain + schema via MCP, writes each query, and verifies it
 // by running execute_sql and inspecting the rows (dates in-window, KPI value type
 // matches format, totals plausible) before emitting the spec. Returns

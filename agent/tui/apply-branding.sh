@@ -2,7 +2,7 @@
 # Rebrand the TUI to "DeepSQL Agent" in an agent checkout, then rebuild the
 # Node/Ink dist. Idempotent. The TUI logo/tagline live in the TUI *source*
 # (not the skin), so this overlay edits them and rebuilds — vendored
-# customization, applied like hermes/webui/apply-overlay.sh.
+# customization, applied like agent/webui/apply-overlay.sh.
 #
 # Handles the clean string edits (tagline, default-skin branding) + rebuild.
 # The ASCII logo/hero blocks are in README.md (multi-line art doesn't sed
@@ -40,7 +40,7 @@ fi
 if grep -q '\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97 \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x95\x97' "$BANNER"; then
   echo "= logo already DeepSQL wordmark"
 else
-  echo "! logo not yet replaced — paste the DeepSQL LOGO_ART + CADUCEUS_ART from hermes/tui/README.md into ui-tui/src/banner.ts"
+  echo "! logo not yet replaced — paste the DeepSQL LOGO_ART + CADUCEUS_ART from agent/tui/README.md into ui-tui/src/banner.ts"
 fi
 
 # 4. Rebuild the TUI dist.

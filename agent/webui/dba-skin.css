@@ -2,7 +2,7 @@
  * Minimal black/white/grey, Inter-first, flat surfaces (no shadows).
  * Matches the DBA Agent design language. Light + dark variants.
  * Install: append this file to the webui's static/style.css and register
- * the skin in static/boot.js `_SKINS` (see hermes/webui/README.md).
+ * the skin in static/boot.js `_SKINS` (see agent/webui/README.md).
  */
 
 :root[data-skin="dba"]{

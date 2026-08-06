@@ -17,7 +17,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Dashboard generator — the embedded DeepSQL (Hermes) agent as a coding agent.
+ * Dashboard generator — the embedded DeepSQL Agent as a coding agent
+ * (customized Hermes runtime; see agent/README.md).
  *
  * <p>The agent doesn't fill in a rigid spec anymore. It <b>writes the whole
  * dashboard as a single self-contained HTML document</b> — any layout, filters,

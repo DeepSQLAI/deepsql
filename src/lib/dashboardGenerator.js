@@ -1,6 +1,7 @@
 import { dashboardGenAPI } from '@/lib/api/client'
 
-// Dashboard generation runs the embedded Hermes agent as a CODING agent
+// Dashboard generation runs the embedded DeepSQL Agent as a CODING agent
+// (customized Hermes runtime — see agent/README.md).
 // (DashboardAgentService): it grounds on business rules + schema, verifies every
 // query with execute_sql, then writes the whole dashboard as a self-contained
 // HTML document — streaming its steps to the UI. The artifact renders in a
