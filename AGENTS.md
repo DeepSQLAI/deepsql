@@ -198,7 +198,9 @@ only covers cloud-specific, non-obvious caveats.
   Redis degrades gracefully but the local `.env` points at it.
 - **Backend** (port 8080, base path `/api`): `bash scripts/start-backend.sh` (wraps
   `./mvnw spring-boot:run`; it strips `SPRING_PROFILES_ACTIVE=prod` for local runs → dev mode).
-- **Frontend** (port 3000): `npm run dev` (Vite proxies `/api` → 8080).
+- **Frontend** (port 3000): `npm run dev` (Vite proxies `/api` → 8080 and `/agent-api` → 8787).
+- **Hermes Agent webui** (port 8787, optional): needed only for the sidebar **Agent** tab.
+  See caveats below for install + `HERMES_WEBUI_ALLOWED_ORIGINS`.
 - A demo target DB `demo_shop` (same Postgres server, sample `customers`/`products`/`orders`)
   exists for exercising connection/schema features without an external database.
 
