@@ -178,8 +178,9 @@ only covers cloud-specific, non-obvious caveats.
 - **Backend** (port 8080, base path `/api`): `bash scripts/start-backend.sh` (wraps
   `./mvnw spring-boot:run`; it strips `SPRING_PROFILES_ACTIVE=prod` for local runs → dev mode).
 - **Frontend** (port 3000): `npm run dev` (Vite proxies `/api` → 8080 and `/agent-api` → 8787).
-- **Hermes Agent webui** (port 8787, optional): needed only for the sidebar **Agent** tab.
-  See caveats below for install + `HERMES_WEBUI_ALLOWED_ORIGINS`.
+- **DeepSQL Agent API** (port 8787, optional): needed for the sidebar **Agent** tab.
+  Runtime is a customized Nous Hermes Agent; see caveats below for install +
+  `HERMES_WEBUI_ALLOWED_ORIGINS` (upstream env name).
 - A demo target DB `demo_shop` (same Postgres server, sample `customers`/`products`/`orders`)
   exists for exercising connection/schema features without an external database.
 
@@ -207,15 +208,19 @@ only covers cloud-specific, non-obvious caveats.
   `DEEPSQL_CHAT_ENDPOINT=https://deepsql-selfhost-resource.cognitiveservices.azure.com/`,
   `DEEPSQL_CHAT_MODEL=gpt-5.4` (deployment name), plus matching `DEEPSQL_EMBEDDING_*` with
   `text-embedding-3-large`. Also set `AZURE_OPENAI_KEY` / `AZURE_OPENAI_ENDPOINT` aliases —
-  `hermes/install.sh` reads those. After changing LLM env, restart the backend
+  `agent/install.sh` reads those. After changing LLM env, restart the backend
   (`scripts/start-backend.sh`); `/api/setup/status` should show `hasLlmConfig: true`.
-- **Agent tab (Hermes) is optional but required for the in-app Agent chat UI.** Install via
+- **Agent tab is optional but required for the in-app Agent chat UI.** The Agent tab
+  is DeepSQL’s own React (`AgentChatPanel`); it talks to the DeepSQL Agent HTTP API
+  on `:8787` (a heavily customized [Nous Hermes Agent](https://hermes-agent.nousresearch.com/)
+  runtime — see [`agent/README.md`](agent/README.md)). Install upstream via
   `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-setup`,
-  symlink `~/.hermes/hermes-agent/.venv` → `venv` (DeepSQL's `hermes/install.sh` expects `.venv`),
-  then `bash hermes/install.sh`. Start the webui with
+  symlink `~/.hermes/hermes-agent/.venv` → `venv` (DeepSQL’s `agent/install.sh` expects `.venv`),
+  then `bash agent/install.sh`. Start the agent API/webui with
   `HERMES_WEBUI_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000`
-  (without this, Vite's Origin header makes Hermes return **403** "Cross-origin mismatch").
-  Webui listens on `:8787`; Vite proxies `/agent-api` → there.
+  (upstream env var; without it Vite’s Origin header yields **403** “Cross-origin mismatch”).
+  Listens on `:8787`; Vite proxies `/agent-api` → there. Profile cookie name
+  `hermes_profile` is an upstream contract — do not rename it in DeepSQL clients.
 - **Before running backend tests that boot the Spring context** (e.g. `ApiSmokeTest`), stop
   the running backend first — both use `ddl-auto=update` on the same `dba_agent` DB and can
   deadlock on an `ALTER TABLE`. Test env vars are documented in `CLAUDE.md` (Testing).

@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
-# Reproducibly install the DBA customization into an agent home (~/.hermes).
-# Idempotent: safe to re-run. Source of truth is this repo's hermes/ dir.
+# Reproducibly install the DeepSQL Agent customization into an agent home (~/.hermes).
+# Idempotent: safe to re-run. Source of truth is this repo's agent/ dir.
 #
 # Configures:
 #   - model: existing Azure OpenAI gpt-5.4 via its OpenAI-compatible v1 endpoint
 #   - mcp_servers.deepsql: the repo's DeepSQL MCP server (read-only DBA tools)
-#   - skills.external_dirs: this repo's hermes/skills (source of truth)
+#   - skills.external_dirs: this repo's agent/skills (source of truth)
 #   - approvals.mode: smart
 #   - SOUL.md: the DBA persona
 #   - disables host-affecting toolsets (terminal/file/code/browser/computer_use)
 #
 # Secrets are read from the environment (or the repo .env), never committed:
 #   AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT  (endpoint defaults to the repo value)
+#
+# Upstream note: HERMES_HOME / hermes-agent / hermes CLI are contracts of the
+# Nous Hermes Agent runtime this customization runs on — do not rename those.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -50,14 +53,14 @@ cfg.setdefault("mcp_servers", {})["deepsql"] = {
     "env": {"DEEPSQL_API_BASE_URL": "http://localhost:8080/api/",
             "DEEPSQL_MCP_USER_ID": "deepsql-agent", "DEEPSQL_MCP_PROJECT_ID": "deepsql-agent"},
 }
-cfg.setdefault("skills", {})["external_dirs"] = [f"{repo}/hermes/skills"]
+cfg.setdefault("skills", {})["external_dirs"] = [f"{repo}/agent/skills"]
 cfg.setdefault("approvals", {})["mode"] = "smart"
 cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
 print(f"  config.yaml updated ({cfg_path})")
 PY
 
 # Persona
-cp "$REPO_ROOT/hermes/SOUL.md" "$HERMES_HOME/SOUL.md"
+cp "$REPO_ROOT/agent/SOUL.md" "$HERMES_HOME/SOUL.md"
 echo "  SOUL.md installed"
 
 # Scope to a read-only sandbox: disable host-affecting toolsets.
@@ -66,4 +69,4 @@ echo "  SOUL.md installed"
     >/dev/null 2>&1 ) || echo "  (toolset disable skipped — disable manually with 'hermes tools disable ...')"
 echo "  host toolsets disabled (read-only deepsql + memory/todo/skills remain)"
 
-echo "✓ DBA customization installed. Verify: (cd $AGENT_DIR && uv run hermes mcp test deepsql)"
+echo "✓ DeepSQL Agent customization installed. Verify: (cd $AGENT_DIR && uv run hermes mcp test deepsql)"

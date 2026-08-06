@@ -2,9 +2,9 @@
 
 The TUI's logo, hero art, and tagline live in the TUI **source**
 (`ui-tui/src/banner.ts`, `ui-tui/src/components/branding.tsx`) and its default
-skin in `hermes_cli/skin_engine.py` — not in a skin YAML. So rebranding to
-"DeepSQL Agent" means editing those files in the agent checkout and rebuilding
-the Node/Ink dist (like `hermes/webui/apply-overlay.sh` for the webui).
+skin in `hermes_cli/skin_engine.py` (upstream module path) — not in a skin YAML.
+So rebranding to "DeepSQL Agent" means editing those files in the agent checkout
+and rebuilding the Node/Ink dist (like `agent/webui/apply-overlay.sh` for the webui).
 
 Changing the *defaults* (not just our `deepsql` skin) also removes the brief
 flash of default branding at startup — there's no default left to render before
@@ -61,7 +61,7 @@ const CADUCEUS_ART = [
 ## Colors
 
 The wordmark color comes from the active skin's banner palette
-([hermes/skins/deepsql.yaml](../skins/deepsql.yaml)) — kept in a tight grey
+([agent/skins/deepsql.yaml](../skins/deepsql.yaml)) — kept in a tight grey
 range so it reads as a subtle, understated grey rather than bright white.
 
 ## Productization note
