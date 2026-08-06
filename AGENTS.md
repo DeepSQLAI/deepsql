@@ -159,3 +159,65 @@ User Message → ChatController → SpringAIChatService
 - Database provider anti-pattern → never use if/else for database types
 - Connection pool pollution → always reset session state after benchmark operations
 - Frontend state → use Zustand selector hooks to avoid infinite re-render loops
+
+## Cursor Cloud specific instructions
+
+The dev environment runs the stack **natively (no Docker)**: Java 25 + Maven wrapper backend,
+Vite frontend, and locally-installed PostgreSQL 16 + Redis. System dependencies (JDK 25,
+Postgres, pgvector, Redis) are baked into the VM snapshot; the startup update script only
+refreshes `npm install`. Standard commands live in [`CLAUDE.md`](CLAUDE.md) — this section
+only covers cloud-specific, non-obvious caveats.
+
+### Services (start these each session — systemd is NOT running in the VM)
+
+- **PostgreSQL 16** (vault DB, port 5432): start with `sudo pg_ctlcluster 16 main start`.
+  DB `dba_agent` (user/pass `postgres`/`postgres`), extensions `vector` + `pg_stat_statements`
+  enabled. `shared_preload_libraries=pg_stat_statements` is already set in the cluster config.
+- **Redis** (cache, port 6379): start with `sudo redis-server /etc/redis/redis.conf --daemonize yes`.
+  Redis degrades gracefully but the local `.env` points at it.
+- **Backend** (port 8080, base path `/api`): `bash scripts/start-backend.sh` (wraps
+  `./mvnw spring-boot:run`; it strips `SPRING_PROFILES_ACTIVE=prod` for local runs → dev mode).
+- **Frontend** (port 3000): `npm run dev` (Vite proxies `/api` → 8080 and `/agent-api` → 8787).
+- **Hermes Agent webui** (port 8787, optional): needed only for the sidebar **Agent** tab.
+  See caveats below for install + `HERMES_WEBUI_ALLOWED_ORIGINS`.
+- A demo target DB `demo_shop` (same Postgres server, sample `customers`/`products`/`orders`)
+  exists for exercising connection/schema features without an external database.
+
+### Non-obvious setup caveats (each cost real debugging time)
+
+- **Java 25 is mandatory** (`pom.xml` sets `java.version=25`); the VM's default `java` is set
+  to Temurin 25 via `update-alternatives`, and `JAVA_HOME` is exported in `~/.bashrc`.
+- **`.env` is loaded by `source` in `scripts/start-backend.sh`, which runs under `set -e`.**
+  Dotted keys like `spring.data.redis.host=...` make bash abort the whole script with
+  "command not found". Use Spring relaxed-binding UPPERCASE env names instead
+  (e.g. `SPRING_DATA_REDIS_HOST`). This is why the local `.env` avoids dotted keys.
+- **`ENCRYPTION_KEYS` must be set, not just `ENCRYPTION_KEY`.** `application.properties`
+  hardcodes `ENCRYPTION_KEYS=${ENCRYPTION_KEYS:}`; with the OS env var unset this is a
+  circular placeholder reference that fails `EncryptionService` bean creation at boot. The
+  local `.env` sets `ENCRYPTION_KEYS=<id>:<base64key>` matching `ENCRYPTION_KEY_ID`.
+- **`SECURITY_AUTH_ENABLED=false`** (set in `.env`) enables the dev auto-admin bypass, so the
+  web UI needs no login. Auth defaults to ON in every profile otherwise (there is no
+  `admin/admin`); a real login needs the localhost admin-bootstrap flow (see README).
+- **The `scheduled_tasks` table and the `vector`/`pg_stat_statements` extensions** come from
+  `docker/postgres/init/*.sql`. In the native (non-Docker) setup those were applied by hand;
+  they persist in the snapshot. If you ever recreate the vault DB, re-apply
+  `docker/postgres/init/*.sql` or db-scheduler logs `relation "scheduled_tasks" does not exist`.
+- **LLM (Azure OpenAI) is configured in the local gitignored `.env`** (not committed). Working
+  values for this environment: `DEEPSQL_CHAT_PROVIDER=openai`,
+  `DEEPSQL_CHAT_ENDPOINT=https://deepsql-selfhost-resource.cognitiveservices.azure.com/`,
+  `DEEPSQL_CHAT_MODEL=gpt-5.4` (deployment name), plus matching `DEEPSQL_EMBEDDING_*` with
+  `text-embedding-3-large`. Also set `AZURE_OPENAI_KEY` / `AZURE_OPENAI_ENDPOINT` aliases —
+  `hermes/install.sh` reads those. After changing LLM env, restart the backend
+  (`scripts/start-backend.sh`); `/api/setup/status` should show `hasLlmConfig: true`.
+- **Agent tab (Hermes) is optional but required for the in-app Agent chat UI.** Install via
+  `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-setup`,
+  symlink `~/.hermes/hermes-agent/.venv` → `venv` (DeepSQL's `hermes/install.sh` expects `.venv`),
+  then `bash hermes/install.sh`. Start the webui with
+  `HERMES_WEBUI_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000`
+  (without this, Vite's Origin header makes Hermes return **403** "Cross-origin mismatch").
+  Webui listens on `:8787`; Vite proxies `/agent-api` → there.
+- **Before running backend tests that boot the Spring context** (e.g. `ApiSmokeTest`), stop
+  the running backend first — both use `ddl-auto=update` on the same `dba_agent` DB and can
+  deadlock on an `ALTER TABLE`. Test env vars are documented in `CLAUDE.md` (Testing).
+- `npm run lint` currently reports many pre-existing warnings/errors in the repo; that is the
+  baseline, not a setup failure.
