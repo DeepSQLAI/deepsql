@@ -2,6 +2,7 @@ package com.dbaagent.controller;
 
 import com.dbaagent.model.User;
 import com.dbaagent.model.UserAccountStatus;
+import com.dbaagent.repository.McpTokenRepository;
 import com.dbaagent.repository.UserRepository;
 import com.dbaagent.service.SystemConfigService;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,7 @@ import java.util.Optional;
 public class UserController {
 
     private final UserRepository userRepository;
+    private final McpTokenRepository mcpTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final SystemConfigService systemConfigService;
 
@@ -94,7 +96,7 @@ public class UserController {
         if (password == null || password.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("message", "Password is required"));
         }
-        userRepository.findByUsername("admin").ifPresent(userRepository::delete);
+        userRepository.findByUsername("admin").ifPresent(this::deleteUserAndOwnedCredentials);
         User user = new User();
         user.setUsername("admin");
         user.setPassword(passwordEncoder.encode(password));
@@ -117,8 +119,38 @@ public class UserController {
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(404).body(Map.of("message", "User not found"));
         }
-        userRepository.delete(userOpt.get());
+        deleteUserAndOwnedCredentials(userOpt.get());
         return ResponseEntity.ok(Map.of("message", "User deleted successfully"));
+    }
+
+    /**
+     * Delete a user together with the credentials that belong to them.
+     *
+     * <p>{@code mcp_tokens.user_id} is a non-null FK with no cascade, so a plain
+     * {@code userRepository.delete(user)} throws
+     * {@code ConstraintViolationException: update or delete on table "users"
+     * violates foreign key constraint "fkhm5walli9xtthjoek1ia4paqg" on table
+     * "mcp_tokens"} — surfacing to the caller as a bare 500.
+     *
+     * <p>It is reachable on any self-host install: {@code setup-agent.sh} mints an
+     * MCP token for the admin every run, so setting up the agent was enough to
+     * make {@code POST /users/admin/reset} fail permanently — exactly when an
+     * operator locked out of the UI needs it most.
+     *
+     * <p>Deleting the tokens is the correct behaviour and not merely a way to
+     * satisfy the constraint: they are bearer credentials scoped to this user, and
+     * leaving them behind would orphan working credentials whose owner is gone.
+     *
+     * <p>The transaction lives on {@code McpTokenRepository.deleteByUserId}. Putting
+     * {@code @Transactional} here would be inert: both callers reach this method by
+     * self-invocation, which never passes through the Spring proxy.
+     */
+    private void deleteUserAndOwnedCredentials(User user) {
+        long revoked = mcpTokenRepository.deleteByUserId(user.getId());
+        if (revoked > 0) {
+            log.info("Revoked {} MCP token(s) belonging to user {} before deletion", revoked, user.getUsername());
+        }
+        userRepository.delete(user);
     }
 
     private Map<String, Object> toUserSummary(User user) {
