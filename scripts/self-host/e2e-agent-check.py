@@ -161,7 +161,38 @@ def main() -> int:
     answer = "".join(tokens).strip()
     print("ANSWER", answer[:500])
     print("TOOLS", tools)
-    agent_ok = ("dba_agent" in answer.lower()) or any("execute_sql" in t for t in tools)
+
+    # The verdict used to be:
+    #   ("dba_agent" in answer) or any("execute_sql" in t for t in tools)
+    # The right-hand side only proves a tool was *attempted*. When the MCP SDK moved
+    # to 2.x and every tool call died with
+    #   AttributeError: 'CallToolResult' object has no attribute 'isError'
+    # the tool names were still recorded, so this printed "✓ All agent UI paths OK"
+    # and exited 0 while the agent's own reply said "I'm blocked". A gate that passes
+    # over a dead agent is worse than no gate — it is why that breakage reached users
+    # instead of CI. The answer is the only honest evidence, so require it, and refuse
+    # replies that are visibly reporting tool failure.
+    answer_l = answer.lower()
+    failure_markers = (
+        "attributeerror",
+        "mcp call failed",
+        "is unreachable",
+        "i'm blocked",
+        "i am blocked",
+        "no attribute",
+    )
+    seen_failures = [m for m in failure_markers if m in answer_l]
+    called_sql = any("execute_sql" in t for t in tools)
+    answered = "dba_agent" in answer_l
+
+    agent_ok = answered and called_sql and not seen_failures
+    if not agent_ok:
+        if not called_sql:
+            print("AGENT_FAIL: execute_sql was never called")
+        if not answered:
+            print("AGENT_FAIL: reply lacks the expected database name 'dba_agent'")
+        if seen_failures:
+            print(f"AGENT_FAIL: reply reports tool failure {seen_failures}")
     print("AGENT_OK", agent_ok)
 
     # ── Dashboard generate ─────────────────────────────────────────────────
@@ -196,7 +227,23 @@ def main() -> int:
                 html = cfg.get("html") or ""
         print("DASH_KEYS", list(dash.keys())[:15] if isinstance(dash, dict) else type(dash))
         print("HTML_LEN", len(html) if isinstance(html, str) else 0)
-        dash_ok = isinstance(html, str) and len(html) > 50 and "<html" in html.lower()
+        # "It is HTML and it is long" was also true of the artifact produced while
+        # every MCP tool was failing: the agent could not read the schema or verify a
+        # query, so it emitted a plausible-looking dashboard full of invented numbers
+        # and this still reported DASH_OK True. A real artifact fetches its data at
+        # runtime through the injected deepsql.query() bridge (that is the artifact
+        # contract — see CLAUDE.md), so its absence means the numbers are hardcoded
+        # model output rather than anything the database returned.
+        html_l = html.lower() if isinstance(html, str) else ""
+        has_html = len(html_l) > 50 and "<html" in html_l
+        queries_live = "deepsql.query" in html_l
+        dash_ok = has_html and queries_live
+        if not dash_ok:
+            if not has_html:
+                print("DASH_FAIL: no HTML document returned")
+            elif not queries_live:
+                print("DASH_FAIL: artifact never calls deepsql.query() — data is not "
+                      "from the database, so the agent likely could not run SQL")
         title = None
         if isinstance(dash, dict):
             cfg = dash.get("dashboardConfig") if isinstance(dash.get("dashboardConfig"), dict) else {}

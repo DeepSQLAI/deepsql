@@ -81,7 +81,11 @@ prompt_env_value() {
   local value="${!name:-}"
   if is_placeholder "$value"; then
     printf '%s: ' "$label"
-    read -r value
+    # `|| true`: read returns non-zero at EOF, and under `set -e` that aborts the
+    # script instantly — no message, no diagnosis, and .env already half-written with
+    # freshly generated secrets. Let the emptiness check below report it instead.
+    # See prompt_optional_env_value for how this was found.
+    read -r value || true
     if [[ -z "$value" ]]; then
       echo "Error: '$name' is required." >&2
       exit 1
@@ -96,7 +100,7 @@ prompt_secret_env_value() {
   local value="${!name:-}"
   if is_placeholder "$value"; then
     printf '%s: ' "$label"
-    read -rs value
+    read -rs value || true
     printf '\n'
     if [[ -z "$value" ]]; then
       echo "Error: '$name' is required." >&2
@@ -110,13 +114,21 @@ prompt_secret_env_value() {
 # the backend can sensibly derive on its own (e.g. company name fallback
 # to admin email domain). If a non-blank value is provided it is persisted
 # to $ENV_FILE and exported; blank leaves the variable unset.
+#
+# The `|| true` is what makes "optional" true. Without it this prompt was the most
+# likely place for the whole installer to die: `read` returns non-zero at EOF, and
+# under `set -euo pipefail` that exits 1 with nothing printed. Any non-interactive
+# run (`install.sh </dev/null`, CI, a piped shell) reached exactly here — after the
+# secrets were generated and written — and stopped, looking like a successful config
+# step followed by silence. Interactively it is no better: this prompt says "press
+# Enter to skip", and Ctrl-D is the other thing people press at a skippable prompt.
 prompt_optional_env_value() {
   local name="$1"
   local label="$2"
   local value="${!name:-}"
   if [[ -z "$value" || "$value" == *change-me-* || "$value" == *replace-with-* ]]; then
     printf '%s: ' "$label"
-    read -r value
+    read -r value || true
     if [[ -n "$value" ]]; then
       # This is the prompt that first exposed the quoting bug: "Company / organization
       # name" invites an answer with a space, and almost every real one has one.

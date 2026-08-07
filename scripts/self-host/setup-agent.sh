@@ -80,24 +80,77 @@ ensure_agent_venv() {
   }
 }
 
+# Importable is not the same as usable. This probe additionally asserts that
+# CallToolResult still carries `isError`, because that is the field hermes-agent
+# actually reads. A presence-only check reports "✓ SDK available" on an SDK 2.x
+# install where every tool call fails at runtime — which is exactly how a broken
+# agent shipped while setup-agent.sh printed a tick.
+MCP_PROBE='
+import sys
+try:
+    from tools.mcp_tool import _MCP_AVAILABLE
+except Exception:
+    sys.exit(1)
+if not _MCP_AVAILABLE:
+    sys.exit(1)
+try:
+    from mcp.types import CallToolResult
+except Exception:
+    sys.exit(2)
+sys.exit(0 if "isError" in getattr(CallToolResult, "model_fields", {}) else 2)
+'
+
 ensure_mcp_sdk() {
-  local py
+  local py rc
   py="$(resolve_venv_python)"
-  if "$py" -c "from tools.mcp_tool import _MCP_AVAILABLE; import sys; sys.exit(0 if _MCP_AVAILABLE else 1)" \
-      2>/dev/null; then
+  # `|| rc=$?` rather than `if`: under set -e a bare call would abort the script,
+  # and rc 2 (incompatible) must be told apart from rc 1 (absent).
+  rc=0
+  "$py" -c "$MCP_PROBE" 2>/dev/null || rc=$?
+  if [[ $rc -eq 0 ]]; then
     echo "✓ Python MCP SDK available ($py)"
     return 0
   fi
-  echo "→ Installing Python MCP SDK into $py"
-  if command -v uv >/dev/null 2>&1; then
-    UV_NO_CONFIG=1 uv pip install --python "$py" 'mcp>=1.0'
-  else
-    "$py" -m pip install 'mcp>=1.0'
+  if [[ $rc -eq 2 ]]; then
+    echo "→ Installed MCP SDK is incompatible with hermes-agent (CallToolResult has no"
+    echo "  'isError' — SDK 2.x renamed it to 'is_error'). Reinstalling a 1.x SDK."
   fi
-  "$py" -c "from tools.mcp_tool import _MCP_AVAILABLE; import sys; sys.exit(0 if _MCP_AVAILABLE else 1)" || {
+  # Read by start_webui: a running webui holds the old SDK in memory and must be
+  # restarted, or this reinstall has no effect on the agent at all.
+  MCP_SDK_REINSTALLED=1
+  echo "→ Installing Python MCP SDK into $py"
+  # The upper bound is load-bearing, not caution. MCP SDK 2.0.0 renamed
+  # CallToolResult.isError -> .is_error (mcp_types/_types.py:1480) and split the
+  # models out into a separate mcp-types package. hermes-agent 0.20.0 still reads
+  # result.isError (tools/mcp_tool.py:5222), so an unpinned 'mcp>=1.0' silently
+  # began resolving to 2.0.0 the day it was published, and every DeepSQL tool call
+  # started failing with
+  #   AttributeError: 'CallToolResult' object has no attribute 'isError'
+  # Three of those trip the client's circuit breaker, after which the remaining
+  # tools are refused with "MCP server 'deepsql' is unreachable" — blaming a healthy
+  # server for a client-side parse failure. In the UI it surfaces only as
+  # "The agent run ended early."
+  #
+  # Raise this ceiling when hermes-agent reads .is_error (or accepts both), not before.
+  if command -v uv >/dev/null 2>&1; then
+    UV_NO_CONFIG=1 uv pip install --python "$py" 'mcp>=1.0,<2'
+  else
+    "$py" -m pip install 'mcp>=1.0,<2'
+  fi
+  rc=0
+  "$py" -c "$MCP_PROBE" 2>/dev/null || rc=$?
+  if [[ $rc -eq 2 ]]; then
+    echo "Error: the installed MCP SDK is still incompatible with hermes-agent" >&2
+    echo "       (CallToolResult has no 'isError'). Every agent tool call would fail" >&2
+    echo "       with AttributeError and the UI would show only 'The agent run ended" >&2
+    echo "       early.' Check that '$py' resolved mcp<2." >&2
+    exit 1
+  fi
+  if [[ $rc -ne 0 ]]; then
     echo "Error: MCP SDK still unavailable after install. Agent tools will not load." >&2
     exit 1
-  }
+  fi
+  echo "✓ Python MCP SDK installed and compatible ($py)"
 }
 
 wait_for_http() {
@@ -219,12 +272,33 @@ start_webui() {
   mkdir -p "$(dirname "$LOG_FILE")" "$HERMES_HOME/logs"
 
   if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-    echo "✓ Hermes webui already running (pid $(cat "$PID_FILE"))"
-    return 0
+    # A live process holds its interpreter's modules in memory, so it keeps using
+    # the SDK that was installed when it started. Re-running this script to repair
+    # a broken SDK otherwise reports "✓ already running" and changes nothing —
+    # every tool call keeps failing exactly as before, under a full set of ticks.
+    if [[ "${MCP_SDK_REINSTALLED:-0}" == "1" ]]; then
+      echo "→ MCP SDK changed on disk; restarting Hermes webui (pid $(cat "$PID_FILE"))"
+      kill "$(cat "$PID_FILE")" 2>/dev/null || true
+      for _ in $(seq 1 20); do
+        kill -0 "$(cat "$PID_FILE")" 2>/dev/null || break
+        sleep 0.5
+      done
+      kill -9 "$(cat "$PID_FILE")" 2>/dev/null || true
+      rm -f "$PID_FILE"
+    else
+      echo "✓ Hermes webui already running (pid $(cat "$PID_FILE"))"
+      return 0
+    fi
   fi
 
   # Free a stale listener on the port if our pid file is gone.
   if lsof -iTCP:"$WEBUI_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    if [[ "${MCP_SDK_REINSTALLED:-0}" == "1" ]]; then
+      echo "Error: the MCP SDK was reinstalled but something else is listening on" >&2
+      echo "       port $WEBUI_PORT and this script does not own it. Stop it and re-run," >&2
+      echo "       or the agent will keep using the old SDK." >&2
+      exit 1
+    fi
     echo "→ Port $WEBUI_PORT already in use; assuming an existing webui and skipping start."
     return 0
   fi

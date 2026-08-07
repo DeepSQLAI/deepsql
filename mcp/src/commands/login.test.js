@@ -5,7 +5,19 @@ const assert = require("node:assert/strict");
 
 // Stub the auth/store module before requiring login so login picks up
 // our fake. Each test rebuilds the stub with the profile shape it wants.
-function withStubbedStore(profiles, fn) {
+//
+// Usage:
+//   withStubbedStore(profiles, fn)                    — no pinned default
+//   withStubbedStore(profiles, { default: url }, fn)  — explicit pinned default
+//
+// The default is NEVER inferred from profile order here. It used to be
+// `Object.keys(profiles)[0]`, which quietly modelled "whichever host you logged
+// into first" — precisely the guessing this command exists to refuse. A test that
+// cares about a default must say so.
+function withStubbedStore(profiles, optsOrFn, maybeFn) {
+  const opts = typeof optsOrFn === "function" ? {} : (optsOrFn || {});
+  const fn = typeof optsOrFn === "function" ? optsOrFn : maybeFn;
+  const pinned = Object.prototype.hasOwnProperty.call(opts, "default") ? opts.default : null;
   const storeKey = require.resolve("../auth/store");
   const loginKey = require.resolve("./login");
   delete require.cache[storeKey];
@@ -16,10 +28,10 @@ function withStubbedStore(profiles, fn) {
     loaded: true,
     exports: {
       normalizeBaseUrl: (url) => url.endsWith("/") ? url : `${url}/`,
-      listProfiles: () => ({ profiles, default: Object.keys(profiles)[0] || null }),
+      listProfiles: () => ({ profiles, default: pinned }),
+      defaultBaseUrl: () => pinned,
       // Other fns aren't used by resolveLoginBaseUrl. Stub them just so
       // the require() in login.js doesn't blow up.
-      defaultBaseUrl: () => null,
       getProfile: () => null,
       setProfile: () => {},
     },
@@ -106,6 +118,74 @@ test("login with no --url and multiple profiles refuses to guess — lists them 
       assert.match(thrown.message, /https:\/\/customer\.example\.com\//);
       // And we point them at config set-default for pinning.
       assert.match(thrown.message, /deepsql config set-default/);
+    },
+  );
+});
+
+// ─── ≥ 2 profiles WITH a pinned default: honour it ───────────────────────
+
+test("login with no --url and multiple profiles uses the pinned default", () => {
+  // The error above tells the user to run `deepsql config set-default <url>`
+  // to "pin one as the default for future logins" — but resolveLoginBaseUrl
+  // never read state.default, so following that advice changed nothing and the
+  // same error came back. Reported from a real machine whose auth.json held
+  // {"default":"http://localhost:8082", profiles:{...9085, ...8082}} and where
+  // bare `deepsql login` still refused.
+  //
+  // A default the user pinned by hand is their stated choice, not a guess, so
+  // honouring it does not reopen the ambiguity this command exists to refuse.
+  withStubbedStore(
+    {
+      "https://deepsql.example.com/": { token: "t1" },
+      "https://customer.example.com/": { token: "t2" },
+    },
+    { default: "https://customer.example.com/" },
+    (resolve) => {
+      const stderr = captureStderr();
+      const url = resolve({}, { stderr });
+      assert.equal(url, "https://customer.example.com/");
+      // Say which one, so a pinned default is never silent.
+      assert.match(stderr.get(), /customer\.example\.com/);
+      assert.match(stderr.get(), /Pass --url to log in against a different host/);
+    },
+  );
+});
+
+test("login --url still wins over a pinned default", () => {
+  withStubbedStore(
+    {
+      "https://deepsql.example.com/": { token: "t1" },
+      "https://customer.example.com/": { token: "t2" },
+    },
+    { default: "https://customer.example.com/" },
+    (resolve) => {
+      const stderr = captureStderr();
+      const url = resolve({ url: "https://fresh.example.com" }, { stderr });
+      assert.equal(url, "https://fresh.example.com/");
+      assert.equal(stderr.get(), "", "no hint when the user was explicit");
+    },
+  );
+});
+
+test("login ignores a stale default that names no saved profile", () => {
+  // set-default writes whatever it is given, and profiles can be removed by
+  // editing auth.json. Falling back to the list is right here: resolving to a
+  // host with no saved profile would fail later with a worse message.
+  withStubbedStore(
+    {
+      "https://deepsql.example.com/": { token: "t1" },
+      "https://customer.example.com/": { token: "t2" },
+    },
+    { default: "https://deleted.example.com/" },
+    (resolve) => {
+      let thrown;
+      try {
+        resolve({}, { stderr: captureStderr() });
+      } catch (err) {
+        thrown = err;
+      }
+      assert.ok(thrown, "a stale default must not resolve");
+      assert.match(thrown.message, /Multiple saved DeepSQL profiles/);
     },
   );
 });

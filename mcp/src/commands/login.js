@@ -48,7 +48,26 @@ function resolveLoginBaseUrl(opts, { stderr = process.stderr } = {}) {
     );
     return only;
   }
-  // Multiple profiles — refuse to guess. List them so the user can pick.
+  // A default the user pinned with `deepsql config set-default` is their stated
+  // choice, not a guess, so honour it. This branch was missing: the error below
+  // has always advertised set-default as the remedy, but nothing read
+  // state.default, so following that advice produced the identical error again
+  // and left no way out except passing --url on every login.
+  //
+  // Require the default to still name a saved profile. set-default writes
+  // whatever it is given, and profiles can be removed by editing auth.json;
+  // resolving to a host with no saved profile would only fail later with a
+  // worse message.
+  const pinned = state.default && urls.includes(state.default) ? state.default : null;
+  if (pinned) {
+    stderr.write(
+      `[deepsql] Using default profile: ${pinned}. Pass --url to log in against a different host.\n`,
+    );
+    return pinned;
+  }
+
+  // Multiple profiles and nothing pinned — refuse to guess. List them so the
+  // user can pick.
   throw new Error(
     `Multiple saved DeepSQL profiles. Pass --url <host> to choose one:\n  - ${urls.join("\n  - ")}\n`
     + `Or run \`deepsql config set-default <url>\` to pin one as the default for future logins.`,
@@ -115,6 +134,23 @@ async function run(opts, { stderr = process.stderr, stdout = process.stdout } = 
 
   stdout.write(`Authorized as ${issued.username} at ${baseUrl}\n`);
   stdout.write(`Token saved to ${store.authFilePath()}\n`);
+
+  // Saving a profile does not make it active: store.setProfile only adopts a new
+  // default when there is none. So logging into a second host leaves bare
+  // `deepsql` pointed at the old one — and if that host is down, the agent intro
+  // reported "No databases connected yet" for a server it never reached, which
+  // reads as "your login didn't work".
+  //
+  // Deliberately NOT switching automatically: silently redirecting a DBA tool at
+  // a different database is a worse failure than one extra line of output. Say
+  // what is active and give the exact command.
+  const active = store.defaultBaseUrl();
+  if (active && active !== baseUrl) {
+    stdout.write(
+      `\nNote: bare \`deepsql\` still uses ${active}.\n`
+      + `      Make this host the default:  deepsql config set-default ${baseUrl}\n`,
+    );
+  }
 }
 
 module.exports = { run, resolveLoginBaseUrl };
