@@ -140,11 +140,21 @@ if [[ "$schema_json" != *'"success":true'* ]]; then
 fi
 
 if [[ "$DEEPSQL_SMOKE_WAIT_FOR_INIT" == "true" ]]; then
+  # Brain init calls the LLM once per schema batch and routinely runs for many
+  # minutes. Every check up to this point prints only on failure, so without the
+  # progress lines below this script sat completely mute for up to
+  # DEEPSQL_SMOKE_INIT_TIMEOUT_SECONDS (default 1200) — indistinguishable from a
+  # hang, and duly killed by whoever was watching it, well before it would have
+  # finished.
+  echo "Waiting for brain init (up to ${DEEPSQL_SMOKE_INIT_TIMEOUT_SECONDS}s)."
+  echo "This calls the LLM once per schema batch, so several minutes is normal."
   deadline=$((SECONDS + DEEPSQL_SMOKE_INIT_TIMEOUT_SECONDS))
+  last_report=""
   while (( SECONDS < deadline )); do
     init_json="$(curl -fsS -b "$cookie_jar" "$base/connections/${connection_id}/init-status")"
     init_stage="$(printf '%s' "$init_json" | sed -n 's/.*"currentStage":"\([^"]*\)".*/\1/p')"
     init_progress="$(printf '%s' "$init_json" | sed -n 's/.*"progressPercent":\([0-9][0-9]*\).*/\1/p')"
+    init_message="$(printf '%s' "$init_json" | sed -n 's/.*"stageMessage":"\([^"]*\)".*/\1/p')"
 
     if [[ "$init_stage" == "COMPLETED" ]]; then
       echo "Brain init completed for smoke-test connection (${init_progress:-100}%)."
@@ -155,6 +165,14 @@ if [[ "$DEEPSQL_SMOKE_WAIT_FOR_INIT" == "true" ]]; then
       echo "Error: brain init failed for smoke-test connection." >&2
       echo "$init_json" >&2
       exit 1
+    fi
+
+    # Print only on change: enough to prove the run is alive and advancing,
+    # without 240 identical lines scrolling the earlier output away.
+    report="${init_stage:-?} ${init_progress:-0}% ${init_message:-}"
+    if [[ "$report" != "$last_report" ]]; then
+      echo "  [${SECONDS}s] ${init_stage:-unknown} ${init_progress:-0}%${init_message:+ — $init_message}"
+      last_report="$report"
     fi
 
     sleep 5
