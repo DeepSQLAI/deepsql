@@ -85,6 +85,11 @@ function renderIntro(
     connections = [],
     suggestions = [],
     recommendationCount = 0,
+    // Non-null when the connection list could not be fetched at all. Kept
+    // distinct from "connections === []" so an unreachable server is never
+    // rendered as an empty account.
+    unreachable = null,
+    baseUrl = null,
   } = {}
 ) {
   const out = [""];
@@ -102,7 +107,18 @@ function renderIntro(
 
   // Connections the token can see (frictionless onboarding: guide to add one if none).
   out.push("");
-  if (connections.length === 0) {
+  if (unreachable) {
+    // Never render the onboarding empty-state for a server we could not reach.
+    // "No databases connected yet → deepsql connections add" tells someone whose
+    // connections are perfectly fine to go create another one, and hides the fact
+    // that the CLI is pointed somewhere dead. Name the host: the usual cause is
+    // the saved default pointing somewhere other than the last `deepsql login`.
+    out.push("  " + c(AMBER, "Could not reach your DeepSQL server", useColor));
+    if (baseUrl) out.push("    " + dim(baseUrl, useColor));
+    out.push("    " + dim(unreachable, useColor));
+    out.push("    " + dim("→ ", useColor) + "deepsql config show"
+      + dim("   (check which host is the default)", useColor));
+  } else if (connections.length === 0) {
     out.push("  " + c(PURPLE, "No databases connected yet", useColor));
     out.push("    " + dim("→ ", useColor) + "deepsql connections add");
   } else {

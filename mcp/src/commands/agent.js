@@ -127,6 +127,9 @@ async function run(opts, io = {}) {
       connections: introData.connections,
       suggestions: introData.suggestions,
       recommendationCount: introData.recommendationCount,
+      // Surface an unreachable server instead of an empty-account banner.
+      unreachable: introData.unreachable,
+      baseUrl: session.baseUrl,
     });
   }
   // conversationId stays null on the first turn so the server resumes your most

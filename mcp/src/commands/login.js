@@ -134,6 +134,23 @@ async function run(opts, { stderr = process.stderr, stdout = process.stdout } = 
 
   stdout.write(`Authorized as ${issued.username} at ${baseUrl}\n`);
   stdout.write(`Token saved to ${store.authFilePath()}\n`);
+
+  // Saving a profile does not make it active: store.setProfile only adopts a new
+  // default when there is none. So logging into a second host leaves bare
+  // `deepsql` pointed at the old one — and if that host is down, the agent intro
+  // reported "No databases connected yet" for a server it never reached, which
+  // reads as "your login didn't work".
+  //
+  // Deliberately NOT switching automatically: silently redirecting a DBA tool at
+  // a different database is a worse failure than one extra line of output. Say
+  // what is active and give the exact command.
+  const active = store.defaultBaseUrl();
+  if (active && active !== baseUrl) {
+    stdout.write(
+      `\nNote: bare \`deepsql\` still uses ${active}.\n`
+      + `      Make this host the default:  deepsql config set-default ${baseUrl}\n`,
+    );
+  }
 }
 
 module.exports = { run, resolveLoginBaseUrl };

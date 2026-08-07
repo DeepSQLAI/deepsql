@@ -61,15 +61,35 @@ async function checkConnection(session, c) {
 
 // Returns { connections: [{name,dbType,canManage}], suggestions: [{conn,text,fix}] }.
 async function loadIntroData(session, { timeoutMs = 2500 } = {}) {
-  const data = { connections: [], suggestions: [], recommendationCount: 0 };
+  const data = { connections: [], suggestions: [], recommendationCount: 0, unreachable: null };
+
+  // The connection list is the one fetch whose failure must NOT be swallowed.
+  // It used to share a single catch with the suggestions below, so a server that
+  // could not be reached at all left connections empty and the intro rendered
+  // "No databases connected yet → deepsql connections add" — telling the user to
+  // add a connection they already had. An unreachable host was indistinguishable
+  // from an empty account. Reported after a login to a second host while the
+  // saved default still pointed at a dead one: `deepsql connections list` said
+  // "Network error contacting http://…:8082/api/connections" while the agent
+  // intro cheerfully reported no databases.
+  let list;
   try {
-    const list = await withTimeout(listConnections(session), timeoutMs);
-    data.connections = (list || []).map((c) => ({
-      id: c.id,
-      name: c.connectionName || c.name || c.id,
-      dbType: c.dbType || "",
-      canManage: !!c.canManageConfig,
-    }));
+    list = await withTimeout(listConnections(session), timeoutMs);
+  } catch (err) {
+    data.unreachable = (err && err.message) ? err.message : String(err);
+    return data;
+  }
+
+  data.connections = (list || []).map((c) => ({
+    id: c.id,
+    name: c.connectionName || c.name || c.id,
+    dbType: c.dbType || "",
+    canManage: !!c.canManageConfig,
+  }));
+
+  // Suggestions really are decoration — a slow or older backend missing these
+  // endpoints should degrade quietly rather than block the REPL.
+  try {
     // Status/suggestions only for connections this user can configure
     // (admin-level), capped so a workspace with many connections doesn't fan
     // out at startup.
@@ -85,7 +105,7 @@ async function loadIntroData(session, { timeoutMs = 2500 } = {}) {
       data.recommendationCount = checks.reduce((n, r) => n + (r.recCount || 0), 0);
     }
   } catch {
-    /* degrade gracefully — render whatever we have */
+    /* decoration only — render whatever we have */
   }
   return data;
 }
