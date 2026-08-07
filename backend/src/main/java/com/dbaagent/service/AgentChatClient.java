@@ -26,9 +26,14 @@ import java.util.Map;
 /**
  * Synchronous client for the DeepSQL Agent webui API, reached over the compose
  * network (internal — not via the gated /agent-api proxy). Used by non-browser
- * channels (Slack, etc.) that need a single final answer rather than a live SSE
+ * channels (Slack, CLI, etc.) that need a single final answer rather than a live SSE
  * stream: it starts a turn, consumes the stream server-side, and returns the
  * assembled text plus a compact tool-step summary.
+ *
+ * <p>Sessions are scoped by the upstream {@code hermes_profile} cookie. This client
+ * keeps a {@link CookieManager} and calls {@code /api/profile/switch} before
+ * session/chat calls so CLI/Slack turns see the same profile Spring provisioned
+ * ({@code u-<user>}), matching the browser Agent tab.
  */
 @Service
 public class AgentChatClient {
@@ -63,11 +68,6 @@ public class AgentChatClient {
     }
 
     /**
-     * Return a usable session id for the given profile: reuse {@code existingSessionId}
-     * when present, otherwise create a fresh session and auto-approve its read-only
-     * tool surface (channels are non-interactive). Returns null on failure.
-     */
-    /**
      * Why a session could not be created, for callers that surface a reason to the user.
      * {@code sessionId} non-null means success and {@code failureReason} is null.
      */
@@ -75,17 +75,18 @@ public class AgentChatClient {
         boolean ok() { return sessionId != null; }
     }
 
+    /** Convenience wrapper around {@link #ensureSessionDetailed}. */
     public String ensureSession(String profile, String existingSessionId) {
         return ensureSessionDetailed(profile, existingSessionId).sessionId();
     }
-
     public SessionAttempt ensureSessionDetailed(String profile, String existingSessionId) {
         try {
             switchProfile(profile);
         } catch (Exception e) {
             log.warn("Could not switch agent profile to {} (webui={}): {}",
                 profile, webuiUrl, e.toString());
-            return new SessionAttempt(null, describe(e));
+            log.debug("agent profile/switch failure detail", e);
+            return new SessionAttempt(null, "could not switch agent profile: " + describe(e));
         }
         if (existingSessionId != null && !existingSessionId.isBlank()) {
             return new SessionAttempt(existingSessionId, null);
@@ -123,7 +124,9 @@ public class AgentChatClient {
 
     /** Activate the hermes_profile cookie for subsequent webui API calls. */
     private void switchProfile(String profile) throws Exception {
-        if (profile == null || profile.isBlank()) return;
+        if (profile == null || profile.isBlank()) {
+            throw new IllegalArgumentException("agent profile is required");
+        }
         postJson("/api/profile/switch", Map.of("name", profile));
     }
 
@@ -142,7 +145,7 @@ public class AgentChatClient {
                 return AgentReply.fail("agent did not start a turn");
             }
         } catch (Exception e) {
-            return AgentReply.fail("could not start agent turn: " + e.getMessage());
+            return AgentReply.fail("could not start agent turn: " + describe(e));
         }
         return consumeStream(streamId);
     }
@@ -157,6 +160,7 @@ public class AgentChatClient {
         StringBuilder answer = new StringBuilder();
         List<String> toolSteps = new ArrayList<>();
         boolean ended = false;
+        String streamError = null;
         try {
             HttpResponse<InputStream> resp = http.send(req, HttpResponse.BodyHandlers.ofInputStream());
             if (resp.statusCode() / 100 != 2) {
@@ -182,6 +186,13 @@ public class AgentChatClient {
                                 // after the LAST tool is the real reply.
                                 answer.setLength(0);
                             }
+                            case "error", "apperror" -> {
+                                String err = textField(data, "message");
+                                if (err == null || err.isBlank()) err = textField(data, "error");
+                                if (err == null || err.isBlank()) err = data;
+                                streamError = err;
+                                ended = true;
+                            }
                             case "stream_end", "done" -> ended = true;
                             default -> { /* metering, context_status, interim_assistant, title — ignore */ }
                         }
@@ -192,8 +203,11 @@ public class AgentChatClient {
         } catch (Exception e) {
             return AgentReply.fail("agent stream error: " + e.getMessage());
         }
+        if (streamError != null && !streamError.isBlank()) {
+            return AgentReply.fail("agent runtime error: " + streamError);
+        }
         String text = answer.toString().trim();
-        if (text.isEmpty() && !ended) {
+        if (text.isEmpty()) {
             return AgentReply.fail("agent run ended before producing an answer");
         }
         return AgentReply.ok(text, toolSteps);
