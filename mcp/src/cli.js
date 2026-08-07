@@ -155,6 +155,7 @@ const COMMAND_HELP = {
     subcommands: [
       ["show",                "List saved profiles (default)"],
       ["set-default <url>",   "Set the default profile"],
+      ["remove <url>",        "Forget a saved profile (e.g. a host you no longer run)"],
       ["path",                "Print the auth file path"],
     ],
   },

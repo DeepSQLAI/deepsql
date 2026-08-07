@@ -149,7 +149,7 @@ deepsql query "SELECT 1" --connection prod-pg --caller-agent claude-code --json
 | `deepsql login` | Authorize CLI against a DeepSQL host (browser PKCE / device code / password) | none — interactive only |
 | `deepsql logout` | Revoke the saved token | none |
 | `deepsql whoami` | Show the logged-in user, role, URL, pinned connection | none |
-| `deepsql config show\|set-default <url>\|path` | Manage saved profiles | none |
+| `deepsql config show\|set-default <url>\|remove <url>\|path` | Manage saved profiles (one per DeepSQL URL) | none |
 | `deepsql mcp` | Run the stdio MCP server | this skill spawns it |
 | `deepsql mcp config --install --for <editor>` | Install MCP entry + this skill into editor config | none — interactive |
 | `deepsql connections list\|use\|current\|unset\|schema\|add\|update\|remove\|test\|show\|init` | Full connection CRUD | partial: `list_connections`, `get_schema` |

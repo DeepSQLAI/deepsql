@@ -476,6 +476,49 @@ else
   echo
 fi
 
+# ── DeepSQL CLI (@deepsql/mcp) ───────────────────────────────────────────────
+# Nothing in this repo installed or updated the CLI, so a reader who followed the
+# README end to end finished with a running stack and no `deepsql` command at
+# all — and anyone who installed it once drifted silently (a machine here sat on
+# 0.16.0 while npm was on 0.26.0). The CLI is an agent-facing surface, so a stale
+# one misreports which tools and subcommands exist.
+#
+# Report rather than install: this is a global npm mutation, and `npm i -g` can
+# need elevated permissions depending on the Node install. Printing the exact
+# command keeps the decision with the operator and never fails the install.
+report_cli_status() {
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "DeepSQL CLI: npm not found — skipping check."
+    echo "  The CLI is optional; install Node 20+ then: npm i -g @deepsql/mcp"
+    echo
+    return 0
+  fi
+  local installed latest
+  installed="$(deepsql --version 2>/dev/null | tr -d '[:space:]' || true)"
+  # `npm view` reaches the network; never let it stall or fail the install.
+  latest="$(npm view @deepsql/mcp version 2>/dev/null | tr -d '[:space:]' || true)"
+
+  if [[ -z "$installed" ]]; then
+    echo "DeepSQL CLI: not installed."
+    echo "  Install it with:  npm i -g @deepsql/mcp"
+  elif [[ -z "$latest" ]]; then
+    # Don't claim "up to date" on a check that never completed — that is the
+    # same false-green that let a stale CLI sit unnoticed in the first place.
+    echo "DeepSQL CLI: ${installed} installed (could not reach npm to check for updates)."
+  elif [[ "$installed" != "$latest" ]]; then
+    echo "DeepSQL CLI: ${installed} installed, ${latest} available."
+    echo "  Update with:  npm i -g @deepsql/mcp@latest"
+  else
+    echo "DeepSQL CLI: ${installed} (up to date)."
+  fi
+  if [[ -n "$installed" ]]; then
+    echo "  Point it at this stack:  deepsql login --url http://localhost:${DEEPSQL_BACKEND_PORT}"
+  fi
+  echo
+}
+
+report_cli_status
+
 echo "Useful commands:"
 echo "  ./scripts/self-host/status.sh"
 echo "  ./scripts/self-host/smoke-test.sh"
