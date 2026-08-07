@@ -100,3 +100,5 @@ optd-sidecar/target/
 .idea/
 .vscode/
 *.iml
+.local-admin-credentials
+.local-mcp-token

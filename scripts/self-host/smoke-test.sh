@@ -167,7 +167,7 @@ if [[ "$DEEPSQL_SMOKE_WAIT_FOR_INIT" == "true" ]]; then
   fi
 fi
 
-if [[ "$VECTOR_STORE_TYPE" == "pgvector" ]]; then
+if [[ "$VECTOR_STORE_TYPE" == "pgvector" && "$DEEPSQL_SMOKE_WAIT_FOR_INIT" == "true" ]]; then
   embedded_docs="$(compose exec -T postgres psql -U postgres -d dba_agent -At -c "
     SELECT COUNT(embedding)
     FROM rag_documents
@@ -177,6 +177,96 @@ if [[ "$VECTOR_STORE_TYPE" == "pgvector" ]]; then
     echo "Error: brain init completed but pgvector has no embedded documents for ${connection_id}." >&2
     exit 1
   fi
+fi
+
+# ── Agent paths (Hermes) ────────────────────────────────────────────────────
+# Agent tab (browser→/agent-api) and dashboards (backend→AGENT_WEBUI_URL) both
+# need Hermes on :8787. Fail loudly when DEEPSQL_SMOKE_AGENT=1 (default) so a
+# "green" smoke test means those UI surfaces will work.
+: "${DEEPSQL_SMOKE_AGENT:=1}"
+: "${DEEPSQL_FRONTEND_PORT:=3000}"
+: "${AGENT_WEBUI_URL:=http://host.docker.internal:8787}"
+: "${HERMES_WEBUI_PORT:=8787}"
+
+if [[ "$DEEPSQL_SMOKE_AGENT" == "1" ]]; then
+  if ! curl -fsS "http://127.0.0.1:${HERMES_WEBUI_PORT}/api/mcp/servers" >/dev/null 2>&1; then
+    echo "Error: Hermes webui is not reachable on :${HERMES_WEBUI_PORT}." >&2
+    echo "       Agent tab and AI dashboards will fail. Run:" >&2
+    echo "         ./scripts/self-host/setup-agent.sh" >&2
+    exit 1
+  fi
+
+  # Backend container must reach Hermes (dashboard / Slack / CLI path).
+  if ! compose exec -T backend sh -c \
+      "curl -fsS --connect-timeout 3 \"${AGENT_WEBUI_URL}/api/mcp/servers\" >/dev/null"; then
+    echo "Error: backend cannot reach AGENT_WEBUI_URL=${AGENT_WEBUI_URL}." >&2
+    echo "       Check docker-compose.yml AGENT_WEBUI_URL + extra_hosts, and that" >&2
+    echo "       Hermes binds HERMES_WEBUI_HOST=0.0.0.0." >&2
+    exit 1
+  fi
+
+  # Browser path through nginx: profile switch must not 403 (Host/Origin CSRF).
+  switch_code="$(curl -sS -o /tmp/deepsql-agent-switch.json -w '%{http_code}' \
+    -b "$cookie_jar" -c "$cookie_jar" \
+    -H 'Content-Type: application/json' \
+    -H "Origin: http://localhost:${DEEPSQL_FRONTEND_PORT}" \
+    -X POST "http://localhost:${DEEPSQL_FRONTEND_PORT}/agent-api/api/profile/switch" \
+    -d '{"name":"u-admin"}' || true)"
+  if [[ "$switch_code" != "200" ]]; then
+    # Profile name may not be u-admin if the smoke user differs — resolve via bridge.
+    bridge_json="$(curl -fsS -b "$cookie_jar" -H 'Content-Type: application/json' \
+      -X POST "$base/agent/session" -d "{\"connectionId\":\"${connection_id}\"}")"
+    profile="$(printf '%s' "$bridge_json" | sed -n 's/.*"profile":"\([^"]*\)".*/\1/p')"
+    if [[ -z "$profile" ]]; then
+      echo "Error: /api/agent/session did not return a profile." >&2
+      echo "$bridge_json" >&2
+      exit 1
+    fi
+    switch_code="$(curl -sS -o /tmp/deepsql-agent-switch.json -w '%{http_code}' \
+      -b "$cookie_jar" -c "$cookie_jar" \
+      -H 'Content-Type: application/json' \
+      -H "Origin: http://localhost:${DEEPSQL_FRONTEND_PORT}" \
+      -X POST "http://localhost:${DEEPSQL_FRONTEND_PORT}/agent-api/api/profile/switch" \
+      -d "{\"name\":\"${profile}\"}" || true)"
+  else
+    profile="u-admin"
+  fi
+  if [[ "$switch_code" != "200" ]]; then
+    echo "Error: /agent-api/api/profile/switch → HTTP ${switch_code} (expected 200)." >&2
+    echo "       Common cause: nginx Host header dropping :${DEEPSQL_FRONTEND_PORT} (CSRF)." >&2
+    cat /tmp/deepsql-agent-switch.json 2>/dev/null >&2 || true
+    exit 1
+  fi
+
+  session_json="$(curl -fsS -b "$cookie_jar" -c "$cookie_jar" \
+    -H 'Content-Type: application/json' \
+    -H "Origin: http://localhost:${DEEPSQL_FRONTEND_PORT}" \
+    -X POST "http://localhost:${DEEPSQL_FRONTEND_PORT}/agent-api/api/session/new" \
+    -d "{\"profile\":\"${profile}\",\"enabled_toolsets\":[\"deepsql\",\"skills\"]}")"
+  session_id="$(printf '%s' "$session_json" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("session",{}).get("session_id") or "")' 2>/dev/null || true)"
+  if [[ -z "$session_id" ]]; then
+    echo "Error: /agent-api/api/session/new did not return a session_id." >&2
+    echo "$session_json" >&2
+    exit 1
+  fi
+
+  # Backend→Hermes session (dashboard path) — same as AgentChatClient.ensureSession.
+  backend_switch="$(compose exec -T backend sh -c \
+    "curl -fsS -c /tmp/hc.jar -H 'Content-Type: application/json' \
+      -X POST '${AGENT_WEBUI_URL}/api/profile/switch' \
+      -d '{\"name\":\"${profile}\"}' >/dev/null && \
+     curl -fsS -b /tmp/hc.jar -c /tmp/hc.jar -H 'Content-Type: application/json' \
+      -X POST '${AGENT_WEBUI_URL}/api/session/new' \
+      -d '{\"profile\":\"${profile}\",\"enabled_toolsets\":[\"deepsql\",\"skills\"]}'")"
+  if [[ "$backend_switch" != *"session_id"* ]]; then
+    echo "Error: backend→Hermes session/new failed (dashboard path)." >&2
+    echo "$backend_switch" >&2
+    exit 1
+  fi
+
+  echo "Agent smoke checks passed (Hermes up, nginx profile/switch OK, backend session OK)."
+  echo "Agent profile: $profile"
+  echo "Agent session: $session_id"
 fi
 
 echo "Smoke test passed."

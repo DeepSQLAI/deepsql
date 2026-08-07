@@ -105,6 +105,38 @@ class BrainJobsServiceTest {
     }
 
     @Test
+    void listJobs_toleratesNullConsecutiveFailures() throws Exception {
+        OffsetDateTime nextRun = OffsetDateTime.of(2026, 4, 8, 9, 30, 0, 0, ZoneOffset.UTC);
+
+        when(schemaChangeTrackingService.ensureDefaultDriftConfig("conn-1"))
+            .thenReturn(new SchemaDriftConfig());
+        when(jdbcTemplate.query(anyString(), org.mockito.ArgumentMatchers.<RowMapper<Object>>any()))
+            .thenAnswer(invocation -> {
+                @SuppressWarnings("unchecked")
+                RowMapper<Object> mapper = invocation.getArgument(1);
+                ResultSet rs = mock(ResultSet.class);
+                when(rs.getString("task_name")).thenReturn("brain-refresh-metadata-lifecycle");
+                when(rs.getObject("execution_time", OffsetDateTime.class)).thenReturn(nextRun);
+                when(rs.getBoolean("picked")).thenReturn(false);
+                when(rs.getObject("last_success", OffsetDateTime.class)).thenReturn(null);
+                when(rs.getObject("last_failure", OffsetDateTime.class)).thenReturn(null);
+                when(rs.getObject("consecutive_failures")).thenReturn(null);
+                when(rs.getObject("last_heartbeat", OffsetDateTime.class)).thenReturn(null);
+                return List.of(mapper.mapRow(rs, 0));
+            });
+
+        List<BrainJobsService.BrainJobStatus> jobs = service.listJobs("conn-1");
+
+        BrainJobsService.BrainJobStatus metadataRefresh = jobs.stream()
+            .filter(job -> "metadata_refresh".equals(job.key()))
+            .findFirst()
+            .orElseThrow();
+
+        assertEquals("active", metadataRefresh.status());
+        assertEquals(0, metadataRefresh.consecutiveFailures());
+    }
+
+    @Test
     void runJob_dispatchesMetadataRefreshForConnection() {
         BrainJobsService.ManualRunResult result = service.runJob("conn-1", "metadata_refresh");
 

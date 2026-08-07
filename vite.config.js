@@ -56,7 +56,9 @@ export default defineConfig({
       // Agent chat service: /agent-api/api/chat/stream → :8787/api/chat/stream
       '/agent-api': {
         target: agentProxyTarget,
-        changeOrigin: true,
+        // Keep the browser Host (localhost:3000) so Hermes CSRF Origin checks
+        // pass. changeOrigin:true rewrites Host to :8787 and profile/switch 403s.
+        changeOrigin: false,
         rewrite: (p) => p.replace(/^\/agent-api/, ''),
         timeout: 300000,
         proxyTimeout: 300000,

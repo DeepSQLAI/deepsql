@@ -75,6 +75,11 @@ export const agentChatAPI = {
     return data;
   },
 
+  /** Re-export for callers that switch explicitly (e.g. AgentChatPanel boot). */
+  async switchProfile(profile) {
+    await switchAgentProfile(profile);
+  },
+
   /** Create a lean DBA chat session for this profile; returns the session id. */
   async newSession(profile) {
     // Idempotent re-bind in case bootstrap's switch was skipped or the cookie aged out.
@@ -85,6 +90,8 @@ export const agentChatAPI = {
     }
     const data = await postJson(`${AGENT_BASE}/api/session/new`, {
       profile,
+      // Alias `deepsql` → `mcp-deepsql` once MCP is discovered; `skills` keeps
+      // the DBA skill surface. Omit host toolsets (terminal/file/etc.).
       enabled_toolsets: ["deepsql", "skills"],
     });
     const sessionId = data?.session?.session_id || data?.session_id;

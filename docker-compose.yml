@@ -86,10 +86,18 @@ services:
       # CORS — allow the frontend service (and optional custom domain)
       cors.allowed.origins: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
 
+      # Dashboard generation + Slack/channels call Hermes server-side (AgentChatClient),
+      # not via the browser /agent-api proxy. Point at the host webui; there is no
+      # deepsql-agent Compose service in the four-service self-host stack.
+      AGENT_WEBUI_URL: ${AGENT_WEBUI_URL:-http://host.docker.internal:8787}
+
       # Self-host should default to the hardened production profile
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       # Automatically set by install.sh for pgvector self-host mode
       SPRING_AUTOCONFIGURE_EXCLUDE: ${SPRING_AUTOCONFIGURE_EXCLUDE:-}
+    # So AGENT_WEBUI_URL=http://host.docker.internal:8787 resolves on Linux too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${DEEPSQL_BACKEND_PORT:-8080}:8080"
     volumes:
@@ -112,6 +120,11 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    # nginx proxies /agent-api/ → http://host.docker.internal:8787 (see docker/nginx/default.conf).
+    # The agent is optional and usually runs on the host (hermes-webui on :8787).
+    # Docker Desktop injects host.docker.internal; on Linux Compose needs this mapping.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${DEEPSQL_FRONTEND_PORT:-3000}:80"
 

@@ -3,7 +3,7 @@
 # Idempotent: safe to re-run. Source of truth is this repo's agent/ dir.
 #
 # Configures:
-#   - model: existing Azure OpenAI gpt-5.4 via its OpenAI-compatible v1 endpoint
+#   - model: from DEEPSQL_CHAT_* (or legacy AZURE_OPENAI_*) via OpenAI-compatible endpoint
 #   - mcp_servers.deepsql: the repo's DeepSQL MCP server (read-only DBA tools)
 #   - skills.external_dirs: this repo's agent/skills (source of truth)
 #   - approvals.mode: smart
@@ -11,47 +11,107 @@
 #   - disables host-affecting toolsets (terminal/file/code/browser/computer_use)
 #
 # Secrets are read from the environment (or the repo .env), never committed:
-#   AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT  (endpoint defaults to the repo value)
+#   DEEPSQL_CHAT_API_KEY, DEEPSQL_CHAT_ENDPOINT, DEEPSQL_CHAT_MODEL
+#   (legacy fallback: AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT)
 #
 # Upstream note: HERMES_HOME / hermes-agent / hermes CLI are contracts of the
 # Nous Hermes Agent runtime this customization runs on — do not rename those.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+# Reject a nested profile home inherited from a live Hermes process.
+if [[ "${HERMES_HOME:-}" == */profiles/* ]]; then
+  unset HERMES_HOME
+fi
+HERMES_HOME="${DEEPSQL_HERMES_HOME:-${HERMES_HOME:-$HOME/.hermes}}"
 AGENT_DIR="${HERMES_AGENT_DIR:-$HERMES_HOME/hermes-agent}"
-VENV_PY="$AGENT_DIR/.venv/bin/python"
 
-# Load repo .env for Azure creds if not already in the environment.
+# Prefer the same interpreter order as scripts/self-host/setup-agent.sh
+if [[ -x "$AGENT_DIR/venv/bin/python" ]]; then
+  VENV_PY="$AGENT_DIR/venv/bin/python"
+elif [[ -x "$AGENT_DIR/.venv/bin/python" ]]; then
+  VENV_PY="$AGENT_DIR/.venv/bin/python"
+else
+  echo "Agent venv not found under $AGENT_DIR — run scripts/self-host/setup-agent.sh first." >&2
+  exit 1
+fi
+
+# Load repo .env for LLM creds if not already in the environment.
 if [[ -f "$REPO_ROOT/.env" ]]; then set -a; . "$REPO_ROOT/.env"; set +a; fi
-: "${AZURE_OPENAI_KEY:?Set AZURE_OPENAI_KEY (or add it to repo .env)}"
-AZURE_ENDPOINT_HOST="$(printf '%s' "${AZURE_OPENAI_ENDPOINT:-https://your-resource.cognitiveservices.azure.com/}" | sed -E 's#https?://##; s#/.*##; s#\.cognitiveservices\.azure\.com#.openai.azure.com#')"
-BASE_URL="https://${AZURE_ENDPOINT_HOST}/openai/v1"
 
-[[ -x "$VENV_PY" ]] || { echo "Agent venv not found at $VENV_PY — install the agent runtime first."; exit 1; }
+# Prefer the same BYO-LLM vars the Spring backend uses. Fall back to legacy
+# AZURE_OPENAI_* for older checkouts.
+API_KEY="${DEEPSQL_CHAT_API_KEY:-${AZURE_OPENAI_KEY:-}}"
+ENDPOINT="${DEEPSQL_CHAT_ENDPOINT:-${AZURE_OPENAI_ENDPOINT:-}}"
+MODEL="${DEEPSQL_CHAT_MODEL:-gpt-5.4}"
+
+if [[ -z "$API_KEY" ]]; then
+  echo "Error: set DEEPSQL_CHAT_API_KEY (or AZURE_OPENAI_KEY) in the environment or $REPO_ROOT/.env" >&2
+  exit 1
+fi
+if [[ -z "$ENDPOINT" ]]; then
+  echo "Error: set DEEPSQL_CHAT_ENDPOINT (or AZURE_OPENAI_ENDPOINT)." >&2
+  exit 1
+fi
+
+# Normalize to an OpenAI-compatible …/openai/v1 or …/v1 base URL.
+# Azure Cognitive Services / Azure OpenAI hosts need /openai/v1; plain OpenAI
+# and OpenAI-compatible servers already expose /v1.
+normalize_base_url() {
+  local ep="$1"
+  ep="${ep%/}"
+  if [[ "$ep" == *"/openai/v1" || "$ep" == *"/v1" ]]; then
+    printf '%s' "$ep"
+    return
+  fi
+  if [[ "$ep" == *".cognitiveservices.azure.com"* || "$ep" == *".openai.azure.com"* || "$ep" == *".azure-api.net"* ]]; then
+    printf '%s/openai/v1' "$ep"
+    return
+  fi
+  printf '%s/v1' "$ep"
+}
+BASE_URL="$(normalize_base_url "$ENDPOINT")"
+
+BACKEND_PORT="${DEEPSQL_BACKEND_PORT:-8080}"
 
 echo "→ Repo:        $REPO_ROOT"
 echo "→ Agent home:  $HERMES_HOME"
-echo "→ Model base:  $BASE_URL"
+echo "→ Model:       $MODEL @ $BASE_URL"
 
-# Deep-merge the DBA config blocks into ~/.hermes/config.yaml (PyYAML ships with the agent).
-REPO_ROOT="$REPO_ROOT" BASE_URL="$BASE_URL" AZURE_OPENAI_KEY="$AZURE_OPENAI_KEY" \
-HERMES_HOME="$HERMES_HOME" "$VENV_PY" - <<'PY'
+REPO_ROOT="$REPO_ROOT" BASE_URL="$BASE_URL" API_KEY="$API_KEY" MODEL="$MODEL" \
+BACKEND_PORT="$BACKEND_PORT" HERMES_HOME="$HERMES_HOME" "$VENV_PY" - <<'PY'
 import os, yaml, pathlib
 home = pathlib.Path(os.environ["HERMES_HOME"]); repo = os.environ["REPO_ROOT"]
 cfg_path = home / "config.yaml"
 cfg = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else {}
 cfg = cfg or {}
 cfg["model"] = {
-    "default": "gpt-5.4", "provider": "custom",
-    "base_url": os.environ["BASE_URL"], "api_key": os.environ["AZURE_OPENAI_KEY"],
-    "api_mode": "chat_completions", "context_length": 272000,
+    "default": os.environ["MODEL"],
+    "provider": "custom",
+    "base_url": os.environ["BASE_URL"],
+    "api_key": os.environ["API_KEY"],
+    "api_mode": "chat_completions",
+    "context_length": 272000,
 }
+cfg.setdefault("providers", {})["custom"] = {
+    "base_url": os.environ["BASE_URL"],
+    "api_key": os.environ["API_KEY"],
+}
+# Keep an existing DEEPSQL_AUTH_TOKEN if a prior setup-agent run wrote one into
+# the root config; otherwise leave token unset — setup-agent.sh provisions the
+# per-user profile with a minted token.
+existing_env = ((cfg.get("mcp_servers") or {}).get("deepsql") or {}).get("env") or {}
+mcp_env = {
+    "DEEPSQL_API_BASE_URL": f"http://localhost:{os.environ['BACKEND_PORT']}/api/",
+    "DEEPSQL_MCP_USER_ID": existing_env.get("DEEPSQL_MCP_USER_ID", "deepsql-agent"),
+    "DEEPSQL_MCP_PROJECT_ID": existing_env.get("DEEPSQL_MCP_PROJECT_ID", "deepsql-agent"),
+}
+if existing_env.get("DEEPSQL_AUTH_TOKEN"):
+    mcp_env["DEEPSQL_AUTH_TOKEN"] = existing_env["DEEPSQL_AUTH_TOKEN"]
 cfg.setdefault("mcp_servers", {})["deepsql"] = {
     "command": "node",
     "args": [f"{repo}/mcp/deepsql-phase1-server.js"],
-    "env": {"DEEPSQL_API_BASE_URL": "http://localhost:8080/api/",
-            "DEEPSQL_MCP_USER_ID": "deepsql-agent", "DEEPSQL_MCP_PROJECT_ID": "deepsql-agent"},
+    "env": mcp_env,
 }
 cfg.setdefault("skills", {})["external_dirs"] = [f"{repo}/agent/skills"]
 cfg.setdefault("approvals", {})["mode"] = "smart"
@@ -63,10 +123,11 @@ PY
 cp "$REPO_ROOT/agent/SOUL.md" "$HERMES_HOME/SOUL.md"
 echo "  SOUL.md installed"
 
-# Scope to a read-only sandbox: disable host-affecting toolsets.
 ( cd "$AGENT_DIR" && UV_NO_CONFIG=1 "$VENV_PY" -m hermes_cli.main tools disable \
     terminal file code_execution browser computer_use image_gen tts vision web delegation cronjob \
     >/dev/null 2>&1 ) || echo "  (toolset disable skipped — disable manually with 'hermes tools disable ...')"
 echo "  host toolsets disabled (read-only deepsql + memory/todo/skills remain)"
 
-echo "✓ DeepSQL Agent customization installed. Verify: (cd $AGENT_DIR && uv run hermes mcp test deepsql)"
+echo "✓ DeepSQL Agent customization installed."
+echo "  Verify: (cd $AGENT_DIR && uv run hermes mcp test deepsql)"
+echo "  Or run: scripts/self-host/setup-agent.sh (starts webui + provisions MCP token)"

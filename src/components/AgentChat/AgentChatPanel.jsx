@@ -59,6 +59,9 @@ export default function AgentChatPanel({ connectionId, connectionName }) {
     try {
       const { profile } = await agentChatAPI.bootstrap(connectionId)
       profileRef.current = profile
+      // Hermes requires the hermes_profile cookie before session/chat calls;
+      // without it, chat/start 404s and the UI loader never resolves.
+      await agentChatAPI.switchProfile(profile)
 
       // Resume the user's most recent conversation for this connection (from our
       // identity-keyed backend, so it works on any device) unless they asked for
