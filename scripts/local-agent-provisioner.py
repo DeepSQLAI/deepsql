@@ -74,12 +74,37 @@ def write_profile_env(home: Path, *, user: str, token: str) -> None:
     os.chmod(env_path, 0o600)
 
 
+def _load_profile_config(home: Path):
+    """Load profile config.yaml, recovering from a corrupt file by cloning the default.
+
+    A prior dump race (or a partial write) can leave personas/model keys mangled so
+    PyYAML refuses to parse. Without recovery, every subsequent /provision 500s and
+    the agent profile never gets a fresh MCP token — which surfaces to CLI users as
+    empty agent turns, not as a clear provisioner error.
+    """
+    import yaml  # agent venv / system PyYAML
+
+    cfg_path = home / "config.yaml"
+    default_path = HERMES_HOME / "config.yaml"
+    if cfg_path.exists():
+        try:
+            cfg = yaml.safe_load(cfg_path.read_text())
+            if isinstance(cfg, dict) and cfg.get("model"):
+                return cfg
+        except Exception as e:
+            sys.stderr.write(f"[agent-provisioner] corrupt {cfg_path}: {e}; restoring from default\n")
+    if default_path.exists():
+        cfg = yaml.safe_load(default_path.read_text()) or {}
+    else:
+        cfg = {}
+    return cfg if isinstance(cfg, dict) else {}
+
+
 def write_profile_mcp(home: Path, *, user: str, token: str) -> None:
     import yaml  # agent venv / system PyYAML
 
     cfg_path = home / "config.yaml"
-    cfg = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else {}
-    cfg = cfg or {}
+    cfg = _load_profile_config(home)
     # Token must live on the MCP subprocess env — the agent runtime does not auto-forward
     # the profile .env into mcp_servers.*.env.
     cfg.setdefault("mcp_servers", {})["deepsql"] = {
@@ -94,7 +119,10 @@ def write_profile_mcp(home: Path, *, user: str, token: str) -> None:
     }
     cfg.setdefault("skills", {})["external_dirs"] = [str(REPO_ROOT / "agent" / "skills")]
     cfg.setdefault("approvals", {})["mode"] = "smart"
-    cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
+    dumped = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)
+    # Refuse to write unparseable YAML — better a loud 500 than a silent corrupt profile.
+    yaml.safe_load(dumped)
+    cfg_path.write_text(dumped)
     soul_src = REPO_ROOT / "agent" / "SOUL.md"
     if soul_src.exists():
         (home / "SOUL.md").write_text(soul_src.read_text())

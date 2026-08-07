@@ -235,7 +235,24 @@ only covers cloud-specific, non-obvious caveats.
   `http://deepsql-agent:8788/provision`) with `AGENT_PROVISION_SECRET`. In this VM run
   `python3 scripts/local-agent-provisioner.py` (needs those two env vars in `.env`).
   Without it, Spring logs `agent.provision-secret is unset — skipping…` and the
-  `u-admin` agent profile is never created/token-refreshed.
+  `u-admin` agent profile is never created/token-refreshed. If provision returns HTTP
+  500 with a PyYAML parse error on `config.yaml`, the profile is corrupt (often a
+  mangled `agent.personalities` block that also drops `model:`) — the provisioner
+  now restores from `~/.hermes/config.yaml`. Manual recovery: copy that default
+  over `~/.hermes/profiles/u-<user>/config.yaml` and re-POST `/provision`. Symptom
+  of a bad profile: Hermes logs `Missed model deployment` and CLI agent returns
+  empty / “ended before producing an answer”.
+- **`AGENT_WEBUI_URL` for native runs.** Default is `http://deepsql-agent:8787`
+  (Compose DNS). Native local must set `AGENT_WEBUI_URL=http://127.0.0.1:8787` in
+  `.env` or CLI/Slack `AgentChatClient` cannot reach the agent API.
+- **DeepSQL CLI (`deepsql`) for agent testing.** Install from the repo package:
+  `cd mcp && DEEPSQL_SKIP_AGENT_SETUP=1 npm install -g .` (prefix
+  `~/.npm-global`, keep that on `PATH`). Auth against local backend with an MCP
+  token (`POST /api/auth/mcp-tokens` when auth is disabled stores into
+  `~/.config/deepsql/auth.json`). One-shot:
+  `deepsql agent --connection <uuid> "…"`. Interactive: `deepsql` / `deepsql agent`.
+  The CLI is a thin client over `POST /api/agent/chat` (not a local agent runtime);
+  backend + agent API (:8787) + provisioner must already be up.
 - **Spring CORS must allow both loopback hosts.** Set
   `CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000` in `.env`. Opening
   the UI as `http://127.0.0.1:3000` while only `localhost` is allowlisted yields **403**
