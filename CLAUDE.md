@@ -178,6 +178,65 @@ returns a number).
 - Do NOT commit automatically — wait for explicit user instruction.
 - Conventional commits: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`, `perf:`, `ci:`
 
+### Agent Runtime Rules (learned the hard way, 2026-08-07)
+
+1. **Pin the Python MCP SDK below 2.0.** `scripts/self-host/setup-agent.sh` installs
+   it as `mcp>=1.0,<2`. SDK **2.0.0 renamed `CallToolResult.isError` to `is_error`**
+   and split the models into a separate `mcp-types` package, while `hermes-agent`
+   0.20.0 still reads `result.isError` (`tools/mcp_tool.py:5222`). With the old
+   unbounded `mcp>=1.0`, every DeepSQL tool call raised
+   `AttributeError: 'CallToolResult' object has no attribute 'isError'` — a time bomb
+   that detonated the day 2.0.0 shipped, with no code change on our side. Raise the
+   ceiling only once hermes reads `is_error`.
+2. **Three tool failures trip hermes's circuit breaker**, after which the rest are
+   refused as `MCP server 'deepsql' is unreachable` — blaming a healthy server for a
+   client-side parse error. Do not trust that message; find the *first* failure in
+   `~/.hermes/logs/errors.log`.
+3. **A running webui holds its SDK in memory.** After changing the SDK it must be
+   restarted; `setup-agent.sh` now does that itself. It previously printed
+   `✓ Hermes webui already running` and left the broken SDK loaded, so re-running the
+   repair script gave a full column of ticks and no change.
+4. **The agent version was never the problem.** `agent/distribution.yaml` once pinned
+   `hermes_requires <0.20.0` on a "verified" 401 that came from a hand-rolled
+   `hermes serve` run rather than `hermes webui`. 0.20.0 works. Verify against the
+   real start path before writing a version constraint.
+
+### Verification Anti-Patterns (do not repeat)
+
+These all reported success over broken systems — which is how the agent shipped
+broken. Assert the *outcome*, never the attempt:
+
+- **`e2e-agent-check.py`** passed on `any("execute_sql" in t for t in tools)` — a tool
+  being *attempted*. It printed `✓ All agent UI paths OK` and exited 0 while the
+  agent's own reply said "I'm blocked". It now requires the answer itself.
+- **A dashboard that is "HTML and long"** proves nothing: with every tool failing, the
+  agent emitted a plausible artifact full of invented numbers. A real one calls
+  `deepsql.query()`; absence of that call means the data never came from the database.
+- **Presence ≠ compatibility.** The SDK check tested only that `mcp` imports, so it
+  printed `✓ Python MCP SDK available` on an SDK whose every call failed. It now
+  asserts `CallToolResult` still carries `isError`.
+- **Mocks hide SDK breaks.** `tests/tools/test_mcp_structured_content.py` uses a
+  `_FakeCallToolResult` with a hardcoded `.isError`, so it kept passing precisely when
+  the real SDK stopped matching. Pin the dependency; a fake cannot catch this.
+- **Never claim a check you did not run.** `install.sh` reported "up to date" when it
+  could not reach npm; it now says it could not check.
+- **`set -e` + `read` at EOF aborts silently.** Prompts in `install.sh` use
+  `read … || true` so the explicit emptiness checks report the problem. Without it the
+  installer exited 1 with no message, after writing generated secrets to `.env`.
+- **Silent-failure rule, concretely:** the CLI rendered an unreachable server as
+  `No databases connected yet` because one `catch` covered both the connection fetch
+  and decorative extras. An unreachable host must never look like an empty account.
+
+### Data Model Rules
+
+- **`mcp_tokens.user_id` is a non-null FK with no cascade.** Deleting a user who holds
+  a token throws `ConstraintViolationException`. `UserController` clears the user's
+  tokens first via `McpTokenRepository.deleteByUserId`, which carries its own
+  `@Transactional` — a derived delete needs one, and annotating a self-invoked caller
+  does nothing (Spring proxies are bypassed by `this::`). This broke
+  `POST /users/admin/reset` on every install that had run `setup-agent.sh`, since that
+  mints an admin MCP token on each run.
+
 ### MCP & CLI Release Rules
 
 **Whenever you add, rename, or remove an MCP tool or a CLI subcommand, you MUST update all of these in the same commit — they are agent-facing surfaces and drift silently breaks discoverability:**
