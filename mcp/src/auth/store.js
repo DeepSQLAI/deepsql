@@ -121,7 +121,12 @@ function removeProfile(baseUrl) {
   delete state.profiles[key];
   if (state.default === key) {
     const remaining = Object.keys(state.profiles);
-    state.default = remaining[0] || null;
+    // One survivor is unambiguous, so adopt it. Two or more is a choice only the
+    // user can make: `remaining[0]` is insertion order — "whichever host you
+    // logged into first" — the same implicit guess `deepsql login` refuses to
+    // make. Silently repointing the default there would aim the CLI at a
+    // different database without saying so.
+    state.default = remaining.length === 1 ? remaining[0] : null;
   }
   save(state);
 }

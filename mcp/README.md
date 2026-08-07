@@ -17,6 +17,15 @@ Both share one auth file (`~/.config/deepsql/auth.json`, mode 0600). Log
 in once with `deepsql login`; the MCP server uses the same token
 automatically — no token needs to be embedded in your editor's config.
 
+One profile is saved per DeepSQL URL, and logging in to a second host does
+**not** make it active. Check which host bare `deepsql` will use:
+
+```bash
+deepsql config show                    # list profiles, * marks the default
+deepsql config set-default <url>       # choose which host bare `deepsql` uses
+deepsql config remove <url>            # forget a host you no longer run
+```
+
 ## Install
 
 ```bash

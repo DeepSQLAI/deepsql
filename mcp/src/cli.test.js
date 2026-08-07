@@ -138,6 +138,10 @@ test("--no-color suppresses ANSI escapes in help output", async () => {
 const HELP_DRIFT_TARGETS = [
   { command: "slow-queries", modulePath: "./commands/slow-queries" },
   { command: "brain", modulePath: "./commands/brain" },
+  // `config` dispatched from a bare switch with no SUBCOMMANDS export, so it sat
+  // outside this guard entirely and its help could drift unnoticed. It now
+  // exports the map like its siblings.
+  { command: "config", modulePath: "./commands/config" },
 ];
 
 for (const { command, modulePath } of HELP_DRIFT_TARGETS) {
