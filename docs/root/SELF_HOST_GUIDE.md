@@ -142,6 +142,9 @@ the [first-run admin bootstrap](#first-run-access) correctly. In order it:
    index exists. Any of those missing is a hard failure.
 8. Flips `SECURITY_ADMIN_BOOTSTRAP_ENABLED=true`, creates the admin account, then flips it
    back to `false` in `.env` and restarts the backend.
+9. Runs [`scripts/self-host/setup-agent.sh`](../../scripts/self-host/setup-agent.sh) unless
+   `DEEPSQL_SKIP_AGENT_SETUP=1` — installs Hermes under `~/.hermes/`, provisions the admin
+   MCP profile, and starts the webui on `0.0.0.0:8787`.
 
 Re-running it is the supported way to apply configuration changes and to rebuild after a
 `git pull`. It is idempotent: already-set secrets are left alone, and the admin bootstrap
@@ -249,6 +252,44 @@ rather than trust it.
 | `SECURITY_SESSION_ACCESS_MINUTES` | `application.properties:23` → [`JwtUtil.java`](../../backend/src/main/java/com/dbaagent/security/JwtUtil.java), `AuthSessionService.java` | Access-token lifetime. Default 15. |
 | `SECURITY_SESSION_REFRESH_DAYS` | `application.properties:24` → [`AuthSessionService.java`](../../backend/src/main/java/com/dbaagent/service/AuthSessionService.java) | Refresh-token lifetime. Default 7. |
 | `SPRING_PROFILES_ACTIVE` | [`docker-compose.yml:90`](../../docker-compose.yml) | `prod` for self-hosting. Compose and `install.sh` both default to it. |
+
+### DeepSQL Agent (Hermes) — required for Agent tab + AI dashboards
+
+The four Compose services give you auth, brain, classic chat, and schema tools. Two UI
+surfaces additionally need a **host Hermes webui** on `:8787`:
+
+| UI surface | How it reaches Hermes |
+|---|---|
+| **Agent** tab | Browser → nginx `/agent-api/` → `host.docker.internal:8787` |
+| **Dashboards** → AI generate | Backend `AgentChatClient` → `AGENT_WEBUI_URL` (default `http://host.docker.internal:8787`) |
+
+```bash
+./scripts/self-host/setup-agent.sh
+```
+
+That script (also invoked by `install.sh`) will:
+
+1. Clone [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) and
+   [nesquena/hermes-webui](https://github.com/nesquena/hermes-webui) into `~/.hermes/` if needed.
+2. Ensure the Python `mcp` SDK is installed (without it, DeepSQL tools never register).
+3. Run [`agent/install.sh`](../../agent/install.sh) to write the DBA persona, skills, and
+   model config from your `DEEPSQL_CHAT_*` values.
+4. Mint an MCP token for the admin user and write `~/.hermes/profiles/u-<user>/`.
+5. Start the webui bound to `0.0.0.0:8787` with **no** `HERMES_WEBUI_PASSWORD`.
+
+Compose already sets `AGENT_WEBUI_URL` and `extra_hosts` on the backend, and nginx proxies
+`/agent-api/` with `$http_host` (port-preserving) so Hermes CSRF accepts
+`Origin: http://localhost:3000`.
+
+Verify:
+
+```bash
+curl -fsS http://127.0.0.1:8787/api/mcp/servers
+./scripts/self-host/smoke-test.sh   # includes agent path checks when Hermes is up
+```
+
+Set `DEEPSQL_SKIP_AGENT_SETUP=1` before `install.sh` if you only want the core stack;
+set `DEEPSQL_SMOKE_AGENT=0` to skip agent checks in the smoke test.
 
 ### The LLM
 
@@ -525,8 +566,13 @@ not a ping. Against the vault database itself it: verifies the `vector` and
 `pg_stat_statements` extensions, the `rag_documents` table and its ANN index; logs in as
 the admin; creates a PostgreSQL connection pointing at the internal `postgres` service;
 confirms it appears in the connection list; fetches live schema metadata; waits for brain
-initialisation to reach `COMPLETED` (up to 20 minutes by default); and finally asserts
-that pgvector actually holds embedded documents for that connection.
+initialisation to reach `COMPLETED` (up to 20 minutes by default); asserts that pgvector
+holds embedded documents for that connection; then (unless `DEEPSQL_SMOKE_AGENT=0`)
+verifies Hermes is up, nginx `/agent-api/api/profile/switch` returns 200, and the backend
+can create a Hermes session via `AGENT_WEBUI_URL`.
+
+For a live LLM turn (Agent tab SQL + dashboard HTML), run
+[`e2e-agent-check.py`](../../scripts/self-host/e2e-agent-check.py).
 
 It reads credentials from `DEEPSQL_INITIAL_ADMIN_EMAIL` / `DEEPSQL_INITIAL_ADMIN_PASSWORD`
 in `.env`, or from `DEEPSQL_SMOKE_EMAIL` / `DEEPSQL_SMOKE_PASSWORD`. Set
@@ -602,29 +648,70 @@ with it. Back up first.
 
 ## Troubleshooting
 
-### Frontend container will not start: `host not found in upstream "deepsql-agent"`
+### Dashboard generate: 502 “DeepSQL agent is unavailable”
+
+Dashboards call Hermes **from the backend container** (`AgentChatClient`), not through
+the browser `/agent-api` proxy. Compose sets `AGENT_WEBUI_URL=http://host.docker.internal:8787`
+and `extra_hosts: host.docker.internal:host-gateway` on the backend. If you still see
+502, confirm Hermes is up (`curl -sS http://127.0.0.1:8787/api/mcp/servers`) and that
+the backend can reach it:
+
+```bash
+docker exec deepsql-selfhost-backend-1 curl -sS -o /dev/null -w '%{http_code}\n' \
+  http://host.docker.internal:8787/api/mcp/servers
+```
+
+### `/agent-api/*` returns 502 Bad Gateway
+
+[`docker/nginx/default.conf`](../../docker/nginx/default.conf) proxies `/agent-api/` to
+`http://host.docker.internal:8787/`. The agent is **not** one of the four Compose services —
+it is an optional Hermes webui process, typically started on the host at `:8787`.
+
+The frontend service maps `host.docker.internal` → `host-gateway` via `extra_hosts` in
+[`docker-compose.yml`](../../docker-compose.yml). If you still see 502:
+
+1. Confirm the agent is listening:
+   `curl -sS -X POST http://127.0.0.1:8787/api/session/new -H 'Content-Type: application/json' -d '{}'`
+2. Rebuild the frontend so the nginx config is picked up:
+   `docker compose -p deepsql-selfhost up -d --build frontend`
+
+### Agent tab spins / never talks to brain
+
+Two host-side requirements after Hermes is up on `:8787`:
+
+1. **Profile cookie.** Hermes scopes sessions by `hermes_profile`. The Agent tab must
+   `POST /agent-api/api/profile/switch` with `{ "name": "u-<user>" }` before
+   `session/new` / `chat/start`. Without it, `chat/start` returns 404
+   `"Session not found"` and the UI loader never resolves. Fixed in
+   [`src/lib/api/agentClient.js`](../../src/lib/api/agentClient.js).
+2. **Python MCP SDK in the webui process.** Discovery runs in-process. Start the webui
+   with the agent `venv` that has the `mcp` package (not a bare `.venv` missing it):
+
+   ```bash
+   # Prefer the canonical venv (has mcp). Bind 0.0.0.0 so Docker nginx can reach it.
+   export HERMES_HOME=~/.hermes HERMES_WEBUI_HOST=0.0.0.0 HERMES_WEBUI_PORT=8787
+   unset HERMES_WEBUI_PASSWORD
+   cd ~/.hermes/hermes-webui && ~/.hermes/hermes-agent/venv/bin/python server.py
+   ```
+
+   Sanity check: `curl -sS http://127.0.0.1:8787/api/mcp/servers` should list
+   `deepsql` and, after the first agent turn, `active: true` with a non-zero
+   `tool_count`. If discovery logs `mcp package not installed`, install it into
+   that interpreter (`uv pip install --python …/venv/bin/python mcp`).
+
+### Frontend container will not start: `host not found in upstream "…"`
 
 ```
-nginx: [emerg] host not found in upstream "deepsql-agent" in /etc/nginx/conf.d/default.conf:82
+nginx: [emerg] host not found in upstream "…" in /etc/nginx/conf.d/default.conf
 ```
 
-[`docker/nginx/default.conf`](../../docker/nginx/default.conf) contains an `/agent-api/`
-location that proxies to `http://deepsql-agent:8787/`, for a separate agent runtime that
-**is not one of the four Compose services**. nginx resolves upstream hostnames when it
-loads its configuration, so if nothing on the Compose network answers to `deepsql-agent`,
-nginx refuses to start and the container crash-loops — `install.sh` then times out waiting
-for the frontend.
-
-Confirm it with `docker compose -p deepsql-selfhost logs frontend`. If that is what you
-see, remove the `location = /__agent_auth` and `location /agent-api/ { … }` blocks from
-`docker/nginx/default.conf` and rebuild the frontend:
+Ensure `extra_hosts: ["host.docker.internal:host-gateway"]` is present on the frontend
+service (Compose adds this for Linux; Docker Desktop usually injects the name already),
+then rebuild:
 
 ```bash
 docker compose -p deepsql-selfhost up -d --build frontend
 ```
-
-Everything the web UI needs — the SPA and the `/api/` proxy — is unaffected; only the
-agent-runtime passthrough goes away.
 
 ### Backend restarts every few minutes during brain init
 
@@ -700,6 +787,14 @@ Project-name mismatch. See [Project name](#project-name-two-stacks-by-accident).
 ---
 
 ## Production checklist
+
+Agent-specific (in addition to the core stack):
+
+- [ ] `./scripts/self-host/setup-agent.sh` succeeded (or was run by `install.sh`)
+- [ ] `curl -fsS http://127.0.0.1:8787/api/mcp/servers` returns the `deepsql` server
+- [ ] Backend reaches Hermes: `AGENT_WEBUI_URL` + `extra_hosts` on the backend service
+- [ ] `./scripts/self-host/smoke-test.sh` passes with agent checks (default `DEEPSQL_SMOKE_AGENT=1`)
+- [ ] Optional full turn: `python3 scripts/self-host/e2e-agent-check.py <connectionId>`
 
 - [ ] `SPRING_PROFILES_ACTIVE=prod`
 - [ ] `SECURITY_AUTH_ENABLED` left at `true`

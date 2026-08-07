@@ -155,6 +155,12 @@ public class BrainJobsService {
             statusReason = "Recurring job is not registered in db-scheduler";
         }
 
+        // db-scheduler leaves consecutive_failures NULL until the first
+        // success/failure is recorded; coerce before unboxing into the int field.
+        int consecutiveFailures = row != null && row.consecutiveFailures() != null
+            ? row.consecutiveFailures()
+            : 0;
+
         return new BrainJobStatus(
             job.key(),
             job.title(),
@@ -165,7 +171,7 @@ public class BrainJobsService {
             row != null ? row.executionTime() : null,
             row != null ? row.lastSuccess() : null,
             row != null ? row.lastFailure() : null,
-            row != null ? row.consecutiveFailures() : 0,
+            consecutiveFailures,
             status,
             statusReason
         );

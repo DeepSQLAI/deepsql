@@ -445,7 +445,28 @@ echo "Images:   built from source in this checkout (backend/Dockerfile, ./Docker
 echo "          After pulling new code, re-run this script to rebuild."
 echo
 
+# Agent tab + AI dashboards need Hermes on the host (:8787). Install/start it
+# unless the operator explicitly opted out.
+if [[ "${DEEPSQL_SKIP_AGENT_SETUP:-0}" != "1" ]]; then
+  if [[ -x "$SCRIPT_DIR/setup-agent.sh" ]]; then
+    echo "Setting up the DeepSQL Agent (Hermes webui on :8787)…"
+    if "$SCRIPT_DIR/setup-agent.sh"; then
+      echo "Agent setup complete."
+    else
+      echo "Warning: agent setup failed. The core UI still works, but the Agent tab" >&2
+      echo "         and AI dashboards need: ./scripts/self-host/setup-agent.sh" >&2
+    fi
+    echo
+  fi
+else
+  echo "Skipped agent setup (DEEPSQL_SKIP_AGENT_SETUP=1)."
+  echo "Run ./scripts/self-host/setup-agent.sh when you want the Agent tab / AI dashboards."
+  echo
+fi
+
 echo "Useful commands:"
 echo "  ./scripts/self-host/status.sh"
 echo "  ./scripts/self-host/smoke-test.sh"
+echo "  ./scripts/self-host/setup-agent.sh          # Hermes webui + MCP profile"
+echo "  python3 scripts/self-host/e2e-agent-check.py <connectionId>  # live Agent+dashboard turn"
 echo "  ./scripts/self-host/uninstall.sh"

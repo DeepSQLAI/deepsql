@@ -176,7 +176,10 @@ is rejected. Changing width means migrating the column.
 
 The installer generates your JWT secret, the credential-vault encryption key and the vault
 DB password, prompts for the first admin account, builds both images, starts the stack, and
-verifies pgvector is live.
+verifies pgvector is live. Unless you set `DEEPSQL_SKIP_AGENT_SETUP=1`, it also runs
+[`scripts/self-host/setup-agent.sh`](scripts/self-host/setup-agent.sh) to install Hermes under
+`~/.hermes/`, wire DeepSQL MCP, and start the webui on `0.0.0.0:8787` (required for the
+**Agent** tab and AI dashboard generation).
 
 **The first build takes several minutes** — it compiles the Spring Boot backend with Maven
 inside the container and bundles the frontend with Vite. It has not hung. Later builds reuse

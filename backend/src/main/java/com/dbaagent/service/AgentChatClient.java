@@ -10,6 +10,8 @@ import org.springframework.stereotype.Service;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.CookieManager;
+import java.net.CookiePolicy;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -32,12 +34,23 @@ import java.util.Map;
 public class AgentChatClient {
     private static final Logger log = LoggerFactory.getLogger(AgentChatClient.class);
 
+    // Cookie jar: the agent scopes sessions by hermes_profile. Without
+    // /api/profile/switch first, session/new(profile=u-…) then chat/start
+    // returns 404 "Session not found" under the default profile.
+    private final CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
     private final HttpClient http = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(5)).build();
+        .connectTimeout(Duration.ofSeconds(5))
+        .cookieHandler(cookies)
+        .build();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    /** Internal base URL of the agent webui (compose network). */
-    @Value("${agent.webui-url:http://deepsql-agent:8787}")
+    /**
+     * Base URL of the agent webui. Self-host Compose sets
+     * {@code AGENT_WEBUI_URL=http://host.docker.internal:8787} (no deepsql-agent
+     * service in the four-container stack). Override for a dedicated agent
+     * container on the compose network.
+     */
+    @Value("${agent.webui-url:http://host.docker.internal:8787}")
     private String webuiUrl;
 
     /** Hard ceiling on a single agent turn for a channel reply. */
@@ -67,6 +80,13 @@ public class AgentChatClient {
     }
 
     public SessionAttempt ensureSessionDetailed(String profile, String existingSessionId) {
+        try {
+            switchProfile(profile);
+        } catch (Exception e) {
+            log.warn("Could not switch agent profile to {} (webui={}): {}",
+                profile, webuiUrl, e.toString());
+            return new SessionAttempt(null, describe(e));
+        }
         if (existingSessionId != null && !existingSessionId.isBlank()) {
             return new SessionAttempt(existingSessionId, null);
         }
@@ -99,6 +119,12 @@ public class AgentChatClient {
             log.debug("agent session/new failure detail", e);
             return new SessionAttempt(null, describe(e));
         }
+    }
+
+    /** Activate the hermes_profile cookie for subsequent webui API calls. */
+    private void switchProfile(String profile) throws Exception {
+        if (profile == null || profile.isBlank()) return;
+        postJson("/api/profile/switch", Map.of("name", profile));
     }
 
     /**
