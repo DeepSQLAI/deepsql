@@ -1,3 +1,5 @@
+const fs = require("fs");
+
 const ALLOWED_READ_ONLY_KEYWORDS = new Set([
   "SELECT",
   "WITH",
@@ -1038,14 +1040,60 @@ function clampInteger(value, min, max, fallback) {
   return Math.min(max, Math.max(min, parsed));
 }
 
+// Live bearer-token resolution. The MCP server is a long-lived stdio
+// subprocess; inside the DeepSQL Agent container the provisioner rotates the
+// token on disk (DEEPSQL_TOKEN_FILE) WITHOUT respawning us. Reading the token
+// per request — cached by mtime so we only touch disk when the file actually
+// changes — lets a rotated token take effect with no container restart. Editor
+// and CLI installs set no token file and keep using the env snapshot
+// (config.authToken), so their behaviour is unchanged.
+let _tokenFileCache = null; // { path, mtimeMs, token }
+
+function readTokenFile(tokenFile) {
+  const stat = fs.statSync(tokenFile);
+  if (
+    _tokenFileCache &&
+    _tokenFileCache.path === tokenFile &&
+    _tokenFileCache.mtimeMs === stat.mtimeMs
+  ) {
+    return _tokenFileCache.token;
+  }
+  const token = fs.readFileSync(tokenFile, "utf8").trim();
+  _tokenFileCache = { path: tokenFile, mtimeMs: stat.mtimeMs, token };
+  return token;
+}
+
+function getAuthToken(config) {
+  if (config && config.tokenFile) {
+    try {
+      const token = readTokenFile(config.tokenFile);
+      if (token) {
+        return token;
+      }
+    } catch {
+      // Any stat/read error → fall back to the env token snapshot so we never
+      // hard-fail just because the file is momentarily missing mid-rewrite.
+    }
+  }
+  return (config && config.authToken) || "";
+}
+
+// Force the next getAuthToken() to re-read from disk regardless of mtime. Used
+// by the 401 self-heal path, where the provisioner may have just rewritten the
+// token file (same second → identical mtime granularity on some filesystems).
+function invalidateTokenCache() {
+  _tokenFileCache = null;
+}
+
 function buildHeaders(config, extraHeaders = {}) {
   const headers = {
     Accept: "application/json",
     ...extraHeaders,
   };
 
-  if (config.authToken) {
-    headers.Authorization = `Bearer ${config.authToken}`;
+  const authToken = getAuthToken(config);
+  if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
   }
 
   // Origin-tracking headers so the backend audit row can distinguish
@@ -1070,13 +1118,13 @@ function resolveApiUrl(baseUrl, path) {
   return new URL(normalizedPath, baseUrl).toString();
 }
 
-async function callDeepSqlApi(config, path, { method = "GET", json, headers } = {}) {
+async function performFetch(config, path, { method = "GET", json, headers } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
   const url = resolveApiUrl(config.baseUrl, path);
 
   try {
-    const response = await fetch(url, {
+    return await fetch(url, {
       method,
       headers: buildHeaders(
         config,
@@ -1090,26 +1138,6 @@ async function callDeepSqlApi(config, path, { method = "GET", json, headers } = 
       body: json == null ? undefined : JSON.stringify(json),
       signal: controller.signal,
     });
-
-    const rawBody = await response.text();
-    let payload = null;
-    if (rawBody) {
-      try {
-        payload = JSON.parse(rawBody);
-      } catch {
-        payload = rawBody;
-      }
-    }
-
-    if (!response.ok) {
-      const message =
-        (payload && typeof payload === "object" && payload.message) ||
-        response.statusText ||
-        "DeepSQL API request failed";
-      throw new DeepSqlApiError(message, response.status, payload);
-    }
-
-    return payload;
   } catch (error) {
     if (error.name === "AbortError") {
       throw new DeepSqlApiError(
@@ -1122,6 +1150,44 @@ async function callDeepSqlApi(config, path, { method = "GET", json, headers } = 
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function callDeepSqlApi(config, path, options = {}) {
+  const tokenBefore = getAuthToken(config);
+  let response = await performFetch(config, path, options);
+
+  // 401 self-heal: our long-lived subprocess may be holding a token the agent
+  // provisioner has since rotated on disk. Re-read the token file (bypassing
+  // the mtime cache) and retry exactly once if it actually changed. We
+  // deliberately do NOT retry 403 — that's an RBAC denial, not stale creds —
+  // and only retry when a tokenFile is configured (editor/CLI installs aren't).
+  if (response.status === 401 && config && config.tokenFile) {
+    invalidateTokenCache();
+    const tokenAfter = getAuthToken(config);
+    if (tokenAfter && tokenAfter !== tokenBefore) {
+      response = await performFetch(config, path, options);
+    }
+  }
+
+  const rawBody = await response.text();
+  let payload = null;
+  if (rawBody) {
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      payload = rawBody;
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      (payload && typeof payload === "object" && payload.message) ||
+      response.statusText ||
+      "DeepSQL API request failed";
+    throw new DeepSqlApiError(message, response.status, payload);
+  }
+
+  return payload;
 }
 
 function summarizeConnections(connections) {
@@ -1677,7 +1743,7 @@ const CONNECTIONS_CACHE_TTL_MS = 30000;
 let _connectionsCache = null; // { key, ts, payload }
 
 async function fetchConnectionsCached(config) {
-  const key = `${(config && config.baseUrl) || ""}|${(config && config.authToken) || ""}`;
+  const key = `${(config && config.baseUrl) || ""}|${getAuthToken(config)}`;
   if (_connectionsCache && _connectionsCache.key === key
       && Date.now() - _connectionsCache.ts < CONNECTIONS_CACHE_TTL_MS) {
     return _connectionsCache.payload;
@@ -2273,6 +2339,10 @@ function createConfigFromEnv(env = process.env) {
   return {
     baseUrl,
     authToken: env.DEEPSQL_AUTH_TOKEN || "",
+    // Optional path to a file holding just the bearer token. When set (the
+    // agent-container case), getAuthToken reads it live per request so a
+    // provisioner-rotated token takes effect without respawning this process.
+    tokenFile: env.DEEPSQL_TOKEN_FILE || null,
     timeoutMs: clampInteger(env.DEEPSQL_MCP_TIMEOUT_MS, 1000, 600000, 120000),
     defaultUserId: env.DEEPSQL_MCP_USER_ID || "mcp-phase1",
     defaultProjectId: env.DEEPSQL_MCP_PROJECT_ID || "mcp-phase1",
@@ -2296,7 +2366,9 @@ module.exports = {
   containsForbiddenKeyword,
   createConfigFromEnv,
   firstKeyword,
+  getAuthToken,
   handleToolCall,
+  invalidateTokenCache,
   normalizeSqlForInspection,
   resolveApiUrl,
   splitStatements,

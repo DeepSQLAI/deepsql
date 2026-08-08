@@ -1,5 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 const {
   resolveApiUrl,
@@ -10,7 +13,46 @@ const {
   validateReadOnlySql,
   TOOL_DEFINITIONS,
   handleToolCall,
+  callDeepSqlApi,
+  createConfigFromEnv,
+  getAuthToken,
+  invalidateTokenCache,
 } = require("./deepsql-phase1-lib");
+
+function tmpTokenFile(contents) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dsql-tok-"));
+  const p = path.join(dir, "deepsql.token");
+  fs.writeFileSync(p, contents);
+  return p;
+}
+
+// Install a global.fetch stub that records the Authorization header on each
+// request and returns queued responses. Returns { authHeaders, restore }.
+// Each response entry is { status, ok, body, onCall? } — onCall fires before
+// the response is returned, letting a test rotate the token file mid-flight.
+function installFetchStub(responses) {
+  const authHeaders = [];
+  const original = global.fetch;
+  let i = 0;
+  global.fetch = async (_url, init) => {
+    authHeaders.push(init && init.headers ? init.headers.Authorization : undefined);
+    const spec = responses[Math.min(i, responses.length - 1)];
+    i += 1;
+    if (spec && typeof spec.onCall === "function") {
+      spec.onCall();
+    }
+    const status = spec?.status ?? 200;
+    return {
+      ok: spec?.ok ?? (status >= 200 && status < 300),
+      status,
+      statusText: spec?.statusText ?? "OK",
+      async text() {
+        return JSON.stringify(spec?.body ?? {});
+      },
+    };
+  };
+  return { authHeaders, restore: () => { global.fetch = original; } };
+}
 
 test("resolveApiUrl keeps the /api prefix for absolute-looking tool paths", () => {
   const result = resolveApiUrl("http://localhost:8080/api/", "/connections");
@@ -869,4 +911,119 @@ test("Phase A tools that require connectionId reject empty input cleanly (no net
     assert.match(result.structuredContent.error, /connectionId is required/);
     assert.equal(calls.length, 0, `${name} must not hit the network on validation failure`);
   }
+});
+
+// ─── Live token resolution + 401 self-heal ─────────────────────────────────
+// The MCP server is a long-lived subprocess; in the agent container the token
+// is rotated on disk without respawning us. These tests cover getAuthToken's
+// mtime-cached live read, buildHeaders/callDeepSqlApi picking up a rotated
+// token, and the one-shot 401 self-heal retry.
+
+test("createConfigFromEnv wires DEEPSQL_TOKEN_FILE and keeps the env token fallback", () => {
+  const withFile = createConfigFromEnv({ DEEPSQL_TOKEN_FILE: "/x/y.token", DEEPSQL_AUTH_TOKEN: "z" });
+  assert.equal(withFile.tokenFile, "/x/y.token");
+  assert.equal(withFile.authToken, "z");
+  const without = createConfigFromEnv({});
+  assert.equal(without.tokenFile, null);
+});
+
+test("getAuthToken caches by mtime and re-reads only when the file changes", () => {
+  invalidateTokenCache();
+  const p = tmpTokenFile("tok1\n");
+  const cfg = { tokenFile: p, authToken: "envtok" };
+  const realRead = fs.readFileSync;
+  let reads = 0;
+  fs.readFileSync = (...a) => { reads += 1; return realRead(...a); };
+  try {
+    assert.equal(getAuthToken(cfg), "tok1");
+    assert.equal(getAuthToken(cfg), "tok1");
+    assert.equal(reads, 1, "unchanged mtime → served from cache, no second read");
+    const later = new Date(Date.now() + 10000);
+    fs.writeFileSync(p, "tok2\n");
+    fs.utimesSync(p, later, later);
+    assert.equal(getAuthToken(cfg), "tok2");
+    assert.equal(reads, 2, "mtime advanced → re-read from disk");
+  } finally {
+    fs.readFileSync = realRead;
+  }
+});
+
+test("getAuthToken falls back to the env token when no file / unreadable file", () => {
+  invalidateTokenCache();
+  assert.equal(getAuthToken({ authToken: "envtok" }), "envtok");
+  assert.equal(getAuthToken({ tokenFile: "/no/such/deepsql.token", authToken: "envtok" }), "envtok");
+  assert.equal(getAuthToken({ tokenFile: "/no/such/deepsql.token" }), "");
+});
+
+test("callDeepSqlApi sends the live token and reflects a rotation mid-process", async () => {
+  invalidateTokenCache();
+  const p = tmpTokenFile("tokA\n");
+  const cfg = { baseUrl: "http://test/api/", tokenFile: p, timeoutMs: 5000 };
+  const stub = installFetchStub([{ body: {} }, { body: {} }]);
+  try {
+    await callDeepSqlApi(cfg, "/connections");
+    const later = new Date(Date.now() + 10000);
+    fs.writeFileSync(p, "tokB\n");
+    fs.utimesSync(p, later, later);
+    await callDeepSqlApi(cfg, "/connections");
+  } finally {
+    stub.restore();
+  }
+  assert.equal(stub.authHeaders[0], "Bearer tokA");
+  assert.equal(stub.authHeaders[1], "Bearer tokB", "rotated token used without restart");
+});
+
+test("callDeepSqlApi self-heals a 401 by re-reading a rotated token and retrying once", async () => {
+  invalidateTokenCache();
+  const p = tmpTokenFile("stale\n");
+  const cfg = { baseUrl: "http://test/api/", tokenFile: p, timeoutMs: 5000 };
+  const stub = installFetchStub([
+    {
+      status: 401,
+      ok: false,
+      statusText: "Unauthorized",
+      body: { message: "unauthorized" },
+      // Provisioner rotates the token concurrently with the failing call.
+      onCall: () => {
+        const later = new Date(Date.now() + 10000);
+        fs.writeFileSync(p, "fresh\n");
+        fs.utimesSync(p, later, later);
+      },
+    },
+    { body: { ok: true } },
+  ]);
+  try {
+    const result = await callDeepSqlApi(cfg, "/connections");
+    assert.deepEqual(result, { ok: true });
+  } finally {
+    stub.restore();
+  }
+  assert.equal(stub.authHeaders.length, 2, "exactly one retry");
+  assert.equal(stub.authHeaders[0], "Bearer stale");
+  assert.equal(stub.authHeaders[1], "Bearer fresh");
+});
+
+test("callDeepSqlApi does not retry a 401 when no token file is configured", async () => {
+  invalidateTokenCache();
+  const cfg = { baseUrl: "http://test/api/", authToken: "envtok", timeoutMs: 5000 };
+  const stub = installFetchStub([{ status: 401, ok: false, statusText: "Unauthorized", body: { message: "nope" } }]);
+  try {
+    await assert.rejects(() => callDeepSqlApi(cfg, "/connections"), /nope/);
+  } finally {
+    stub.restore();
+  }
+  assert.equal(stub.authHeaders.length, 1, "env-only install must not retry");
+});
+
+test("callDeepSqlApi does not retry a 401 when the token file is unchanged", async () => {
+  invalidateTokenCache();
+  const p = tmpTokenFile("same\n");
+  const cfg = { baseUrl: "http://test/api/", tokenFile: p, timeoutMs: 5000 };
+  const stub = installFetchStub([{ status: 401, ok: false, statusText: "Unauthorized", body: { message: "nope" } }]);
+  try {
+    await assert.rejects(() => callDeepSqlApi(cfg, "/connections"), /nope/);
+  } finally {
+    stub.restore();
+  }
+  assert.equal(stub.authHeaders.length, 1, "unchanged token → no pointless retry");
 });
