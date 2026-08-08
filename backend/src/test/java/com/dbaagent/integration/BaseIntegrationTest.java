@@ -2,6 +2,7 @@ package com.dbaagent.integration;
 
 import com.dbaagent.model.DatabaseConnection;
 import com.dbaagent.service.CredentialService;
+import com.dbaagent.support.LlmTestSupport;
 import org.opentest4j.TestAbortedException;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +16,19 @@ import org.springframework.web.context.WebApplicationContext;
 /**
  * Base class for integration tests that test actual controllers
  * with real database connections (no mocking).
+ *
+ * <p>Provides utilities for:
+ * <ul>
+ *   <li>Finding and requiring test database connections</li>
+ *   <li>Checking and requiring LLM configuration via {@link LlmTestSupport}</li>
+ *   <li>Building API paths with the correct context path</li>
+ * </ul>
+ *
+ * <p>For tests that require LLM, use either:
+ * <ul>
+ *   <li>{@code @RequiresLlm} annotation at class or method level (skips before Spring context loads)</li>
+ *   <li>{@code requireChatLlm()} / {@code requireEmbeddingLlm()} methods (checks after context loads)</li>
+ * </ul>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
@@ -27,6 +41,9 @@ public abstract class BaseIntegrationTest {
     @Autowired
     protected CredentialService credentialService;
 
+    @Autowired
+    protected LlmTestSupport llmTestSupport;
+
     protected MockMvc mockMvc;
 
     @Value("${test.connection.id}")
@@ -34,10 +51,7 @@ public abstract class BaseIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        // Configure MockMvc
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
-
-        // Subclasses can override this method to add custom setup
     }
 
     protected String getTestConnectionId() {
@@ -83,5 +97,55 @@ public abstract class BaseIntegrationTest {
             return CONTEXT_PATH;
         }
         return path.startsWith(CONTEXT_PATH) ? path : CONTEXT_PATH + path;
+    }
+
+    /**
+     * Checks if chat LLM is configured and available.
+     * Uses the actual {@link com.dbaagent.llm.LlmConfigResolver} which checks
+     * both environment variables and database configuration.
+     *
+     * @return true if chat LLM credentials are configured
+     */
+    protected boolean isChatLlmAvailable() {
+        return llmTestSupport.isChatAvailable();
+    }
+
+    /**
+     * Checks if embedding LLM is configured and available.
+     * Uses the actual {@link com.dbaagent.llm.LlmConfigResolver} which checks
+     * both environment variables and database configuration.
+     *
+     * @return true if embedding LLM credentials are configured
+     */
+    protected boolean isEmbeddingLlmAvailable() {
+        return llmTestSupport.isEmbeddingAvailable();
+    }
+
+    /**
+     * Aborts the test if chat LLM is not configured.
+     *
+     * @param purpose description of what the test needs chat LLM for
+     * @throws TestAbortedException if chat LLM is not configured
+     */
+    protected void requireChatLlm(String purpose) {
+        llmTestSupport.requireChat(purpose);
+    }
+
+    /**
+     * Aborts the test if embedding LLM is not configured.
+     *
+     * @param purpose description of what the test needs embedding LLM for
+     * @throws TestAbortedException if embedding LLM is not configured
+     */
+    protected void requireEmbeddingLlm(String purpose) {
+        llmTestSupport.requireEmbedding(purpose);
+    }
+
+    /**
+     * Returns a human-readable description of the LLM configuration status.
+     * Useful for diagnostic output in tests.
+     */
+    protected String describeLlmConfiguration() {
+        return llmTestSupport.describeConfiguration();
     }
 }

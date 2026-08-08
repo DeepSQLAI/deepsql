@@ -2,7 +2,9 @@ package com.dbaagent.integration;
 
 import com.dbaagent.model.ChatRequest;
 import com.dbaagent.model.ChatResponse;
+import com.dbaagent.support.RequiresLlm;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,22 +22,33 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Integration tests for Chat prompts testing accuracy and speed.
  *
- * Tests various DBA question categories:
- * - Schema/Structure questions (fast-path)
- * - Slow query questions (fast-path)
- * - Index recommendation questions (fast-path)
- * - Workload type questions (fast-path)
- * - LLM-routed questions (complex queries requiring AI)
+ * <p>Tests various DBA question categories:
+ * <ul>
+ *   <li>Schema/Structure questions (fast-path)</li>
+ *   <li>Slow query questions (fast-path)</li>
+ *   <li>Index recommendation questions (fast-path)</li>
+ *   <li>Workload type questions (fast-path)</li>
+ *   <li>LLM-routed questions (complex queries requiring AI)</li>
+ * </ul>
  *
- * Configuration:
- * - Set TEST_CONNECTION_ID environment variable to a valid connection ID
- * - Or update test.connection.id in application-test.properties
+ * <p>Configuration requirements:
+ * <ul>
+ *   <li>Database connection: Set {@code TEST_CONNECTION_ID} environment variable or
+ *       configure {@code test.connection.id} in application-test.properties</li>
+ *   <li>LLM credentials: Set {@code DEEPSQL_CHAT_PROVIDER} and {@code DEEPSQL_CHAT_API_KEY}
+ *       environment variables, or configure via the setup wizard</li>
+ * </ul>
  *
- * Performance targets:
- * - Fast-path questions: < 500ms (server-side, excluding test overhead)
- * - LLM questions: < 30s (depends on Azure OpenAI)
+ * <p>Performance targets:
+ * <ul>
+ *   <li>Fast-path questions: &lt; 500ms (server-side, excluding test overhead)</li>
+ *   <li>LLM questions: &lt; 30s (depends on LLM provider)</li>
+ * </ul>
+ *
+ * <p>Tests in this class require LLM configuration and will be skipped if not available.
  */
 @DisplayName("Chat Prompt Integration Tests")
+@RequiresLlm(chat = true)
 class ChatPromptIntegrationTest extends BaseIntegrationTest {
 
     @Autowired
