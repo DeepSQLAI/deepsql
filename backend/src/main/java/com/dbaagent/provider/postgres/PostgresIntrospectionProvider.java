@@ -12,6 +12,20 @@ import java.util.*;
 /**
  * PostgreSQL implementation of IntrospectionProvider.
  * Uses pg_catalog and information_schema for schema introspection.
+ *
+ * <p>Every catalog query filters on {@code current_schema()} rather than a
+ * hardcoded {@code 'public'}. Databases that keep their tables anywhere else —
+ * a dbt warehouse in {@code marts}, a tenant schema, anything — were previously
+ * invisible: introspection returned zero tables, so brain initialization
+ * "COMPLETED" in about a second having learned nothing, and the schema snapshot
+ * was persisted as an empty table list. Honouring the session search_path makes
+ * the target schema a property of the connection (set it on the role, or via the
+ * JDBC {@code currentSchema} parameter) instead of a compile-time constant.
+ *
+ * <p>{@link #getDefaultSchema()} deliberately still reports {@code public}: its
+ * callers use it to decide whether a name needs qualifying, and reporting the
+ * session schema there would strip the schema off exactly the names that need
+ * it most ({@code marts.dim_person} → {@code dim_person}).
  */
 @Slf4j
 @Component
@@ -55,25 +69,27 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             JOIN pg_namespace n ON n.nspname = t.schemaname
             JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = t.tablename
             LEFT JOIN pg_stat_all_tables s ON s.relid = c.oid
-            WHERE t.schemaname = 'public' AND c.relkind IN ('r', 'p')
+            WHERE t.schemaname = current_schema() AND c.relkind IN ('r', 'p')
             UNION ALL
             SELECT v.viewname as name, 'view' as type, 0 as row_count
-            FROM pg_views v WHERE v.schemaname = 'public'
+            FROM pg_views v WHERE v.schemaname = current_schema()
             ORDER BY type, name
             """;
+
+        String schema = resolveSchema(connection);
 
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery(query)) {
             while (rs.next()) {
                 DatabaseObject obj = new DatabaseObject();
                 obj.setName(rs.getString("name"));
-                obj.setSchema(DEFAULT_SCHEMA);
+                obj.setSchema(schema);
                 obj.setType(rs.getString("type"));
                 Long estimatedRowCount = getNullableLong(rs, "row_count");
                 obj.setRowCount("table".equals(obj.getType())
-                    ? resolveTableRowCount(connection, DEFAULT_SCHEMA, obj.getName(), estimatedRowCount)
+                    ? resolveTableRowCount(connection, schema, obj.getName(), estimatedRowCount)
                     : estimatedRowCount);
-                obj.setColumns(getTableColumns(connection, DEFAULT_SCHEMA, obj.getName()));
+                obj.setColumns(getTableColumns(connection, schema, obj.getName()));
                 objects.add(obj);
             }
         }
@@ -87,16 +103,18 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             SELECT p.proname as name, pg_get_functiondef(p.oid) as definition
             FROM pg_proc p
             JOIN pg_namespace n ON p.pronamespace = n.oid
-            WHERE n.nspname = 'public' AND p.prokind = 'f'
+            WHERE n.nspname = current_schema() AND p.prokind = 'f'
             ORDER BY p.proname
             """;
+
+        String schema = resolveSchema(connection);
 
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery(query)) {
                 while (rs.next()) {
                     DatabaseObject obj = new DatabaseObject();
                     obj.setName(rs.getString("name"));
-                    obj.setSchema(DEFAULT_SCHEMA);
+                    obj.setSchema(schema);
                     obj.setType("function");
                     obj.setDefinition(rs.getString("definition"));
                     objects.add(obj);
@@ -112,16 +130,18 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             SELECT p.proname as name, pg_get_functiondef(p.oid) as definition
             FROM pg_proc p
             JOIN pg_namespace n ON p.pronamespace = n.oid
-            WHERE n.nspname = 'public' AND p.prokind = 'p'
+            WHERE n.nspname = current_schema() AND p.prokind = 'p'
             ORDER BY p.proname
             """;
+
+        String schema = resolveSchema(connection);
 
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery(query)) {
                 while (rs.next()) {
                     DatabaseObject obj = new DatabaseObject();
                     obj.setName(rs.getString("name"));
-                    obj.setSchema(DEFAULT_SCHEMA);
+                    obj.setSchema(schema);
                     obj.setType("procedure");
                     obj.setDefinition(rs.getString("definition"));
                     objects.add(obj);
@@ -151,7 +171,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
         try (PreparedStatement stmt = connection.prepareStatement(query)) {
             stmt.setString(1, tableName);
             stmt.setString(2, tableName);
-            stmt.setString(3, DEFAULT_SCHEMA);
+            stmt.setString(3, resolveSchema(connection));
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     ColumnInfo col = new ColumnInfo();
@@ -257,11 +277,12 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
                     stats.setIndexSize(rs.getLong("index_bytes"));
                     stats.setSizeBytes(rs.getLong("total_bytes"));
                     stats.setIndexSizeBytes(rs.getLong("index_bytes"));
+                    String schema = resolveSchema(connection);
                     stats.setRowCount(resolveTableRowCount(
                         connection,
-                        DEFAULT_SCHEMA,
+                        schema,
                         tableName,
-                        getEstimatedTableRowCount(connection, DEFAULT_SCHEMA, tableName)
+                        getEstimatedTableRowCount(connection, schema, tableName)
                     ));
                 }
             }
@@ -288,14 +309,15 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             "JOIN pg_namespace n ON n.nspname = t.schemaname " +
             "JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = t.tablename " +
             "LEFT JOIN pg_stat_all_tables s ON s.relid = c.oid " +
-            "WHERE t.schemaname = 'public' AND c.relkind IN ('r', 'p') " +
+            "WHERE t.schemaname = current_schema() AND c.relkind IN ('r', 'p') " +
             "UNION ALL " +
             "SELECT v.viewname as tablename, 'view' as type, 0 as size_bytes, 0 as row_count " +
             "FROM pg_views v " +
-            "WHERE v.schemaname = 'public' " +
+            "WHERE v.schemaname = current_schema() " +
             "ORDER BY tablename";
 
         Map<String, TableMetadata> tableMap = new HashMap<>();
+        String schemaName = resolveSchema(connection);
 
         try (Statement stmt = connection.createStatement()) {
             applyStatementSettings(stmt);
@@ -303,12 +325,12 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
                 while (rs.next()) {
                     TableMetadata table = new TableMetadata();
                     table.setName(rs.getString("tablename"));
-                    table.setSchema(DEFAULT_SCHEMA);
+                    table.setSchema(schemaName);
                     table.setType(rs.getString("type"));
                     table.setSizeBytes(rs.getLong("size_bytes"));
                     Long estimatedRowCount = getNullableLong(rs, "row_count");
                     table.setRowCount("table".equals(table.getType())
-                        ? resolveTableRowCount(connection, DEFAULT_SCHEMA, table.getName(), estimatedRowCount)
+                        ? resolveTableRowCount(connection, schemaName, table.getName(), estimatedRowCount)
                         : estimatedRowCount);
                     schema.getTables().add(table);
                     tableMap.put(table.getName(), table);
@@ -349,9 +371,9 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             "  FROM information_schema.table_constraints tc " +
             "  JOIN information_schema.key_column_usage ku " +
             "  ON tc.constraint_name = ku.constraint_name AND tc.table_name = ku.table_name " +
-            "  WHERE tc.table_schema = 'public' AND tc.constraint_type = 'PRIMARY KEY' " +
+            "  WHERE tc.table_schema = current_schema() AND tc.constraint_type = 'PRIMARY KEY' " +
             ") pk ON c.table_name = pk.table_name AND c.column_name = pk.column_name " +
-            "WHERE c.table_schema = 'public' " +
+            "WHERE c.table_schema = current_schema() " +
             "ORDER BY c.table_name, c.ordinal_position";
 
         try (Statement stmt = connection.createStatement()) {
@@ -386,10 +408,10 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             "array_agg(a.attname ORDER BY array_position(ix.indkey, a.attnum)) as columns, " +
             "ix.indisunique " +
             "FROM pg_indexes i " +
-            "JOIN pg_class c ON c.relname = i.tablename AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public') " +
-            "JOIN pg_index ix ON ix.indexrelid = (SELECT oid FROM pg_class WHERE relname = i.indexname AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')) " +
+            "JOIN pg_class c ON c.relname = i.tablename AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema()) " +
+            "JOIN pg_index ix ON ix.indexrelid = (SELECT oid FROM pg_class WHERE relname = i.indexname AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())) " +
             "JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(ix.indkey) " +
-            "WHERE i.schemaname = 'public' " +
+            "WHERE i.schemaname = current_schema() " +
             "GROUP BY i.tablename, i.indexname, i.indexdef, ix.indisunique " +
             "ORDER BY i.tablename, i.indexname";
 
@@ -435,7 +457,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             "ON tc.constraint_name = kcu.constraint_name " +
             "JOIN information_schema.constraint_column_usage AS ccu " +
             "ON ccu.constraint_name = tc.constraint_name " +
-            "WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public' " +
+            "WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = current_schema() " +
             "ORDER BY tc.table_name, tc.constraint_name";
         
         try (Statement stmt = connection.createStatement()) {
@@ -472,7 +494,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             JOIN information_schema.constraint_column_usage ccu
                 ON tc.constraint_name = ccu.constraint_name
             WHERE tc.constraint_type = 'FOREIGN KEY'
-                AND tc.table_schema = 'public'
+                AND tc.table_schema = current_schema()
             ORDER BY tc.table_name, tc.constraint_name
             """;
 
@@ -502,7 +524,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
                 data_type, character_maximum_length, numeric_precision, numeric_scale,
                 udt_name
             FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = ?
+            WHERE table_schema = current_schema() AND table_name = ?
             ORDER BY ordinal_position
             """;
 
@@ -547,7 +569,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             LEFT JOIN information_schema.constraint_column_usage ccu
                 ON tc.constraint_name = ccu.constraint_name
                 AND tc.constraint_type = 'FOREIGN KEY'
-            WHERE tc.table_schema = 'public' AND tc.table_name = ?
+            WHERE tc.table_schema = current_schema() AND tc.table_name = ?
             ORDER BY tc.constraint_name
             """;
 
@@ -582,11 +604,12 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
 
     @Override
     public Long getTableRowCount(Connection connection, String database, String tableName) throws SQLException {
+        String schema = resolveSchema(connection);
         return resolveTableRowCount(
             connection,
-            DEFAULT_SCHEMA,
+            schema,
             tableName,
-            getEstimatedTableRowCount(connection, DEFAULT_SCHEMA, tableName)
+            getEstimatedTableRowCount(connection, schema, tableName)
         );
     }
 
@@ -763,6 +786,28 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
         return null;
     }
 
+    /**
+     * The schema this session's catalog queries resolve against — the first
+     * existing entry in the search_path. Falls back to {@code public} so a
+     * connection whose search_path names only missing schemas behaves exactly
+     * as it did before, rather than tagging every object with a null schema.
+     */
+    private String resolveSchema(Connection connection) {
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT current_schema()")) {
+            if (rs.next()) {
+                String schema = rs.getString(1);
+                if (schema != null && !schema.isBlank()) {
+                    return schema;
+                }
+            }
+        } catch (SQLException e) {
+            log.debug("Could not resolve current_schema(), falling back to {}: {}",
+                DEFAULT_SCHEMA, e.getMessage());
+        }
+        return DEFAULT_SCHEMA;
+    }
+
     private String quoteIdentifier(String identifier) {
         return "\"" + identifier.replace("\"", "\"\"") + "\"";
     }
@@ -802,7 +847,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             JOIN pg_namespace n ON n.nspname = t.schemaname
             JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = t.tablename
             LEFT JOIN pg_stat_all_tables s ON s.relid = c.oid
-            WHERE t.schemaname = 'public' AND c.relkind IN ('r', 'p')
+            WHERE t.schemaname = current_schema() AND c.relkind IN ('r', 'p')
             ORDER BY t.tablename
             """;
 
