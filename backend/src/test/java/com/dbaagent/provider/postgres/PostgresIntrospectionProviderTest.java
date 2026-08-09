@@ -35,9 +35,31 @@ class PostgresIntrospectionProviderTest {
     @Mock
     private ResultSet resultSet;
 
+    // resolveSchema() issues `SELECT current_schema()` on its own Statement before
+    // any method's real query. These mocks answer that call so the fixtures below
+    // keep testing what they were written to test.
+    @Mock
+    private Statement schemaStatement;
+
+    @Mock
+    private ResultSet schemaResultSet;
+
     @BeforeEach
-    void setUp() {
+    void setUp() throws SQLException {
         provider = new PostgresIntrospectionProvider();
+
+        // lenient(): the pure-Java tests (getDatabaseType, getDefaultSchema, …) never
+        // touch the Connection, and strict stubbing would fail them over an unused stub.
+        //
+        // resolveSchema() is the FIRST createStatement() caller in every method that
+        // reaches the database, so returning schemaStatement first and the shared
+        // statement afterwards routes each to the right place. Answering "public"
+        // keeps these fixtures on the historical schema, so they go on asserting the
+        // behaviour they were written for rather than the search_path change itself.
+        lenient().when(connection.createStatement()).thenReturn(schemaStatement, statement);
+        lenient().when(schemaStatement.executeQuery(anyString())).thenReturn(schemaResultSet);
+        lenient().when(schemaResultSet.next()).thenReturn(true);
+        lenient().when(schemaResultSet.getString(1)).thenReturn("public");
     }
 
     @Test
@@ -47,7 +69,8 @@ class PostgresIntrospectionProviderTest {
 
     @Test
     void getDatabaseObjects_returnsTables() throws SQLException {
-        when(connection.createStatement()).thenReturn(statement);
+        // schemaStatement first: resolveSchema() runs before the objects query.
+        when(connection.createStatement()).thenReturn(schemaStatement, statement);
         when(statement.executeQuery(anyString())).thenReturn(resultSet);
         when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
@@ -209,7 +232,8 @@ class PostgresIntrospectionProviderTest {
 
     @Test
     void scanSchema_returnsSchemaMetadata() throws SQLException {
-        when(connection.createStatement()).thenReturn(statement);
+        // schemaStatement first: resolveSchema() runs before the tables query.
+        when(connection.createStatement()).thenReturn(schemaStatement, statement);
         when(statement.executeQuery(anyString())).thenReturn(resultSet);
 
         when(resultSet.next())
@@ -281,6 +305,7 @@ class PostgresIntrospectionProviderTest {
         ResultSet foreignKeysResultSet = mock(ResultSet.class);
 
         when(connection.createStatement()).thenReturn(
+            schemaStatement,   // resolveSchema() runs before the tables query
             statement,
             exactCountStatement,
             columnsStatement,
