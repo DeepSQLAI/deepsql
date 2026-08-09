@@ -59,7 +59,12 @@ class PostgresIntrospectionProviderTest {
         lenient().when(connection.createStatement()).thenReturn(schemaStatement, statement);
         lenient().when(schemaStatement.executeQuery(anyString())).thenReturn(schemaResultSet);
         lenient().when(schemaResultSet.next()).thenReturn(true);
+        // resolveSchema() reads current_schema(), search_path, current_user.
+        // A schema that differs from the role is an ordinary resolution, so these
+        // fixtures land on "public" exactly as they did before search_path support.
         lenient().when(schemaResultSet.getString(1)).thenReturn("public");
+        lenient().when(schemaResultSet.getString(2)).thenReturn("\"$user\", public");
+        lenient().when(schemaResultSet.getString(3)).thenReturn("app_user");
     }
 
     @Test
@@ -196,6 +201,66 @@ class PostgresIntrospectionProviderTest {
         assertEquals(81920L, stats.getDataSize());
         assertEquals(40960L, stats.getIndexSize());
         assertEquals(122880L, stats.getSizeBytes());
+    }
+
+    /** Runs getTableColumns and returns the schema it bound (parameter 4). */
+    private String schemaUsedByGetTableColumns() throws SQLException {
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        provider.getTableColumns(connection, "db", "orders");
+
+        ArgumentCaptor<String> bound = ArgumentCaptor.forClass(String.class);
+        verify(preparedStatement, atLeastOnce()).setString(eq(4), bound.capture());
+        return bound.getValue();
+    }
+
+    @Test
+    void schemaChosenByTheImplicitDollarUserEntryIsIgnored() throws SQLException {
+        // Every Postgres ships search_path = "$user", public. That leading "$user"
+        // is inert only while no schema matches the connecting role — create one and
+        // current_schema() silently becomes it. Honouring that would move an
+        // untouched RDS/Aurora connection off `public` onto an empty user schema and
+        // report a healthy, empty brain. An operator who never configured a
+        // search_path must keep the historical behaviour exactly.
+        when(schemaResultSet.getString(1)).thenReturn("app_user");        // current_schema()
+        when(schemaResultSet.getString(2)).thenReturn("\"$user\", public"); // untouched default
+        when(schemaResultSet.getString(3)).thenReturn("app_user");        // current_user
+
+        assertEquals("public", schemaUsedByGetTableColumns(),
+            "an implicit \"$user\" match must not move introspection off public");
+    }
+
+    @Test
+    void deliberatelyConfiguredSearchPathIsHonoured() throws SQLException {
+        // ALTER ROLE <user> IN DATABASE <db> SET search_path = marts, public;
+        when(schemaResultSet.getString(1)).thenReturn("marts");
+        when(schemaResultSet.getString(3)).thenReturn("app_user");
+        // lenient: the guard short-circuits on schema != current_user, so the
+        // search_path is never read here. Stated anyway to describe the scenario.
+        lenient().when(schemaResultSet.getString(2)).thenReturn("marts, public");
+
+        assertEquals("marts", schemaUsedByGetTableColumns());
+    }
+
+    @Test
+    void userSchemaIsHonouredWhenTheSearchPathWasSetDeliberately() throws SQLException {
+        // "$user" present but the path is NOT the shipped default — that is a stated
+        // intent, so it is honoured rather than second-guessed.
+        when(schemaResultSet.getString(1)).thenReturn("app_user");
+        when(schemaResultSet.getString(2)).thenReturn("\"$user\", marts");
+        when(schemaResultSet.getString(3)).thenReturn("app_user");
+
+        assertEquals("app_user", schemaUsedByGetTableColumns());
+    }
+
+    @Test
+    void nullCurrentSchemaFallsBackToPublic() throws SQLException {
+        // search_path naming only missing schemas makes current_schema() NULL.
+        when(schemaResultSet.getString(1)).thenReturn(null);
+
+        assertEquals("public", schemaUsedByGetTableColumns());
     }
 
     @Test

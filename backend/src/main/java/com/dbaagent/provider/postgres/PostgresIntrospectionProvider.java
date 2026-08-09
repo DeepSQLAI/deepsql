@@ -821,24 +821,68 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
 
     /**
      * The schema this session's catalog queries resolve against — the first
-     * existing entry in the search_path. Falls back to {@code public} so a
-     * connection whose search_path names only missing schemas behaves exactly
-     * as it did before, rather than tagging every object with a null schema.
+     * existing entry in the search_path — but only when that search_path was
+     * deliberately set. Falls back to {@code public} otherwise.
+     *
+     * <p>Two distinct fallbacks, for two distinct reasons:
+     *
+     * <ol>
+     *   <li>{@code current_schema()} is null when the search_path names only
+     *       schemas that do not exist. Tagging every object with a null schema
+     *       would be worse than the previous behaviour.
+     *   <li><b>The search_path is still the untouched Postgres default.</b> Every
+     *       Postgres ships {@code "$user", public} — RDS and Aurora included — and
+     *       that leading {@code "$user"} is inert only while no schema matches the
+     *       connecting role's name. Create one (per-tenant layouts, or the per-user
+     *       pattern the Postgres docs recommend and which spread after PG15
+     *       hardened {@code public}) and {@code current_schema()} silently becomes
+     *       that schema. A connection that had been reading {@code public} would
+     *       start reading an empty user schema and report a healthy, empty brain —
+     *       the very failure honouring search_path exists to fix, inverted.
+     * </ol>
+     *
+     * <p>The second case is detected rather than merely logged: an operator who has
+     * not touched search_path gets the historical {@code public} behaviour bit for
+     * bit, and only an explicit setting — {@code ALTER ROLE … SET search_path},
+     * or the JDBC {@code currentSchema} parameter — moves this provider off it.
+     * That keeps the blast radius of this feature to connections that asked for it.
+     *
+     * <p>Deliberately narrow: the check is for the default search_path *exactly*.
+     * Someone who writes {@code "$user", marts} has stated an intent, and it is
+     * honoured.
      */
     private String resolveSchema(Connection connection) {
         try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery("SELECT current_schema()")) {
+             ResultSet rs = stmt.executeQuery(
+                 "SELECT current_schema(), current_setting('search_path'), current_user")) {
             if (rs.next()) {
                 String schema = rs.getString(1);
-                if (schema != null && !schema.isBlank()) {
-                    return schema;
+                if (schema == null || schema.isBlank()) {
+                    return DEFAULT_SCHEMA;
                 }
+                if (schema.equals(rs.getString(3)) && isUntouchedDefaultSearchPath(rs.getString(2))) {
+                    log.debug("search_path is the Postgres default and '{}' matches the connecting "
+                            + "role, so it was selected by the implicit \"$user\" entry rather than "
+                            + "configured — introspecting '{}' as before", schema, DEFAULT_SCHEMA);
+                    return DEFAULT_SCHEMA;
+                }
+                return schema;
             }
         } catch (SQLException e) {
             log.debug("Could not resolve current_schema(), falling back to {}: {}",
                 DEFAULT_SCHEMA, e.getMessage());
         }
         return DEFAULT_SCHEMA;
+    }
+
+    /**
+     * True when search_path is exactly what Postgres ships, ignoring spacing.
+     * Anything else — including a reordered or extended path that still mentions
+     * {@code "$user"} — counts as configured and is honoured.
+     */
+    private boolean isUntouchedDefaultSearchPath(String searchPath) {
+        return searchPath != null
+            && "\"$user\",public".equals(searchPath.replace(" ", ""));
     }
 
     /**
