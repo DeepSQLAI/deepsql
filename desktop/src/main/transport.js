@@ -96,7 +96,10 @@ class Transport extends EventEmitter {
     const health = await probe(origin, profile);
     if (!health.ok) {
       if (tunnel) await tunnel.stop();
-      throw new TunnelError('unreachable', explainProbeFailure(profile, health));
+      throw new TunnelError(
+        health.status === 403 ? 'cors-rejected' : 'unreachable',
+        explainProbeFailure(profile, origin, health),
+      );
     }
 
     // First successful TLS handshake in pinned/insecure mode establishes the pin.
@@ -192,7 +195,21 @@ class Transport extends EventEmitter {
  * `Host: 127.0.0.1:<port>`. Say so, because "HTTP 404" on its own sends people
  * looking at the backend.
  */
-function explainProbeFailure(profile, health) {
+function explainProbeFailure(profile, origin, health) {
+  // 403 is its own diagnosis and applies to both transports: the probe sends an
+  // Origin header, so the one thing that rejects a *reachable, healthy* DeepSQL
+  // with 403 is its CORS allowlist. Checked before the tunnel branch below,
+  // which would otherwise blame the remote port for a backend that answered
+  // perfectly well.
+  if (health.status === 403) {
+    return (
+      `DeepSQL is running and reachable, but its backend refused the origin ${origin} ` +
+      '(HTTP 403, "Invalid CORS request"). Add that origin to CORS_ALLOWED_ORIGINS on the ' +
+      'VM and restart the backend. A port wildcard is the durable form, because the local ' +
+      'port changes: `CORS_ALLOWED_ORIGINS=https://your-host,http://127.0.0.1:*,' +
+      'http://localhost:*`. Left unfixed, DeepSQL would load but every login would fail.'
+    );
+  }
   if (profile.transport !== 'tunnel' || !health.status) return health.detail;
   const { remoteHost, remotePort } = profile.ssh;
   return (

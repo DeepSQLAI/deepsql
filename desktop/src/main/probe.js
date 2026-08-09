@@ -7,6 +7,21 @@
  * proxies (docker/nginx/default.conf routes /api/ to the backend), so a 200
  * here proves the whole chain — transport, nginx, backend — not just that a
  * TCP port answered.
+ *
+ * The probe deliberately sends an `Origin` header naming the origin the
+ * embedded browser is about to load. Spring treats *any* request carrying
+ * `Origin` as a CORS request (the same-origin short-circuit was dropped in
+ * Spring 5.3), so an origin missing from the backend's `CORS_ALLOWED_ORIGINS`
+ * is rejected with `403 Invalid CORS request` — and this probe sees it.
+ *
+ * Without the header the probe passes and the failure surfaces much later and
+ * much further away: Chromium omits `Origin` on same-origin GETs, so the SPA
+ * loads fine and only the first POST — the login itself — fails, as an opaque
+ * "Request failed with status code 403" (the body is plain text, so the web
+ * app's axios interceptor finds no `.message` to show). Over a tunnel this is
+ * near-guaranteed, because the origin is `http://127.0.0.1:<sticky port>` and
+ * no deployment lists that by hand. Same reasoning as verifyForwarding():
+ * check the thing up front, where it can still be explained.
  */
 
 const http = require('node:http');
@@ -47,7 +62,14 @@ function probe(origin, profile, { timeoutMs = DEFAULT_TIMEOUT_MS, path = HEALTH_
     try {
       options = {
         method: 'GET',
-        headers: { Accept: 'application/json', 'User-Agent': 'DeepSQL-Desktop' },
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'DeepSQL-Desktop',
+          // `url.origin` rather than the caller's string: it is normalised
+          // (default ports dropped, no trailing slash) exactly as a browser
+          // would send it, so the check matches what Chromium does next.
+          Origin: url.origin,
+        },
         ...(isHttps ? tls.nodeTlsOptions(profile) : {}),
       };
     } catch (err) {

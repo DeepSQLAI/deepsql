@@ -7,9 +7,14 @@
  * It navigates a WebContentsView at the real DeepSQL origin (reached either
  * directly over TLS or through an SSH tunnel), so the UI a user sees is always
  * exactly the version their VM is running. There is no bundle/backend skew to
- * manage, and cookies/CORS behave the same as they do in a browser because the
- * app content is served from a single origin (the frontend nginx in
+ * manage, and cookies behave the same as they do in a browser because the app
+ * content is served from a single origin (the frontend nginx in
  * docker/nginx/default.conf already fronts /api and /agent-api).
+ *
+ * CORS is the one thing that does *not* come for free: over a tunnel that single
+ * origin is http://127.0.0.1:<sticky port>, which the VM's CORS_ALLOWED_ORIGINS
+ * has to allow. See the note in probe.js — the probe sends an Origin header so a
+ * missing entry is caught here rather than at the user's first login attempt.
  */
 
 const path = require('node:path');

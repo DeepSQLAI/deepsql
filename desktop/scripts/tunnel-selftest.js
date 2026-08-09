@@ -40,8 +40,23 @@ app.whenReady().then(async () => {
   fs.writeFileSync(keyPath, privateKey, { mode: 0o600 });
 
   // Stands in for the DeepSQL nginx inside the VM.
+  //
+  // It also emulates Spring's CORS check, because that is a real failure mode
+  // of the tunnel transport: the origin is http://127.0.0.1:<sticky port>, and
+  // a VM whose CORS_ALLOWED_ORIGINS lists only its hostname answers 403 with a
+  // plain-text body. Spring rejects on the presence of `Origin` alone — there
+  // is no same-origin exemption — so this mirrors that rule exactly.
+  let lastProbeOrigin = null;
+  let corsAllowedOrigins = null; // null = allow everything
   const upstream = http.createServer((req, res) => {
     if (req.url === '/api/actuator/health') {
+      const origin = req.headers.origin || null;
+      lastProbeOrigin = origin;
+      if (origin && corsAllowedOrigins && !corsAllowedOrigins.includes(origin)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('Invalid CORS request');
+        return;
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end('{"status":"UP"}');
       return;
@@ -106,6 +121,24 @@ app.whenReady().then(async () => {
     forwardedTo === `127.0.0.1:${upstreamPort}`,
     forwardedTo,
   );
+
+  // The probe must announce the origin the browser is about to use, or a CORS
+  // allowlist that omits it stays invisible until the user's first login POST.
+  check(
+    'probe sends the browser origin so CORS is checked at connect time',
+    lastProbeOrigin === `http://127.0.0.1:${localPort}`,
+    lastProbeOrigin === null ? 'no Origin header sent' : lastProbeOrigin,
+  );
+
+  // Same tunnel, same healthy backend — only the allowlist changes.
+  corsAllowedOrigins = ['https://deepsql.example.com'];
+  const corsHealth = await probe(`http://127.0.0.1:${localPort}`, profile);
+  check(
+    'an origin missing from CORS_ALLOWED_ORIGINS fails the probe',
+    !corsHealth.ok && corsHealth.status === 403,
+    `ok=${corsHealth.ok} status=${corsHealth.status}`,
+  );
+  corsAllowedOrigins = null;
 
   // The listener must never be reachable from anything but loopback.
   check(
