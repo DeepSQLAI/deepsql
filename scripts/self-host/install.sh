@@ -519,9 +519,32 @@ report_cli_status() {
 
 report_cli_status
 
+# ── Demo Data Seeding ─────────────────────────────────────────────────────────
+# Optional: seed a demo database with sample e-commerce data, users, saved queries,
+# and performance recommendations. Gives new users an end-to-end view of all features.
+# Enable with DEEPSQL_SEED_DEMO_DATA=1 in .env or environment.
+if [[ "${DEEPSQL_SEED_DEMO_DATA:-0}" == "1" ]]; then
+  if [[ -x "$SCRIPT_DIR/seed-demo-data.sh" ]]; then
+    echo "Seeding demo data (DEEPSQL_SEED_DEMO_DATA=1)…"
+    if "$SCRIPT_DIR/seed-demo-data.sh"; then
+      echo "Demo data seeding complete."
+    else
+      echo "Warning: demo data seeding failed. The stack still works, but the demo" >&2
+      echo "         database and sample data were not created. Run manually:" >&2
+      echo "         ./scripts/self-host/seed-demo-data.sh" >&2
+    fi
+    echo
+  fi
+else
+  echo "Demo data seeding skipped (set DEEPSQL_SEED_DEMO_DATA=1 to enable)."
+  echo "  Run ./scripts/self-host/seed-demo-data.sh for a ready-to-explore demo database."
+  echo
+fi
+
 echo "Useful commands:"
 echo "  ./scripts/self-host/status.sh"
 echo "  ./scripts/self-host/smoke-test.sh"
 echo "  ./scripts/self-host/setup-agent.sh          # Hermes webui + MCP profile"
+echo "  ./scripts/self-host/seed-demo-data.sh       # Seed demo e-commerce database"
 echo "  python3 scripts/self-host/e2e-agent-check.py <connectionId>  # live Agent+dashboard turn"
 echo "  ./scripts/self-host/uninstall.sh"
