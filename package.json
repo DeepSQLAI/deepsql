@@ -26,7 +26,7 @@
     "papaparse": "^5.5.3",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "react-force-graph-2d": "^1.29.0",
+    "react-force-graph-2d": "^1.29.1",
     "react-force-graph-3d": "^1.29.0",
     "react-is": "^19.2.3",
     "react-markdown": "^10.1.0",
