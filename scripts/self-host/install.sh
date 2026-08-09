@@ -477,47 +477,101 @@ else
 fi
 
 # ── DeepSQL CLI (@deepsql/mcp) ───────────────────────────────────────────────
-# Nothing in this repo installed or updated the CLI, so a reader who followed the
-# README end to end finished with a running stack and no `deepsql` command at
-# all — and anyone who installed it once drifted silently (a machine here sat on
-# 0.16.0 while npm was on 0.26.0). The CLI is an agent-facing surface, so a stale
-# one misreports which tools and subcommands exist.
+# Nothing in this repo installed, updated, or logged in the CLI, so a reader
+# who followed the README end to end finished with a running stack and no
+# `deepsql` command at all — and anyone who installed it once drifted silently
+# (a machine here sat on 0.16.0 while npm was on 0.26.0). The CLI is an
+# agent-facing surface, so a stale one misreports which tools and subcommands
+# exist.
 #
-# Report rather than install: this is a global npm mutation, and `npm i -g` can
-# need elevated permissions depending on the Node install. Printing the exact
-# command keeps the decision with the operator and never fails the install.
-report_cli_status() {
+# Install and log in automatically when npm is available. `npm i -g` is tried
+# first without privilege escalation, then retried once with `sudo -n` (never
+# an interactive `sudo` — a password prompt buried in an otherwise unattended
+# installer is exactly the kind of silent hang this script avoids elsewhere).
+# Every step here is non-fatal: install or login failure only prints the
+# manual command and falls through, it never aborts the installer.
+install_deepsql_cli() {
+  if npm i -g @deepsql/mcp >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    if sudo npm i -g @deepsql/mcp >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+setup_deepsql_cli() {
   if ! command -v npm >/dev/null 2>&1; then
-    echo "DeepSQL CLI: npm not found — skipping check."
+    echo "DeepSQL CLI: npm not found — skipping install."
     echo "  The CLI is optional; install Node 20+ then: npm i -g @deepsql/mcp"
     echo
     return 0
   fi
+
   local installed latest
   installed="$(deepsql --version 2>/dev/null | tr -d '[:space:]' || true)"
-  # `npm view` reaches the network; never let it stall or fail the install.
-  latest="$(npm view @deepsql/mcp version 2>/dev/null | tr -d '[:space:]' || true)"
 
   if [[ -z "$installed" ]]; then
-    echo "DeepSQL CLI: not installed."
-    echo "  Install it with:  npm i -g @deepsql/mcp"
-  elif [[ -z "$latest" ]]; then
-    # Don't claim "up to date" on a check that never completed — that is the
-    # same false-green that let a stale CLI sit unnoticed in the first place.
-    echo "DeepSQL CLI: ${installed} installed (could not reach npm to check for updates)."
-  elif [[ "$installed" != "$latest" ]]; then
-    echo "DeepSQL CLI: ${installed} installed, ${latest} available."
-    echo "  Update with:  npm i -g @deepsql/mcp@latest"
+    echo "Installing DeepSQL CLI (@deepsql/mcp)…"
+    if install_deepsql_cli; then
+      installed="$(deepsql --version 2>/dev/null | tr -d '[:space:]' || true)"
+      echo "DeepSQL CLI: ${installed:-installed}."
+    else
+      echo "DeepSQL CLI: install failed (npm i -g @deepsql/mcp may need elevated"
+      echo "  permissions on this system). Install it yourself, then:"
+      echo "  deepsql login --url http://localhost:${DEEPSQL_BACKEND_PORT}"
+      echo
+      return 0
+    fi
   else
-    echo "DeepSQL CLI: ${installed} (up to date)."
+    # `npm view` reaches the network; never let it stall or fail the install.
+    latest="$(npm view @deepsql/mcp version 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ -z "$latest" ]]; then
+      # Don't claim "up to date" on a check that never completed — that is the
+      # same false-green that let a stale CLI sit unnoticed in the first place.
+      echo "DeepSQL CLI: ${installed} installed (could not reach npm to check for updates)."
+    elif [[ "$installed" != "$latest" ]]; then
+      echo "DeepSQL CLI: ${installed} installed, ${latest} available."
+      echo "  Update with:  npm i -g @deepsql/mcp@latest"
+    else
+      echo "DeepSQL CLI: ${installed} (up to date)."
+    fi
   fi
-  if [[ -n "$installed" ]]; then
+
+  if ! command -v deepsql >/dev/null 2>&1; then
+    echo
+    return 0
+  fi
+
+  if [[ -z "${DEEPSQL_INITIAL_ADMIN_EMAIL:-}" || -z "${DEEPSQL_INITIAL_ADMIN_PASSWORD:-}" ]]; then
     echo "  Point it at this stack:  deepsql login --url http://localhost:${DEEPSQL_BACKEND_PORT}"
+    echo
+    return 0
+  fi
+
+  # Skip login if a token already exists for this exact stack — install.sh is
+  # meant to be re-run (upgrades, credential rotation), and login mints a new
+  # long-lived token every time, so re-running it would otherwise pile up
+  # tokens the operator never asked for under `deepsql whoami`.
+  if deepsql whoami --url "http://localhost:${DEEPSQL_BACKEND_PORT}" >/dev/null 2>&1; then
+    echo "DeepSQL CLI: already logged in as ${DEEPSQL_INITIAL_ADMIN_EMAIL}."
+  else
+    echo "Logging in the DeepSQL CLI as ${DEEPSQL_INITIAL_ADMIN_EMAIL}…"
+    if printf '%s' "${DEEPSQL_INITIAL_ADMIN_PASSWORD}" | deepsql login \
+         --url "http://localhost:${DEEPSQL_BACKEND_PORT}" --password \
+         --email "${DEEPSQL_INITIAL_ADMIN_EMAIL}" --password-stdin --label install; then
+      :
+    else
+      echo "DeepSQL CLI: login failed. Run manually:"
+      echo "  deepsql login --url http://localhost:${DEEPSQL_BACKEND_PORT}"
+    fi
   fi
   echo
 }
 
-report_cli_status
+setup_deepsql_cli
 
 echo "Useful commands:"
 echo "  ./scripts/self-host/status.sh"
