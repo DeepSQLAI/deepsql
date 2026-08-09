@@ -28,10 +28,13 @@ knowing:
 
 - The UI is always the exact version the VM is running. There is no
   bundle/backend skew and no second copy of 40+ tabs to keep in step.
-- Cookies, CORS and SSE behave exactly as in a browser, because the app is
-  served from one origin — `docker/nginx/default.conf` already fronts `/api`
-  and `/agent-api` behind the frontend container. No backend change is needed
-  to support the desktop client.
+- Cookies and SSE behave exactly as in a browser, because the app is served
+  from one origin — `docker/nginx/default.conf` already fronts `/api` and
+  `/agent-api` behind the frontend container.
+- **CORS is the one exception, and the one backend setting you must get right.**
+  Over a tunnel that origin is `http://127.0.0.1:<port>`, so the VM's
+  `CORS_ALLOWED_ORIGINS` has to allow it. See
+  [CORS on the VM](#cors-on-the-vm-the-403-nobody-can-read).
 - Everything the client adds is what a browser tab cannot show: which VM you
   are on, how you are reaching it, and whether that path is healthy.
 
@@ -128,6 +131,52 @@ anything publicly.
 
 `http://127.0.0.1:<port>` is a secure context in Chromium, so the backend's
 `Secure` session cookies are still accepted over the tunnel.
+
+### CORS on the VM (the 403 nobody can read)
+
+The tunnel gives the web app the origin `http://127.0.0.1:<port>`, not your VM's
+hostname. If `CORS_ALLOWED_ORIGINS` on the VM names only the hostname, the
+backend rejects that origin — and it does so in the most confusing way
+available:
+
+- Chromium omits `Origin` on same-origin **GET**s, so the health probe, the SPA
+  and every read work. The connection tests green.
+- Chromium *does* send `Origin` on same-origin **POST/PUT/DELETE**, and Spring
+  treats any request carrying `Origin` as cross-origin (the same-origin
+  short-circuit was removed in Spring 5.3). So the first POST — the login —
+  returns `403` with the plain-text body `Invalid CORS request`.
+- That body has no `message` field, so the web app's axios interceptor falls
+  back to axios's own wording: **"Request failed with status code 403"**, naming
+  neither CORS nor the origin.
+
+Fix it on the VM by keeping loopback patterns in the allowlist alongside your
+hostname, then restarting the backend:
+
+```bash
+# /home/<user>/deepsql-self-host/.env
+CORS_ALLOWED_ORIGINS=https://deepsql.example.com,http://127.0.0.1:*,http://localhost:*
+
+docker compose up -d backend
+```
+
+The `*` is a **port** wildcard, which matters because the tunnel's local port is
+chosen at runtime; enumerating ports means re-editing the VM whenever it
+changes. It is legal only because `SecurityConfig` uses
+`setAllowedOriginPatterns` — plain `setAllowedOrigins` rejects `*` in
+combination with `allowCredentials(true)`. Note that `CORS_ALLOWED_ORIGINS`
+*replaces* the built-in list rather than extending it, which is how the loopback
+entries usually go missing.
+
+Verify without opening the app:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "Origin: http://127.0.0.1:<port>" http://127.0.0.1:<port>/api/actuator/health
+# 200 = allowed · 403 = still missing from CORS_ALLOWED_ORIGINS
+```
+
+Since the probe now sends an `Origin` header, the launcher catches this at
+connect time and says so, instead of letting it surface as a failed login.
 
 ## Security model
 

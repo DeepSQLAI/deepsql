@@ -109,11 +109,27 @@ npm run selftest:tunnel   # end-to-end SSH tunnel test (in-process SSH server)
 **It is a thin client and deliberately does not bundle the React frontend.** It
 navigates a `WebContentsView` at the real DeepSQL origin, so the UI is always the
 version the VM is running — no bundle/backend skew, and no second copy of 40+
-tabs to maintain. This works with **zero backend changes** because
-`docker/nginx/default.conf` already serves the SPA, `/api` and `/agent-api` from
-one origin: cookies, CORS and SSE behave exactly as in a browser. Do not
-"improve" this by bundling `dist/` — that reintroduces CORS, `SameSite`, and
+tabs to maintain. `docker/nginx/default.conf` already serves the SPA, `/api` and
+`/agent-api` from one origin, so cookies and SSE behave exactly as in a browser.
+Do not "improve" this by bundling `dist/` — that reintroduces `SameSite` and
 version-skew problems the current design does not have.
+
+**It needs exactly one piece of backend configuration, and CORS is it.** The
+"zero backend changes" claim that used to sit here was wrong, and cost a long
+debugging session. Over a tunnel the origin is `http://127.0.0.1:<sticky port>`,
+not the VM's hostname, so a deployment whose `CORS_ALLOWED_ORIGINS` names only
+its public hostname rejects the desktop client. The failure is maximally
+misleading: Chromium omits `Origin` on same-origin GETs, so the health probe,
+the SPA and every read succeed, and the *first POST* — the login — comes back
+`403` with the plain-text body `Invalid CORS request`. That body has no
+`message` field, so `client.js`'s axios interceptor falls through to axios's own
+wording and the user sees **"Request failed with status code 403"**, which names
+neither CORS nor the origin. Fix: keep loopback patterns in the allowlist —
+`CORS_ALLOWED_ORIGINS=https://your-host,http://127.0.0.1:*,http://localhost:*`.
+Port wildcards work only because `SecurityConfig` uses
+`setAllowedOriginPatterns`; `setAllowedOrigins` would reject `*` alongside
+`allowCredentials(true)`. `probe.js` now sends an `Origin` header for exactly
+this reason, so the rejection is caught at connect time and named.
 
 **Two transports, one abstraction.** Both resolve to an *origin*, so nothing
 downstream of `desktop/src/main/transport.js` knows which is in use:
