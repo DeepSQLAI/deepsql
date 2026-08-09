@@ -277,6 +277,54 @@ Upgrading:
 git pull && docker compose up -d --build
 ```
 
+### Accessing a remote self-hosted instance (SSH tunnel)
+
+If DeepSQL runs on a server you only reach through a bastion/jump host — common in
+locked-down cloud environments — forward the frontend port locally instead of exposing
+it to the internet.
+
+**Direct bastion, one hop:**
+
+```bash
+ssh -N -L 3100:localhost:3000 -o ExitOnForwardFailure=yes <user>@<bastion-host>
+```
+
+**Target host is itself only reachable from inside the bastion's network (two hops):**
+add a `Host` entry per leg in `~/.ssh/config` and let `ProxyJump` chain them — no
+manual double-hop command needed.
+
+```sshconfig
+Host my-bastion
+    HostName <bastion-ip-or-dns>
+    User <bastion-user>
+    IdentityFile ~/.ssh/<bastion-key>
+
+Host deepsql
+    HostName <target-host-ip-or-dns>
+    Port <target-ssh-port>
+    User <target-user>
+    IdentityFile ~/.ssh/<target-key>
+    ProxyJump my-bastion
+    LocalForward 3100 localhost:3000
+    ServerAliveInterval 30
+    ExitOnForwardFailure yes
+```
+
+```bash
+ssh -N deepsql
+```
+
+Then open **http://localhost:3100**. Use a non-3000 local port if something on your
+machine (often a local Docker container) already binds 3000 — `ExitOnForwardFailure=yes`
+makes a port collision fail loudly instead of silently handing you a dead tunnel that
+looks connected while your browser actually talks to the wrong service.
+
+If the connection hangs at the TCP handshake rather than failing immediately, check, in
+order: the target's firewall/security-group rules for the SSH port, whether the target
+host is actually reachable from the bastion (`ssh <bastion> "nc -zv <target> <port>"`),
+and only then your local tunnel config — a hung handshake almost always means the
+network path is blocked somewhere upstream of your laptop, not a misconfigured tunnel.
+
 ### Ports
 
 | Service  | Port | Override                |
