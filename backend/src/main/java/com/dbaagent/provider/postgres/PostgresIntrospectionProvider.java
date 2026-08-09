@@ -77,6 +77,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             """;
 
         String schema = resolveSchema(connection);
+        announceSchema(schema);
 
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery(query)) {
@@ -93,6 +94,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
                 objects.add(obj);
             }
         }
+        warnIfEmptyWhilePublicHasTables(connection, schema, objects.size());
         return objects;
     }
 
@@ -318,6 +320,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
 
         Map<String, TableMetadata> tableMap = new HashMap<>();
         String schemaName = resolveSchema(connection);
+        announceSchema(schemaName);
 
         try (Statement stmt = connection.createStatement()) {
             applyStatementSettings(stmt);
@@ -337,6 +340,8 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
                 }
             }
         }
+
+        warnIfEmptyWhilePublicHasTables(connection, schemaName, schema.getTables().size());
 
         // Batch load all columns and indexes in single queries (eliminates N+1)
         scanPostgreSQLColumnsBatch(connection, tableMap);
@@ -806,6 +811,65 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
                 DEFAULT_SCHEMA, e.getMessage());
         }
         return DEFAULT_SCHEMA;
+    }
+
+    /**
+     * Say which schema this pass is reading, so a switch is never silent.
+     *
+     * <p>Postgres ships {@code search_path = "$user", public} everywhere, RDS and
+     * Aurora included. The {@code "$user"} entry is inert only while no schema
+     * matches the connecting role's name — create one (per-tenant layouts, or the
+     * per-user pattern the Postgres docs recommend and which spread after PG15
+     * hardened {@code public}) and {@code current_schema()} silently becomes that
+     * schema. A connection that had been reading {@code public} would then read an
+     * empty user schema and report a healthy, empty brain: the very failure this
+     * class was changed to fix, inverted.
+     *
+     * <p>Logged at INFO only when it is not {@code public}, because {@code public}
+     * is the unchanged historical case and every connection would otherwise emit a
+     * line per introspection pass.
+     *
+     * <p>Called from the two pass-level entry points rather than from
+     * {@link #resolveSchema}, which runs once per table via
+     * {@link #getTableColumns} — logging there would produce one line per table.
+     */
+    private void announceSchema(String schema) {
+        if (!DEFAULT_SCHEMA.equals(schema)) {
+            log.info("Introspecting schema '{}' (from the session search_path, not '{}')",
+                schema, DEFAULT_SCHEMA);
+        } else {
+            log.debug("Introspecting schema '{}'", schema);
+        }
+    }
+
+    /**
+     * Warn on the fingerprint of an accidental schema switch: nothing found here,
+     * while {@code public} — where this provider used to look unconditionally —
+     * still holds tables.
+     *
+     * <p>Without this the outcome is a successful-looking run over an empty schema.
+     * Best-effort: a failure to count is never allowed to break introspection.
+     */
+    private void warnIfEmptyWhilePublicHasTables(Connection connection, String schema, int found) {
+        if (found > 0 || DEFAULT_SCHEMA.equals(schema)) {
+            return;
+        }
+        try (PreparedStatement stmt = connection.prepareStatement(
+                "SELECT count(*) FROM pg_tables WHERE schemaname = ?")) {
+            stmt.setString(1, DEFAULT_SCHEMA);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next() && rs.getLong(1) > 0) {
+                    log.warn("Schema '{}' contains no tables, but '{}' has {}. The session "
+                            + "search_path resolves to '{}' — if that is not intended, check for a "
+                            + "schema named after the connecting role (search_path starts with "
+                            + "\"$user\"), or set it explicitly: "
+                            + "ALTER ROLE <user> IN DATABASE <db> SET search_path = <schema>, public;",
+                        schema, DEFAULT_SCHEMA, rs.getLong(1), schema);
+                }
+            }
+        } catch (SQLException e) {
+            log.debug("Could not compare '{}' against '{}': {}", schema, DEFAULT_SCHEMA, e.getMessage());
+        }
     }
 
     private String quoteIdentifier(String identifier) {
