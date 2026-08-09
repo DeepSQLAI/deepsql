@@ -10,8 +10,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.sql.*;
 import java.util.List;
 
+import org.mockito.ArgumentCaptor;
+
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -169,6 +173,38 @@ class PostgresIntrospectionProviderTest {
         assertEquals(81920L, stats.getDataSize());
         assertEquals(40960L, stats.getIndexSize());
         assertEquals(122880L, stats.getSizeBytes());
+    }
+
+    @Test
+    void getTableStats_bindsEveryPlaceholderInTheStatsQuery() throws SQLException {
+        // The stats query carried NINE `?` placeholders (the two size subtractions use
+        // two each) while the binding loop ran `i <= 7`, so parameters 8 and 9 were
+        // never set and Postgres rejected every call with
+        //   No value specified for parameter 8
+        // silently killing table-growth snapshots for every table.
+        //
+        // getTableStats_returnsStats above passed throughout, because a mocked
+        // PreparedStatement does not enforce that placeholders are bound. This test
+        // compares the two directly, so the count can never drift again.
+        PreparedStatement rowCountStatement = mock(PreparedStatement.class);
+        ResultSet rowCountResultSet = mock(ResultSet.class);
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement, rowCountStatement);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(rowCountStatement.executeQuery()).thenReturn(rowCountResultSet);
+        when(resultSet.next()).thenReturn(true);
+        when(rowCountResultSet.next()).thenReturn(true);
+        when(rowCountResultSet.getObject("row_count")).thenReturn(1000L);
+
+        provider.getTableStats(connection, "public", "users");
+
+        verify(connection, atLeastOnce()).prepareStatement(sqlCaptor.capture());
+        String statsQuery = sqlCaptor.getAllValues().get(0);
+        int placeholders = (int) statsQuery.chars().filter(c -> c == '?').count();
+
+        assertTrue(placeholders > 0, "stats query should still be parameterised");
+        verify(preparedStatement, times(placeholders)).setString(anyInt(), eq("users"));
     }
 
     @Test

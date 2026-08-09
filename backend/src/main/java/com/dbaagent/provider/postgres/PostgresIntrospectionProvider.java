@@ -223,21 +223,31 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
         TableStats stats = new TableStats();
         stats.setTableName(tableName);
 
+        // One placeholder, resolved once in a CTE, instead of repeating `?::regclass`
+        // in every expression. The previous form had NINE placeholders — the two
+        // subtractions use two each — while the binding loop ran `i <= 7`, so
+        // parameters 8 and 9 were never set and every call threw
+        // `No value specified for parameter 8`. That silently broke table-growth
+        // snapshots for every table on every Postgres connection
+        // (TableGrowthMonitoringService logs it per table and carries on).
+        //
+        // Counting placeholders by hand is exactly what failed here, so the count is
+        // now impossible to get wrong: bind one value and reference it by name.
         String query = """
+            WITH t AS (SELECT ?::regclass AS rel)
             SELECT
-                pg_size_pretty(pg_total_relation_size(?::regclass)) as total_size,
-                pg_total_relation_size(?::regclass) as total_bytes,
-                pg_size_pretty(pg_relation_size(?::regclass)) as data_size,
-                pg_relation_size(?::regclass) as data_bytes,
-                pg_size_pretty(pg_total_relation_size(?::regclass) - pg_relation_size(?::regclass)) as index_size,
-                (pg_total_relation_size(?::regclass) - pg_relation_size(?::regclass)) as index_bytes,
-                obj_description(?::regclass, 'pg_class') as comment
+                pg_size_pretty(pg_total_relation_size(rel)) as total_size,
+                pg_total_relation_size(rel) as total_bytes,
+                pg_size_pretty(pg_relation_size(rel)) as data_size,
+                pg_relation_size(rel) as data_bytes,
+                pg_size_pretty(pg_total_relation_size(rel) - pg_relation_size(rel)) as index_size,
+                (pg_total_relation_size(rel) - pg_relation_size(rel)) as index_bytes,
+                obj_description(rel, 'pg_class') as comment
+            FROM t
             """;
 
         try (PreparedStatement stmt = connection.prepareStatement(query)) {
-            for (int i = 1; i <= 7; i++) {
-                stmt.setString(i, tableName);
-            }
+            stmt.setString(1, tableName);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
