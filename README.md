@@ -249,9 +249,27 @@ your schema — all from one shared brain.
 ```bash
 ./scripts/self-host/status.sh                    # compose ps + health probes
 ./scripts/self-host/smoke-test.sh                # end-to-end check against the vault DB
+./scripts/self-host/seed-demo-data.sh            # seed demo e-commerce database for exploration
 ./scripts/self-host/uninstall.sh                 # stop and remove containers, keep data
 ./scripts/self-host/uninstall.sh --purge-data    # also drop the volumes
 ```
+
+### Demo Database
+
+To explore DeepSQL features without connecting your own database, run:
+
+```bash
+./scripts/self-host/seed-demo-data.sh
+```
+
+This creates a **demo_shop** e-commerce database with:
+- 100 products, 500 customers, 5,000+ orders
+- Intentionally suboptimal query patterns (to trigger recommendations)
+- Pre-configured slow query analysis and index recommendations
+- Sample saved queries in the SQL Editor
+- Sample agent conversation history
+
+Alternatively, set `DEEPSQL_SEED_DEMO_DATA=1` in `.env` before running `install.sh` to seed automatically.
 
 Upgrading:
 
