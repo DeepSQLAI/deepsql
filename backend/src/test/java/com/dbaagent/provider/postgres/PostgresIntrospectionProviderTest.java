@@ -199,6 +199,38 @@ class PostgresIntrospectionProviderTest {
     }
 
     @Test
+    void getTableColumns_qualifiesThePrimaryKeySubqueryBySchema() throws SQLException {
+        // Postgres auto-names primary keys "<table>_pkey", so joining
+        // tc.constraint_name = ku.constraint_name WITHOUT a schema predicate
+        // cross-joins any two schemas holding a same-named table. Measured against
+        // two `orders` tables (s_a PK `other`, s_b PK `name`), asking for s_b:
+        //     name|t  name|t  other|t  other|t
+        // — every column a primary key, and each row duplicated. Schema-qualified
+        // it returns name|t, other|f.
+        //
+        // A mocked ResultSet cannot exercise SQL semantics, so this asserts the
+        // predicates are present and every placeholder is bound — enough to stop
+        // the qualification being dropped again.
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        provider.getTableColumns(connection, "public", "orders");
+
+        verify(connection).prepareStatement(sqlCaptor.capture());
+        String sql = sqlCaptor.getValue();
+
+        assertTrue(sql.contains("tc.table_schema = ku.table_schema"),
+            "the constraint join must be schema-qualified, or <table>_pkey collides across schemas");
+        assertTrue(sql.contains("ku.table_schema = ?"),
+            "the PK lookup must be restricted to the target schema");
+
+        int placeholders = (int) sql.chars().filter(c -> c == '?').count();
+        verify(preparedStatement, times(placeholders)).setString(anyInt(), anyString());
+    }
+
+    @Test
     void getTableStats_bindsEveryPlaceholderInTheStatsQuery() throws SQLException {
         // The stats query carried NINE `?` placeholders (the two size subtractions use
         // two each) while the binding loop ran `i <= 7`, so parameters 8 and 9 were

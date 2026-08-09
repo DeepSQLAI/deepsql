@@ -156,6 +156,26 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
     public List<ColumnInfo> getTableColumns(Connection connection, String database, String tableName) throws SQLException {
         List<ColumnInfo> columns = new ArrayList<>();
 
+        // The PK subquery must be schema-qualified on BOTH the constraint join and
+        // the table lookup. Without it, two schemas holding a same-named table
+        // collide by construction: Postgres auto-names primary keys
+        // "<table>_pkey", so `tc.constraint_name = ku.constraint_name` alone
+        // cross-joins the schemas.
+        //
+        // Measured against two schemas each holding an `orders` table, asking for
+        // s_b.orders whose only PK is `name`:
+        //     name  | t
+        //     name  | t     <- duplicated row
+        //     other | t     <- false positive; `other` is s_a's PK, not s_b's
+        //     other | t     <- duplicated row
+        // i.e. every column reported as a primary key, and each one twice. With the
+        // predicates below the same query returns `name | t`, `other | f`.
+        //
+        // The bug predates the search_path change but was mostly latent while this
+        // provider only ever read `public`. Now that it targets whatever the session
+        // resolves to, same-named tables across schemas — the normal shape of a dbt
+        // warehouse (staging/marts/public each with `orders`) — are the expected
+        // case rather than the exception.
         String query = """
             SELECT c.column_name, c.data_type, c.is_nullable, c.column_default,
                 CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary_key
@@ -163,17 +183,25 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             LEFT JOIN (
                 SELECT ku.column_name
                 FROM information_schema.table_constraints tc
-                JOIN information_schema.key_column_usage ku ON tc.constraint_name = ku.constraint_name
-                WHERE tc.constraint_type = 'PRIMARY KEY' AND ku.table_name = ?
+                JOIN information_schema.key_column_usage ku
+                    ON tc.constraint_name = ku.constraint_name
+                    AND tc.table_schema = ku.table_schema
+                WHERE tc.constraint_type = 'PRIMARY KEY'
+                    AND ku.table_name = ? AND ku.table_schema = ?
             ) pk ON c.column_name = pk.column_name
             WHERE c.table_name = ? AND c.table_schema = ?
             ORDER BY c.ordinal_position
             """;
 
+        // Resolved once: this method runs per table, and resolveSchema() costs a
+        // round-trip each call.
+        String schema = resolveSchema(connection);
+
         try (PreparedStatement stmt = connection.prepareStatement(query)) {
             stmt.setString(1, tableName);
-            stmt.setString(2, tableName);
-            stmt.setString(3, resolveSchema(connection));
+            stmt.setString(2, schema);
+            stmt.setString(3, tableName);
+            stmt.setString(4, schema);
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     ColumnInfo col = new ColumnInfo();
