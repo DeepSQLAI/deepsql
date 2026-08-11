@@ -35,9 +35,36 @@ class PostgresIntrospectionProviderTest {
     @Mock
     private ResultSet resultSet;
 
+    // resolveSchema() issues `SELECT current_schema()` on its own Statement before
+    // any method's real query. These mocks answer that call so the fixtures below
+    // keep testing what they were written to test.
+    @Mock
+    private Statement schemaStatement;
+
+    @Mock
+    private ResultSet schemaResultSet;
+
     @BeforeEach
-    void setUp() {
+    void setUp() throws SQLException {
         provider = new PostgresIntrospectionProvider();
+
+        // lenient(): the pure-Java tests (getDatabaseType, getDefaultSchema, …) never
+        // touch the Connection, and strict stubbing would fail them over an unused stub.
+        //
+        // resolveSchema() is the FIRST createStatement() caller in every method that
+        // reaches the database, so returning schemaStatement first and the shared
+        // statement afterwards routes each to the right place. Answering "public"
+        // keeps these fixtures on the historical schema, so they go on asserting the
+        // behaviour they were written for rather than the search_path change itself.
+        lenient().when(connection.createStatement()).thenReturn(schemaStatement, statement);
+        lenient().when(schemaStatement.executeQuery(anyString())).thenReturn(schemaResultSet);
+        lenient().when(schemaResultSet.next()).thenReturn(true);
+        // resolveSchema() reads current_schema(), search_path, current_user.
+        // A schema that differs from the role is an ordinary resolution, so these
+        // fixtures land on "public" exactly as they did before search_path support.
+        lenient().when(schemaResultSet.getString(1)).thenReturn("public");
+        lenient().when(schemaResultSet.getString(2)).thenReturn("\"$user\", public");
+        lenient().when(schemaResultSet.getString(3)).thenReturn("app_user");
     }
 
     @Test
@@ -47,7 +74,8 @@ class PostgresIntrospectionProviderTest {
 
     @Test
     void getDatabaseObjects_returnsTables() throws SQLException {
-        when(connection.createStatement()).thenReturn(statement);
+        // schemaStatement first: resolveSchema() runs before the objects query.
+        when(connection.createStatement()).thenReturn(schemaStatement, statement);
         when(statement.executeQuery(anyString())).thenReturn(resultSet);
         when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
@@ -175,6 +203,98 @@ class PostgresIntrospectionProviderTest {
         assertEquals(122880L, stats.getSizeBytes());
     }
 
+    /** Runs getTableColumns and returns the schema it bound (parameter 4). */
+    private String schemaUsedByGetTableColumns() throws SQLException {
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        provider.getTableColumns(connection, "db", "orders");
+
+        ArgumentCaptor<String> bound = ArgumentCaptor.forClass(String.class);
+        verify(preparedStatement, atLeastOnce()).setString(eq(4), bound.capture());
+        return bound.getValue();
+    }
+
+    @Test
+    void schemaChosenByTheImplicitDollarUserEntryIsIgnored() throws SQLException {
+        // Every Postgres ships search_path = "$user", public. That leading "$user"
+        // is inert only while no schema matches the connecting role — create one and
+        // current_schema() silently becomes it. Honouring that would move an
+        // untouched RDS/Aurora connection off `public` onto an empty user schema and
+        // report a healthy, empty brain. An operator who never configured a
+        // search_path must keep the historical behaviour exactly.
+        when(schemaResultSet.getString(1)).thenReturn("app_user");        // current_schema()
+        when(schemaResultSet.getString(2)).thenReturn("\"$user\", public"); // untouched default
+        when(schemaResultSet.getString(3)).thenReturn("app_user");        // current_user
+
+        assertEquals("public", schemaUsedByGetTableColumns(),
+            "an implicit \"$user\" match must not move introspection off public");
+    }
+
+    @Test
+    void deliberatelyConfiguredSearchPathIsHonoured() throws SQLException {
+        // ALTER ROLE <user> IN DATABASE <db> SET search_path = marts, public;
+        when(schemaResultSet.getString(1)).thenReturn("marts");
+        when(schemaResultSet.getString(3)).thenReturn("app_user");
+        // lenient: the guard short-circuits on schema != current_user, so the
+        // search_path is never read here. Stated anyway to describe the scenario.
+        lenient().when(schemaResultSet.getString(2)).thenReturn("marts, public");
+
+        assertEquals("marts", schemaUsedByGetTableColumns());
+    }
+
+    @Test
+    void userSchemaIsHonouredWhenTheSearchPathWasSetDeliberately() throws SQLException {
+        // "$user" present but the path is NOT the shipped default — that is a stated
+        // intent, so it is honoured rather than second-guessed.
+        when(schemaResultSet.getString(1)).thenReturn("app_user");
+        when(schemaResultSet.getString(2)).thenReturn("\"$user\", marts");
+        when(schemaResultSet.getString(3)).thenReturn("app_user");
+
+        assertEquals("app_user", schemaUsedByGetTableColumns());
+    }
+
+    @Test
+    void nullCurrentSchemaFallsBackToPublic() throws SQLException {
+        // search_path naming only missing schemas makes current_schema() NULL.
+        when(schemaResultSet.getString(1)).thenReturn(null);
+
+        assertEquals("public", schemaUsedByGetTableColumns());
+    }
+
+    @Test
+    void getTableColumns_qualifiesThePrimaryKeySubqueryBySchema() throws SQLException {
+        // Postgres auto-names primary keys "<table>_pkey", so joining
+        // tc.constraint_name = ku.constraint_name WITHOUT a schema predicate
+        // cross-joins any two schemas holding a same-named table. Measured against
+        // two `orders` tables (s_a PK `other`, s_b PK `name`), asking for s_b:
+        //     name|t  name|t  other|t  other|t
+        // — every column a primary key, and each row duplicated. Schema-qualified
+        // it returns name|t, other|f.
+        //
+        // A mocked ResultSet cannot exercise SQL semantics, so this asserts the
+        // predicates are present and every placeholder is bound — enough to stop
+        // the qualification being dropped again.
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        provider.getTableColumns(connection, "public", "orders");
+
+        verify(connection).prepareStatement(sqlCaptor.capture());
+        String sql = sqlCaptor.getValue();
+
+        assertTrue(sql.contains("tc.table_schema = ku.table_schema"),
+            "the constraint join must be schema-qualified, or <table>_pkey collides across schemas");
+        assertTrue(sql.contains("ku.table_schema = ?"),
+            "the PK lookup must be restricted to the target schema");
+
+        int placeholders = (int) sql.chars().filter(c -> c == '?').count();
+        verify(preparedStatement, times(placeholders)).setString(anyInt(), anyString());
+    }
+
     @Test
     void getTableStats_bindsEveryPlaceholderInTheStatsQuery() throws SQLException {
         // The stats query carried NINE `?` placeholders (the two size subtractions use
@@ -209,7 +329,8 @@ class PostgresIntrospectionProviderTest {
 
     @Test
     void scanSchema_returnsSchemaMetadata() throws SQLException {
-        when(connection.createStatement()).thenReturn(statement);
+        // schemaStatement first: resolveSchema() runs before the tables query.
+        when(connection.createStatement()).thenReturn(schemaStatement, statement);
         when(statement.executeQuery(anyString())).thenReturn(resultSet);
 
         when(resultSet.next())
@@ -281,6 +402,7 @@ class PostgresIntrospectionProviderTest {
         ResultSet foreignKeysResultSet = mock(ResultSet.class);
 
         when(connection.createStatement()).thenReturn(
+            schemaStatement,   // resolveSchema() runs before the tables query
             statement,
             exactCountStatement,
             columnsStatement,

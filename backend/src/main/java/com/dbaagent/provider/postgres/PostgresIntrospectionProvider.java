@@ -12,6 +12,20 @@ import java.util.*;
 /**
  * PostgreSQL implementation of IntrospectionProvider.
  * Uses pg_catalog and information_schema for schema introspection.
+ *
+ * <p>Every catalog query filters on {@code current_schema()} rather than a
+ * hardcoded {@code 'public'}. Databases that keep their tables anywhere else —
+ * a dbt warehouse in {@code marts}, a tenant schema, anything — were previously
+ * invisible: introspection returned zero tables, so brain initialization
+ * "COMPLETED" in about a second having learned nothing, and the schema snapshot
+ * was persisted as an empty table list. Honouring the session search_path makes
+ * the target schema a property of the connection (set it on the role, or via the
+ * JDBC {@code currentSchema} parameter) instead of a compile-time constant.
+ *
+ * <p>{@link #getDefaultSchema()} deliberately still reports {@code public}: its
+ * callers use it to decide whether a name needs qualifying, and reporting the
+ * session schema there would strip the schema off exactly the names that need
+ * it most ({@code marts.dim_person} → {@code dim_person}).
  */
 @Slf4j
 @Component
@@ -55,28 +69,32 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             JOIN pg_namespace n ON n.nspname = t.schemaname
             JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = t.tablename
             LEFT JOIN pg_stat_all_tables s ON s.relid = c.oid
-            WHERE t.schemaname = 'public' AND c.relkind IN ('r', 'p')
+            WHERE t.schemaname = current_schema() AND c.relkind IN ('r', 'p')
             UNION ALL
             SELECT v.viewname as name, 'view' as type, 0 as row_count
-            FROM pg_views v WHERE v.schemaname = 'public'
+            FROM pg_views v WHERE v.schemaname = current_schema()
             ORDER BY type, name
             """;
+
+        String schema = resolveSchema(connection);
+        announceSchema(schema);
 
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery(query)) {
             while (rs.next()) {
                 DatabaseObject obj = new DatabaseObject();
                 obj.setName(rs.getString("name"));
-                obj.setSchema(DEFAULT_SCHEMA);
+                obj.setSchema(schema);
                 obj.setType(rs.getString("type"));
                 Long estimatedRowCount = getNullableLong(rs, "row_count");
                 obj.setRowCount("table".equals(obj.getType())
-                    ? resolveTableRowCount(connection, DEFAULT_SCHEMA, obj.getName(), estimatedRowCount)
+                    ? resolveTableRowCount(connection, schema, obj.getName(), estimatedRowCount)
                     : estimatedRowCount);
-                obj.setColumns(getTableColumns(connection, DEFAULT_SCHEMA, obj.getName()));
+                obj.setColumns(getTableColumns(connection, schema, obj.getName()));
                 objects.add(obj);
             }
         }
+        warnIfEmptyWhilePublicHasTables(connection, schema, objects.size());
         return objects;
     }
 
@@ -87,16 +105,18 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             SELECT p.proname as name, pg_get_functiondef(p.oid) as definition
             FROM pg_proc p
             JOIN pg_namespace n ON p.pronamespace = n.oid
-            WHERE n.nspname = 'public' AND p.prokind = 'f'
+            WHERE n.nspname = current_schema() AND p.prokind = 'f'
             ORDER BY p.proname
             """;
+
+        String schema = resolveSchema(connection);
 
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery(query)) {
                 while (rs.next()) {
                     DatabaseObject obj = new DatabaseObject();
                     obj.setName(rs.getString("name"));
-                    obj.setSchema(DEFAULT_SCHEMA);
+                    obj.setSchema(schema);
                     obj.setType("function");
                     obj.setDefinition(rs.getString("definition"));
                     objects.add(obj);
@@ -112,16 +132,18 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             SELECT p.proname as name, pg_get_functiondef(p.oid) as definition
             FROM pg_proc p
             JOIN pg_namespace n ON p.pronamespace = n.oid
-            WHERE n.nspname = 'public' AND p.prokind = 'p'
+            WHERE n.nspname = current_schema() AND p.prokind = 'p'
             ORDER BY p.proname
             """;
+
+        String schema = resolveSchema(connection);
 
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery(query)) {
                 while (rs.next()) {
                     DatabaseObject obj = new DatabaseObject();
                     obj.setName(rs.getString("name"));
-                    obj.setSchema(DEFAULT_SCHEMA);
+                    obj.setSchema(schema);
                     obj.setType("procedure");
                     obj.setDefinition(rs.getString("definition"));
                     objects.add(obj);
@@ -134,6 +156,26 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
     public List<ColumnInfo> getTableColumns(Connection connection, String database, String tableName) throws SQLException {
         List<ColumnInfo> columns = new ArrayList<>();
 
+        // The PK subquery must be schema-qualified on BOTH the constraint join and
+        // the table lookup. Without it, two schemas holding a same-named table
+        // collide by construction: Postgres auto-names primary keys
+        // "<table>_pkey", so `tc.constraint_name = ku.constraint_name` alone
+        // cross-joins the schemas.
+        //
+        // Measured against two schemas each holding an `orders` table, asking for
+        // s_b.orders whose only PK is `name`:
+        //     name  | t
+        //     name  | t     <- duplicated row
+        //     other | t     <- false positive; `other` is s_a's PK, not s_b's
+        //     other | t     <- duplicated row
+        // i.e. every column reported as a primary key, and each one twice. With the
+        // predicates below the same query returns `name | t`, `other | f`.
+        //
+        // The bug predates the search_path change but was mostly latent while this
+        // provider only ever read `public`. Now that it targets whatever the session
+        // resolves to, same-named tables across schemas — the normal shape of a dbt
+        // warehouse (staging/marts/public each with `orders`) — are the expected
+        // case rather than the exception.
         String query = """
             SELECT c.column_name, c.data_type, c.is_nullable, c.column_default,
                 CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary_key
@@ -141,17 +183,25 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             LEFT JOIN (
                 SELECT ku.column_name
                 FROM information_schema.table_constraints tc
-                JOIN information_schema.key_column_usage ku ON tc.constraint_name = ku.constraint_name
-                WHERE tc.constraint_type = 'PRIMARY KEY' AND ku.table_name = ?
+                JOIN information_schema.key_column_usage ku
+                    ON tc.constraint_name = ku.constraint_name
+                    AND tc.table_schema = ku.table_schema
+                WHERE tc.constraint_type = 'PRIMARY KEY'
+                    AND ku.table_name = ? AND ku.table_schema = ?
             ) pk ON c.column_name = pk.column_name
             WHERE c.table_name = ? AND c.table_schema = ?
             ORDER BY c.ordinal_position
             """;
 
+        // Resolved once: this method runs per table, and resolveSchema() costs a
+        // round-trip each call.
+        String schema = resolveSchema(connection);
+
         try (PreparedStatement stmt = connection.prepareStatement(query)) {
             stmt.setString(1, tableName);
-            stmt.setString(2, tableName);
-            stmt.setString(3, DEFAULT_SCHEMA);
+            stmt.setString(2, schema);
+            stmt.setString(3, tableName);
+            stmt.setString(4, schema);
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     ColumnInfo col = new ColumnInfo();
@@ -257,11 +307,12 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
                     stats.setIndexSize(rs.getLong("index_bytes"));
                     stats.setSizeBytes(rs.getLong("total_bytes"));
                     stats.setIndexSizeBytes(rs.getLong("index_bytes"));
+                    String schema = resolveSchema(connection);
                     stats.setRowCount(resolveTableRowCount(
                         connection,
-                        DEFAULT_SCHEMA,
+                        schema,
                         tableName,
-                        getEstimatedTableRowCount(connection, DEFAULT_SCHEMA, tableName)
+                        getEstimatedTableRowCount(connection, schema, tableName)
                     ));
                 }
             }
@@ -288,14 +339,16 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             "JOIN pg_namespace n ON n.nspname = t.schemaname " +
             "JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = t.tablename " +
             "LEFT JOIN pg_stat_all_tables s ON s.relid = c.oid " +
-            "WHERE t.schemaname = 'public' AND c.relkind IN ('r', 'p') " +
+            "WHERE t.schemaname = current_schema() AND c.relkind IN ('r', 'p') " +
             "UNION ALL " +
             "SELECT v.viewname as tablename, 'view' as type, 0 as size_bytes, 0 as row_count " +
             "FROM pg_views v " +
-            "WHERE v.schemaname = 'public' " +
+            "WHERE v.schemaname = current_schema() " +
             "ORDER BY tablename";
 
         Map<String, TableMetadata> tableMap = new HashMap<>();
+        String schemaName = resolveSchema(connection);
+        announceSchema(schemaName);
 
         try (Statement stmt = connection.createStatement()) {
             applyStatementSettings(stmt);
@@ -303,18 +356,20 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
                 while (rs.next()) {
                     TableMetadata table = new TableMetadata();
                     table.setName(rs.getString("tablename"));
-                    table.setSchema(DEFAULT_SCHEMA);
+                    table.setSchema(schemaName);
                     table.setType(rs.getString("type"));
                     table.setSizeBytes(rs.getLong("size_bytes"));
                     Long estimatedRowCount = getNullableLong(rs, "row_count");
                     table.setRowCount("table".equals(table.getType())
-                        ? resolveTableRowCount(connection, DEFAULT_SCHEMA, table.getName(), estimatedRowCount)
+                        ? resolveTableRowCount(connection, schemaName, table.getName(), estimatedRowCount)
                         : estimatedRowCount);
                     schema.getTables().add(table);
                     tableMap.put(table.getName(), table);
                 }
             }
         }
+
+        warnIfEmptyWhilePublicHasTables(connection, schemaName, schema.getTables().size());
 
         // Batch load all columns and indexes in single queries (eliminates N+1)
         scanPostgreSQLColumnsBatch(connection, tableMap);
@@ -349,9 +404,9 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             "  FROM information_schema.table_constraints tc " +
             "  JOIN information_schema.key_column_usage ku " +
             "  ON tc.constraint_name = ku.constraint_name AND tc.table_name = ku.table_name " +
-            "  WHERE tc.table_schema = 'public' AND tc.constraint_type = 'PRIMARY KEY' " +
+            "  WHERE tc.table_schema = current_schema() AND tc.constraint_type = 'PRIMARY KEY' " +
             ") pk ON c.table_name = pk.table_name AND c.column_name = pk.column_name " +
-            "WHERE c.table_schema = 'public' " +
+            "WHERE c.table_schema = current_schema() " +
             "ORDER BY c.table_name, c.ordinal_position";
 
         try (Statement stmt = connection.createStatement()) {
@@ -386,10 +441,10 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             "array_agg(a.attname ORDER BY array_position(ix.indkey, a.attnum)) as columns, " +
             "ix.indisunique " +
             "FROM pg_indexes i " +
-            "JOIN pg_class c ON c.relname = i.tablename AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public') " +
-            "JOIN pg_index ix ON ix.indexrelid = (SELECT oid FROM pg_class WHERE relname = i.indexname AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')) " +
+            "JOIN pg_class c ON c.relname = i.tablename AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema()) " +
+            "JOIN pg_index ix ON ix.indexrelid = (SELECT oid FROM pg_class WHERE relname = i.indexname AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())) " +
             "JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(ix.indkey) " +
-            "WHERE i.schemaname = 'public' " +
+            "WHERE i.schemaname = current_schema() " +
             "GROUP BY i.tablename, i.indexname, i.indexdef, ix.indisunique " +
             "ORDER BY i.tablename, i.indexname";
 
@@ -435,7 +490,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             "ON tc.constraint_name = kcu.constraint_name " +
             "JOIN information_schema.constraint_column_usage AS ccu " +
             "ON ccu.constraint_name = tc.constraint_name " +
-            "WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public' " +
+            "WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = current_schema() " +
             "ORDER BY tc.table_name, tc.constraint_name";
         
         try (Statement stmt = connection.createStatement()) {
@@ -472,7 +527,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             JOIN information_schema.constraint_column_usage ccu
                 ON tc.constraint_name = ccu.constraint_name
             WHERE tc.constraint_type = 'FOREIGN KEY'
-                AND tc.table_schema = 'public'
+                AND tc.table_schema = current_schema()
             ORDER BY tc.table_name, tc.constraint_name
             """;
 
@@ -502,7 +557,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
                 data_type, character_maximum_length, numeric_precision, numeric_scale,
                 udt_name
             FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = ?
+            WHERE table_schema = current_schema() AND table_name = ?
             ORDER BY ordinal_position
             """;
 
@@ -547,7 +602,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             LEFT JOIN information_schema.constraint_column_usage ccu
                 ON tc.constraint_name = ccu.constraint_name
                 AND tc.constraint_type = 'FOREIGN KEY'
-            WHERE tc.table_schema = 'public' AND tc.table_name = ?
+            WHERE tc.table_schema = current_schema() AND tc.table_name = ?
             ORDER BY tc.constraint_name
             """;
 
@@ -582,11 +637,12 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
 
     @Override
     public Long getTableRowCount(Connection connection, String database, String tableName) throws SQLException {
+        String schema = resolveSchema(connection);
         return resolveTableRowCount(
             connection,
-            DEFAULT_SCHEMA,
+            schema,
             tableName,
-            getEstimatedTableRowCount(connection, DEFAULT_SCHEMA, tableName)
+            getEstimatedTableRowCount(connection, schema, tableName)
         );
     }
 
@@ -763,6 +819,131 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
         return null;
     }
 
+    /**
+     * The schema this session's catalog queries resolve against — the first
+     * existing entry in the search_path — but only when that search_path was
+     * deliberately set. Falls back to {@code public} otherwise.
+     *
+     * <p>Two distinct fallbacks, for two distinct reasons:
+     *
+     * <ol>
+     *   <li>{@code current_schema()} is null when the search_path names only
+     *       schemas that do not exist. Tagging every object with a null schema
+     *       would be worse than the previous behaviour.
+     *   <li><b>The search_path is still the untouched Postgres default.</b> Every
+     *       Postgres ships {@code "$user", public} — RDS and Aurora included — and
+     *       that leading {@code "$user"} is inert only while no schema matches the
+     *       connecting role's name. Create one (per-tenant layouts, or the per-user
+     *       pattern the Postgres docs recommend and which spread after PG15
+     *       hardened {@code public}) and {@code current_schema()} silently becomes
+     *       that schema. A connection that had been reading {@code public} would
+     *       start reading an empty user schema and report a healthy, empty brain —
+     *       the very failure honouring search_path exists to fix, inverted.
+     * </ol>
+     *
+     * <p>The second case is detected rather than merely logged: an operator who has
+     * not touched search_path gets the historical {@code public} behaviour bit for
+     * bit, and only an explicit setting — {@code ALTER ROLE … SET search_path},
+     * or the JDBC {@code currentSchema} parameter — moves this provider off it.
+     * That keeps the blast radius of this feature to connections that asked for it.
+     *
+     * <p>Deliberately narrow: the check is for the default search_path *exactly*.
+     * Someone who writes {@code "$user", marts} has stated an intent, and it is
+     * honoured.
+     */
+    private String resolveSchema(Connection connection) {
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(
+                 "SELECT current_schema(), current_setting('search_path'), current_user")) {
+            if (rs.next()) {
+                String schema = rs.getString(1);
+                if (schema == null || schema.isBlank()) {
+                    return DEFAULT_SCHEMA;
+                }
+                if (schema.equals(rs.getString(3)) && isUntouchedDefaultSearchPath(rs.getString(2))) {
+                    log.debug("search_path is the Postgres default and '{}' matches the connecting "
+                            + "role, so it was selected by the implicit \"$user\" entry rather than "
+                            + "configured — introspecting '{}' as before", schema, DEFAULT_SCHEMA);
+                    return DEFAULT_SCHEMA;
+                }
+                return schema;
+            }
+        } catch (SQLException e) {
+            log.debug("Could not resolve current_schema(), falling back to {}: {}",
+                DEFAULT_SCHEMA, e.getMessage());
+        }
+        return DEFAULT_SCHEMA;
+    }
+
+    /**
+     * True when search_path is exactly what Postgres ships, ignoring spacing.
+     * Anything else — including a reordered or extended path that still mentions
+     * {@code "$user"} — counts as configured and is honoured.
+     */
+    private boolean isUntouchedDefaultSearchPath(String searchPath) {
+        return searchPath != null
+            && "\"$user\",public".equals(searchPath.replace(" ", ""));
+    }
+
+    /**
+     * Say which schema this pass is reading, so a switch is never silent.
+     *
+     * <p>Postgres ships {@code search_path = "$user", public} everywhere, RDS and
+     * Aurora included. The {@code "$user"} entry is inert only while no schema
+     * matches the connecting role's name — create one (per-tenant layouts, or the
+     * per-user pattern the Postgres docs recommend and which spread after PG15
+     * hardened {@code public}) and {@code current_schema()} silently becomes that
+     * schema. A connection that had been reading {@code public} would then read an
+     * empty user schema and report a healthy, empty brain: the very failure this
+     * class was changed to fix, inverted.
+     *
+     * <p>Logged at INFO only when it is not {@code public}, because {@code public}
+     * is the unchanged historical case and every connection would otherwise emit a
+     * line per introspection pass.
+     *
+     * <p>Called from the two pass-level entry points rather than from
+     * {@link #resolveSchema}, which runs once per table via
+     * {@link #getTableColumns} — logging there would produce one line per table.
+     */
+    private void announceSchema(String schema) {
+        if (!DEFAULT_SCHEMA.equals(schema)) {
+            log.info("Introspecting schema '{}' (from the session search_path, not '{}')",
+                schema, DEFAULT_SCHEMA);
+        } else {
+            log.debug("Introspecting schema '{}'", schema);
+        }
+    }
+
+    /**
+     * Warn on the fingerprint of an accidental schema switch: nothing found here,
+     * while {@code public} — where this provider used to look unconditionally —
+     * still holds tables.
+     *
+     * <p>Without this the outcome is a successful-looking run over an empty schema.
+     * Best-effort: a failure to count is never allowed to break introspection.
+     */
+    private void warnIfEmptyWhilePublicHasTables(Connection connection, String schema, int found) {
+        if (found > 0 || DEFAULT_SCHEMA.equals(schema)) {
+            return;
+        }
+        try (PreparedStatement stmt = connection.prepareStatement(
+                "SELECT count(*) FROM pg_tables WHERE schemaname = ?")) {
+            stmt.setString(1, DEFAULT_SCHEMA);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next() && rs.getLong(1) > 0) {
+                    log.warn("Schema '{}' contains no tables, but '{}' has {}. The session "
+                            + "search_path resolves to '{}' — if that is not intended, check for a "
+                            + "schema named after the connecting role (search_path starts with "
+                            + "\"$user\"), or set it explicitly: "
+                            + "ALTER ROLE <user> IN DATABASE <db> SET search_path = <schema>, public;",
+                        schema, DEFAULT_SCHEMA, rs.getLong(1), schema);
+                }
+            }
+        } catch (SQLException e) {
+            log.debug("Could not compare '{}' against '{}': {}", schema, DEFAULT_SCHEMA, e.getMessage());
+        }
+    }
+
     private String quoteIdentifier(String identifier) {
         return "\"" + identifier.replace("\"", "\"\"") + "\"";
     }
@@ -802,7 +983,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             JOIN pg_namespace n ON n.nspname = t.schemaname
             JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = t.tablename
             LEFT JOIN pg_stat_all_tables s ON s.relid = c.oid
-            WHERE t.schemaname = 'public' AND c.relkind IN ('r', 'p')
+            WHERE t.schemaname = current_schema() AND c.relkind IN ('r', 'p')
             ORDER BY t.tablename
             """;
 
