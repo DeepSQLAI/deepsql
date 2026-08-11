@@ -4,9 +4,9 @@
 #   2. fill in required values in .env
 #   3. docker compose up -d --build     (or ./scripts/self-host/install.sh)
 #
-# There are no prebuilt DeepSQL images and no container registry: `backend` and
-# `frontend` are built from this checkout (backend/Dockerfile and ./Dockerfile).
-# The first build compiles the Java backend and takes several minutes.
+# There are no prebuilt DeepSQL images and no container registry: `backend`,
+# `frontend`, and `deepsql-agent` are built from this checkout. The first build
+# compiles the Java backend and takes several minutes.
 #
 # Recommended self-host mode — pgvector locally for RAG storage:
 #       VECTOR_STORE_TYPE=pgvector
@@ -86,18 +86,15 @@ services:
       # CORS — allow the frontend service (and optional custom domain)
       cors.allowed.origins: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
 
-      # Dashboard generation + Slack/channels call Hermes server-side (AgentChatClient),
-      # not via the browser /agent-api proxy. Point at the host webui; there is no
-      # deepsql-agent Compose service in the four-service self-host stack.
-      AGENT_WEBUI_URL: ${AGENT_WEBUI_URL:-http://host.docker.internal:8787}
+      # DeepSQL Agent — compose-network URLs (Agent tab, dashboards, Slack/CLI)
+      AGENT_WEBUI_URL: ${AGENT_WEBUI_URL:-http://deepsql-agent:8787}
+      AGENT_PROVISIONER_URL: ${AGENT_PROVISIONER_URL:-http://deepsql-agent:8788/provision}
+      AGENT_PROVISION_SECRET: ${AGENT_PROVISION_SECRET:-}
 
       # Self-host should default to the hardened production profile
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       # Automatically set by install.sh for pgvector self-host mode
       SPRING_AUTOCONFIGURE_EXCLUDE: ${SPRING_AUTOCONFIGURE_EXCLUDE:-}
-    # So AGENT_WEBUI_URL=http://host.docker.internal:8787 resolves on Linux too.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     ports:
       - "${DEEPSQL_BACKEND_PORT:-8080}:8080"
     volumes:
@@ -108,6 +105,44 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
+
+  # ── DeepSQL Agent (Agent tab, AI dashboards, Slack/CLI agent turns) ───────────
+  # Fifth container: persona + skills + MCP + profile provisioner. Built from
+  # agent/Dockerfile. Required for the Agent tab and AI dashboard generation.
+  deepsql-agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    env_file:
+      - ${DEEPSQL_RUNTIME_ENV_FILE:-.env}
+    environment:
+      # LLM — same BYO credentials the backend uses
+      DEEPSQL_CHAT_PROVIDER: ${DEEPSQL_CHAT_PROVIDER:-openai}
+      DEEPSQL_CHAT_API_KEY: ${DEEPSQL_CHAT_API_KEY:-}
+      DEEPSQL_CHAT_ENDPOINT: ${DEEPSQL_CHAT_ENDPOINT:-}
+      DEEPSQL_CHAT_MODEL: ${DEEPSQL_CHAT_MODEL:-gpt-5.4}
+      # Reach the backend over the compose network (MCP tools + provisioner)
+      DEEPSQL_API_BASE_URL: http://backend:8080/api/
+      # Shared secret with backend AgentBridgeService
+      AGENT_PROVISION_SECRET: ${AGENT_PROVISION_SECRET:-}
+      # Origins allowed by the agent API CSRF check
+      DEEPSQL_AGENT_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000},http://frontend
+      DEEPSQL_AGENT_TRUSTED_AUTH_HEADER: X-Remote-User
+    ports:
+      - "${DEEPSQL_AGENT_PORT:-8787}:8787"
+      - "${DEEPSQL_AGENT_PROVISIONER_PORT:-8788}:8788"
+    volumes:
+      - dba-agent-agent:/var/lib/deepsql-agent
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8788/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
 
   # ── Frontend (React + nginx) ──────────────────────────────────────────────────
   frontend:
@@ -120,11 +155,8 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    # nginx proxies /agent-api/ → http://host.docker.internal:8787 (see docker/nginx/default.conf).
-    # The agent is optional and usually runs on the host (hermes-webui on :8787).
-    # Docker Desktop injects host.docker.internal; on Linux Compose needs this mapping.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      deepsql-agent:
+        condition: service_started
     ports:
       - "${DEEPSQL_FRONTEND_PORT:-3000}:80"
 
@@ -132,3 +164,4 @@ volumes:
   dba-agent-postgres:
   dba-agent-valkey:
   dba-agent-logs:
+  dba-agent-agent:

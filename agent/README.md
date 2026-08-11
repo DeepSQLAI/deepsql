@@ -44,20 +44,31 @@ agent HTTP API (`/agent-api/*`), not the Hermes webui skin.
 These mirror workflows the in-house `AgentOrchestrator` performed, re-expressed as
 agent persona + skills over the DeepSQL MCP tools.
 
-## Install (local / self-host)
+## Install (self-host / enterprise)
 
-1. Install the upstream agent runtime (see [AGENTS.md](../AGENTS.md) Cursor Cloud notes
-   or the [Hermes install docs](https://hermes-agent.nousresearch.com/)).
-2. Apply DeepSQL customization (requires `AZURE_OPENAI_KEY` in the environment or
+**Preferred:** the `deepsql-agent` Compose service. `./scripts/self-host/install.sh`
+builds `agent/Dockerfile` and starts the Agent API (:8787) + profile provisioner
+(:8788) on the compose network. No host-side agent install is required.
+
+```bash
+./scripts/self-host/install.sh
+# or
+docker compose up -d --build deepsql-agent
+```
+
+### Native / local development (optional)
+
+1. Install the upstream agent runtime (see [AGENTS.md](../AGENTS.md) Cursor Cloud notes).
+2. Apply DeepSQL customization (requires `DEEPSQL_CHAT_API_KEY` in the environment or
    the repo `.env`):
 
 ```bash
 bash agent/install.sh
 ```
 
-It configures `~/.hermes/config.yaml` from this repo:
+It configures the agent home from this repo:
 
-- **model** — Azure OpenAI via its OpenAI-compatible `…/openai/v1` endpoint (key from env/.env, never committed)
+- **model** — via OpenAI-compatible endpoint (key from env/.env, never committed)
 - **mcp_servers.deepsql** — this repo’s `mcp/deepsql-phase1-server.js`
 - **skills.external_dirs** — this repo’s `agent/skills` (source of truth; must be a YAML list)
 - **approvals.mode: smart**, **SOUL.md** persona, and disables host-affecting toolsets
@@ -66,11 +77,15 @@ It configures `~/.hermes/config.yaml` from this repo:
 Verify:
 
 ```bash
-cd ~/.hermes/hermes-agent && uv run hermes mcp test deepsql   # → Connected, DeepSQL tools
+# Compose
+curl -fsS http://localhost:8788/health
+
+# Native (after setup-agent.sh)
+./scripts/self-host/setup-agent.sh
 ```
 
 The DeepSQL MCP server and the Spring backend remain the DBA brain; the agent consumes them.
-Optional upstream webui skin: see [`webui/`](webui/).
+Optional upstream UI skin: see [`webui/`](webui/).
 
 ### Approval UX (operator note)
 

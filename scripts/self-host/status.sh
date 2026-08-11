@@ -43,17 +43,19 @@ else
   echo "unreachable"
 fi
 
-: "${HERMES_WEBUI_PORT:=8787}"
-: "${AGENT_WEBUI_URL:=http://host.docker.internal:8787}"
-printf 'Hermes webui (:%s): ' "$HERMES_WEBUI_PORT"
-if curl -fsS "http://127.0.0.1:${HERMES_WEBUI_PORT}/api/mcp/servers" >/dev/null 2>&1; then
+: "${DEEPSQL_AGENT_PORT:=8787}"
+: "${DEEPSQL_AGENT_PROVISIONER_PORT:=8788}"
+: "${AGENT_WEBUI_URL:=http://deepsql-agent:8787}"
+printf 'DeepSQL Agent provisioner (:%s): ' "$DEEPSQL_AGENT_PROVISIONER_PORT"
+if curl -fsS "http://127.0.0.1:${DEEPSQL_AGENT_PROVISIONER_PORT}/health" >/dev/null 2>&1; then
   echo "ok"
 else
-  echo "unreachable — Agent tab / AI dashboards need ./scripts/self-host/setup-agent.sh"
+  echo "unreachable — check: docker compose logs deepsql-agent"
 fi
-printf 'Backend → Hermes (%s): ' "$AGENT_WEBUI_URL"
-if compose exec -T backend sh -c "curl -fsS --connect-timeout 2 '${AGENT_WEBUI_URL}/api/mcp/servers' >/dev/null" 2>/dev/null; then
-  echo "ok"
+printf 'Backend → DeepSQL Agent (%s): ' "$AGENT_WEBUI_URL"
+agent_code="$(compose exec -T backend sh -c "curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 2 '${AGENT_WEBUI_URL}/api/mcp/servers'" 2>/dev/null || echo "000")"
+if [[ "$agent_code" != "000" && -n "$agent_code" ]]; then
+  echo "ok (HTTP ${agent_code})"
 else
   echo "unreachable"
 fi

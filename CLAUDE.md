@@ -54,6 +54,17 @@ docker compose down             # Stop
 
 **Vault DB**: `jdbc:postgresql://localhost:5432/dba_agent` (postgres/postgres)
 
+### Self-host Compose (5 services)
+
+```bash
+./scripts/self-host/install.sh   # builds + starts everything
+docker compose ps                # postgres, valkey, backend, deepsql-agent, frontend
+```
+
+The **DeepSQL Agent** is the fifth container (`agent/Dockerfile`): Agent tab, AI
+dashboards, Slack/CLI agent turns, and per-user profile provisioning on :8787/:8788.
+No host-side agent install is required for Compose deployments.
+
 ## Architecture
 
 ```
@@ -90,7 +101,7 @@ src/                # Frontend (React)
 
 docs/               # Documentation
 mcp/                # DeepSQL Phase 1 MCP server (Node stdio wrapper around backend APIs)
-agent/              # DeepSQL Agent customization (persona, skills, skins; customized Hermes runtime)
+agent/              # DeepSQL Agent (persona, skills, skins, Dockerfile for the Compose service)
 ```
 
 ## MCP Server

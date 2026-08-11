@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """End-to-end checks for Agent tab + dashboard generate paths.
 
-Requires a running self-host stack, Hermes on :8787, and admin creds in .env.
+Requires a running self-host stack (including the deepsql-agent Compose service)
+and admin creds in .env.
 Usage (from repo root):
   python3 scripts/self-host/e2e-agent-check.py [connectionId]
 """
@@ -81,7 +82,7 @@ def main() -> int:
     print(f"→ connection {conn}")
 
     # ── Agent tab ──────────────────────────────────────────────────────────
-    print("\n=== Agent tab (browser → /agent-api → Hermes → MCP) ===")
+    print("\n=== Agent tab (browser → /agent-api → DeepSQL Agent → MCP) ===")
     bridge = req(f"{backend}/agent/session", {"connectionId": conn})
     profile = bridge["profile"]
     print("profile", profile)
@@ -196,7 +197,7 @@ def main() -> int:
     print("AGENT_OK", agent_ok)
 
     # ── Dashboard generate ─────────────────────────────────────────────────
-    print("\n=== Dashboard generate (backend → Hermes) ===")
+    print("\n=== Dashboard generate (backend → DeepSQL Agent) ===")
     dash_ok = False
     try:
         dash = req(

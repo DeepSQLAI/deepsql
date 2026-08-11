@@ -197,29 +197,32 @@ if [[ "$VECTOR_STORE_TYPE" == "pgvector" && "$DEEPSQL_SMOKE_WAIT_FOR_INIT" == "t
   fi
 fi
 
-# ── Agent paths (Hermes) ────────────────────────────────────────────────────
+# ── DeepSQL Agent paths ─────────────────────────────────────────────────────
 # Agent tab (browser→/agent-api) and dashboards (backend→AGENT_WEBUI_URL) both
-# need Hermes on :8787. Fail loudly when DEEPSQL_SMOKE_AGENT=1 (default) so a
-# "green" smoke test means those UI surfaces will work.
+# need the deepsql-agent Compose service. Fail loudly when DEEPSQL_SMOKE_AGENT=1
+# (default) so a "green" smoke test means those UI surfaces will work.
 : "${DEEPSQL_SMOKE_AGENT:=1}"
 : "${DEEPSQL_FRONTEND_PORT:=3000}"
-: "${AGENT_WEBUI_URL:=http://host.docker.internal:8787}"
-: "${HERMES_WEBUI_PORT:=8787}"
+: "${AGENT_WEBUI_URL:=http://deepsql-agent:8787}"
+: "${DEEPSQL_AGENT_PORT:=8787}"
+: "${DEEPSQL_AGENT_PROVISIONER_PORT:=8788}"
 
 if [[ "$DEEPSQL_SMOKE_AGENT" == "1" ]]; then
-  if ! curl -fsS "http://127.0.0.1:${HERMES_WEBUI_PORT}/api/mcp/servers" >/dev/null 2>&1; then
-    echo "Error: Hermes webui is not reachable on :${HERMES_WEBUI_PORT}." >&2
-    echo "       Agent tab and AI dashboards will fail. Run:" >&2
-    echo "         ./scripts/self-host/setup-agent.sh" >&2
+  if ! curl -fsS "http://127.0.0.1:${DEEPSQL_AGENT_PROVISIONER_PORT}/health" >/dev/null 2>&1; then
+    echo "Error: DeepSQL Agent provisioner is not reachable on :${DEEPSQL_AGENT_PROVISIONER_PORT}." >&2
+    echo "       Agent tab and AI dashboards will fail. Check:" >&2
+    echo "         docker compose logs deepsql-agent" >&2
     exit 1
   fi
 
-  # Backend container must reach Hermes (dashboard / Slack / CLI path).
-  if ! compose exec -T backend sh -c \
-      "curl -fsS --connect-timeout 3 \"${AGENT_WEBUI_URL}/api/mcp/servers\" >/dev/null"; then
+  # Backend container must reach the agent API (dashboard / Slack / CLI path).
+  # The API may return 401 without a session — any HTTP response means reachable.
+  agent_code="$(compose exec -T backend sh -c \
+      "curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 3 '${AGENT_WEBUI_URL}/api/mcp/servers'" \
+      || echo "000")"
+  if [[ "$agent_code" == "000" || -z "$agent_code" ]]; then
     echo "Error: backend cannot reach AGENT_WEBUI_URL=${AGENT_WEBUI_URL}." >&2
-    echo "       Check docker-compose.yml AGENT_WEBUI_URL + extra_hosts, and that" >&2
-    echo "       Hermes binds HERMES_WEBUI_HOST=0.0.0.0." >&2
+    echo "       Check docker-compose.yml AGENT_WEBUI_URL and that deepsql-agent is up." >&2
     exit 1
   fi
 
@@ -268,7 +271,7 @@ if [[ "$DEEPSQL_SMOKE_AGENT" == "1" ]]; then
     exit 1
   fi
 
-  # Backend→Hermes session (dashboard path) — same as AgentChatClient.ensureSession.
+  # Backend→agent session (dashboard path) — same as AgentChatClient.ensureSession.
   backend_switch="$(compose exec -T backend sh -c \
     "curl -fsS -c /tmp/hc.jar -H 'Content-Type: application/json' \
       -X POST '${AGENT_WEBUI_URL}/api/profile/switch' \
@@ -277,12 +280,12 @@ if [[ "$DEEPSQL_SMOKE_AGENT" == "1" ]]; then
       -X POST '${AGENT_WEBUI_URL}/api/session/new' \
       -d '{\"profile\":\"${profile}\",\"enabled_toolsets\":[\"deepsql\",\"skills\"]}'")"
   if [[ "$backend_switch" != *"session_id"* ]]; then
-    echo "Error: backend→Hermes session/new failed (dashboard path)." >&2
+    echo "Error: backend→DeepSQL Agent session/new failed (dashboard path)." >&2
     echo "$backend_switch" >&2
     exit 1
   fi
 
-  echo "Agent smoke checks passed (Hermes up, nginx profile/switch OK, backend session OK)."
+  echo "Agent smoke checks passed (DeepSQL Agent up, nginx profile/switch OK, backend session OK)."
   echo "Agent profile: $profile"
   echo "Agent session: $session_id"
 fi

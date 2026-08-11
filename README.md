@@ -174,16 +174,15 @@ is rejected. Changing width means migrating the column.
 ./scripts/self-host/install.sh
 ```
 
-The installer generates your JWT secret, the credential-vault encryption key and the vault
-DB password, prompts for the first admin account, builds both images, starts the stack, and
-verifies pgvector is live. Unless you set `DEEPSQL_SKIP_AGENT_SETUP=1`, it also runs
-[`scripts/self-host/setup-agent.sh`](scripts/self-host/setup-agent.sh) to install Hermes under
-`~/.hermes/`, wire DeepSQL MCP, and start the webui on `0.0.0.0:8787` (required for the
-**Agent** tab and AI dashboard generation).
+The installer generates your JWT secret, the credential-vault encryption key, the vault
+DB password, and the DeepSQL Agent provision secret; prompts for the first admin account;
+builds the backend, frontend, and DeepSQL Agent images; starts the stack; and verifies
+pgvector is live. The **Agent** tab and AI dashboard generation are served by the
+`deepsql-agent` Compose service — no host-side agent install is required.
 
 **The first build takes several minutes** — it compiles the Spring Boot backend with Maven
-inside the container and bundles the frontend with Vite. It has not hung. Later builds reuse
-the Docker layer cache.
+inside the container, bundles the frontend with Vite, and builds the DeepSQL Agent image.
+It has not hung. Later builds reuse the Docker layer cache.
 
 Then open **http://localhost:3000** and log in with the admin email and password you entered.
 

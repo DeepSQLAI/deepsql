@@ -62,19 +62,17 @@ public class AgentBridgeService {
     private boolean provisionEnabled;
 
     /**
-     * The agent provisioner endpoint.
+     * The DeepSQL Agent provisioner endpoint.
      *
-     * <p>The default names a {@code deepsql-agent} container this distribution does
-     * <em>not</em> ship: the self-host stack is four containers (postgres, valkey,
-     * backend, frontend) and Hermes runs on the host via
-     * {@code scripts/self-host/setup-agent.sh}. Nothing resolves that hostname here,
-     * so the default is unreachable by design and kept only for deployments running
-     * their own containerised provisioner.
+     * <p>Self-host Compose runs the {@code deepsql-agent} service, which exposes
+     * a secret-gated {@code POST /provision} on :8788. The default matches that
+     * compose-network hostname. For native (non-Compose) runs, set
+     * {@code AGENT_PROVISIONER_URL=http://127.0.0.1:8788/provision} and start
+     * {@code scripts/local-agent-provisioner.py}.
      *
-     * <p>That is harmless because provisioning is gated on {@code provisionSecret}
-     * below: unset — the default — no request is ever sent to this URL, and
-     * {@code setup-agent.sh} writes the {@code u-<user>} profile locally instead.
-     * Set both values only if you run your own provisioner.
+     * <p>Provisioning is also gated on {@code provisionSecret}: when unset, no
+     * request is sent and the Agent tab opens without a freshly minted per-user
+     * profile.
      */
     @Value("${agent.provisioner-url:http://deepsql-agent:8788/provision}")
     private String provisionerUrl;

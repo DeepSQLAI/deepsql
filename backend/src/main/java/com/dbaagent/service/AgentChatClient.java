@@ -50,12 +50,11 @@ public class AgentChatClient {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
-     * Base URL of the agent webui. Self-host Compose sets
-     * {@code AGENT_WEBUI_URL=http://host.docker.internal:8787} (no deepsql-agent
-     * service in the four-container stack). Override for a dedicated agent
-     * container on the compose network.
+     * Base URL of the DeepSQL Agent API. Self-host Compose sets
+     * {@code AGENT_WEBUI_URL=http://deepsql-agent:8787}. Override for a
+     * native (non-Compose) agent process on localhost.
      */
-    @Value("${agent.webui-url:http://host.docker.internal:8787}")
+    @Value("${agent.webui-url:http://deepsql-agent:8787}")
     private String webuiUrl;
 
     /** Hard ceiling on a single agent turn for a channel reply. */
