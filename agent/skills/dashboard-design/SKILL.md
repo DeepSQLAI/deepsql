@@ -1,7 +1,7 @@
 ---
 name: dashboard-design
 description: Design and code a self-contained HTML dashboard for DeepSQL — ground on the schema, verify SQL, then write a beautiful single-file dashboard that loads data via the deepsql.query bridge.
-version: 2.0.0
+version: 2.1.0
 platforms: [linux, macos, windows]
 metadata:
   hermes:
@@ -23,15 +23,25 @@ await deepsql.query("SELECT ...")         // -> { columns: string[], rows: any[]
 deepsql.ready(fn)                          // runs fn() once the bridge is live (use this to kick off loading)
 
 // Charts — ALWAYS use these instead of hand-writing SVG. Built-in hover tooltips
-// (show the value on mouse-over), number formatting, sparse axis labels, and a
-// graceful "No data" empty state. Pass the deepsql.query result straight in, or
-// [{label,value}] / [[label,value]]. First column = label, second = value (or
-// opts.labelKey/valueKey). opts: { valueFormat(fn), height, color, emptyText }.
+// (show the value on mouse-over), number formatting, sparse axis labels, a
+// graceful "No data" empty state, and a corner expand button that opens the
+// same chart larger in an overlay — all automatic, nothing to wire yourself.
+// Pass the deepsql.query result straight in, or [{label,value}] / [[label,value]].
+// First column = label, second = value (or opts.labelKey/valueKey).
+// opts: { valueFormat(fn), height, color, emptyText, title }.
 deepsql.charts.bar(elOrSelector, data, opts)     // rankings, counts by day
 deepsql.charts.line(elOrSelector, data, opts)     // trends over time (area+line)
 deepsql.charts.donut(elOrSelector, data, opts)    // share/composition (with legend + %)
 deepsql.charts.format(n)                           // human number formatter
 ```
+
+**Chart sizing and the expand control are handled by the runtime — do not build your own.**
+Height is fixed regardless of container width (a chart in a wide card never balloons), and every
+chart already gets a corner "expand" button that opens a larger re-render in an overlay — this is
+exactly the kind of per-chart chrome that's tempting to hand-roll and easy to get inconsistent
+across widgets, so it's built into `deepsql.charts.*` once instead. Pass `opts.title` (the chart's
+plain-business-language heading) so the expanded overlay has something to show as its title — do
+not add your own zoom/expand/fullscreen button, modal, or lightbox; one already exists per chart.
 
 Hard rules:
 - Inline everything — one `<style>`, one or more `<script>`. **No external URLs, CDNs, fonts, or images** (blocked by CSP) and **no `fetch()`/XHR/WebSocket** — data comes only from `deepsql.query`.
@@ -52,6 +62,9 @@ Hard rules:
    - No `undefined` / `null` / `NaN` can reach the screen — every injected value is guarded with a fallback. Pay special attention to KPI sub-labels and any computed % (e.g. a "top source share" caption).
    - Every explicit user ask from the intent checklist is present and wired (controls default correctly and re-query on change).
    - No table/column/SQL/connection-id text is visible anywhere.
+   - No AI-slop pattern from the section below is present (gradient background/hero, emoji-as-icon,
+     decorative blobs/glassmorphism, uniform shadows, off-scale spacing/type, more than one accented
+     "hero" card, hand-rolled chart colors or expand/zoom controls).
    A dashboard that renders with a blank chart or an "undefined" label is a failed build — catch it here.
 
 ## NEVER expose internals (security + UX — non-negotiable)
@@ -79,6 +92,45 @@ Rules:
 - Charts: **use `deepsql.charts.*`** — they hover-tooltip, format, and handle empty data for you. Don't hand-write chart SVG.
 - Numbers formatted for humans (`deepsql.charts.format(n)` / thousands separators; currency symbol from the business rule) — never raw.
 - **Never render `undefined`, `null`, or `NaN`.** Guard every value you inject into the DOM (`v == null ? '—' : v`); a KPI sub-line/label with no value must fall back to a dash or be omitted — not the literal text "undefined".
+
+## Avoid AI-slop patterns (named, so you can catch yourself)
+
+These are the specific tells that make a generated dashboard look generated instead of
+designed. Each one is easy to reach for by default — that's exactly why it needs to be named
+and ruled out explicitly, not left to taste.
+
+- **No default purple/blue/pink gradient backgrounds.** A `linear-gradient(135deg, #667eea, #764ba2)`-style
+  hero band, header, or card is the single most recognizable AI-generated-UI signature. `--ds-grad`
+  exists for exactly one purpose — a subtle lift on the single most important KPI card — never a page
+  background, never a header banner, never more than one card on the whole dashboard.
+- **No emoji as icons, bullets, or section markers.** Not in KPI labels, not in section headers, not
+  as a substitute for a real icon. If a visual marker is needed, use a plain shape (a dot, a small
+  colored square in a legend) — never 📊📈💰✨ etc.
+- **No oversized rounded "blob" shapes, decorative background circles, or glassmorphism for its own
+  sake.** `backdrop-filter`/translucency is not part of this theme — don't add it. Every visual
+  element must carry information (a card, a chart, a legend swatch); nothing is decoration.
+- **No uniform drop-shadow on every element.** `--ds-shadow` is for cards that sit on `--ds-bg` —
+  don't add extra shadows to buttons, badges, or text, and don't stack multiple shadow layers for
+  "depth." Flat and quiet is correct here.
+- **No arbitrary one-off spacing or font sizes.** Pick from a small fixed scale and stay on it for
+  the whole document:
+  - Spacing: `4px 8px 12px 16px 24px 32px` — nothing between these, nothing larger without a real reason.
+  - Type: 3 sizes total — a KPI number (~28–32px, bold), section/card headings (~14–15px, semibold),
+    body/labels (~12–13px, regular). Don't introduce a fourth size for a one-off caption.
+- **No centered "hero" layout with everything stacked in one narrow column.** This is a working
+  dashboard, not a landing page — use a real grid (`auto-fit`/`auto-fill` KPI row, multi-column chart
+  layout) that uses the available width purposefully.
+- **Chart color discipline:** stick to the theme's own greyscale chart palette (already built into
+  `deepsql.charts.*` — you don't choose chart colors). Don't override `opts.color` per chart to
+  introduce your own arbitrary hues; the built-in palette is the whole point of using the shared
+  chart runtime instead of hand-rolled SVG.
+- **One hero KPI, not a "hero row."** If more than one card gets the gradient/accent treatment,
+  none of them read as important — that defeats the point. Pick the single number the business
+  question is actually about and reserve the accent for it alone.
+
+Before emitting, ask: **would this ship, unedited, from a design team that obsesses over every
+pixel — or does it look like the first thing a template generator produced?** If any of the
+patterns above are present, that's your answer.
 
 ## Interaction
 

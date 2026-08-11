@@ -126,6 +126,13 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
     if (abortRef.current) abortRef.current()
     abortRef.current = generateDashboardStream(connectionId, prompt, config, {
       onStep: (s) => setSteps((prev) => [...prev, s]),
+      onChat: (reply) => {
+        // Just a reply — e.g. "hi" — not a dashboard change. No save, no config touch.
+        abortRef.current = null
+        setThinking(false)
+        setSteps([])
+        setMessages((m) => [...m, { role: 'agent', text: reply || '…' }])
+      },
       onDone: (next) => {
         abortRef.current = null
         setConfig(next)
@@ -196,18 +203,32 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
             {thinking && (
               <div className={styles.trace}>
                 <div className={styles.traceHead}>
-                  <Loader2 size={13} className={styles.spin} /> Working… {elapsed}s
+                  <span className={styles.traceHeadLabel}>
+                    <span className={styles.traceDotOuter}><span className={styles.traceDotInner} /></span>
+                    Working
+                  </span>
+                  <span className={styles.traceTime}>{elapsed}s</span>
                 </div>
-                {steps.length === 0 && <div className={styles.traceStep}><Brain size={12} /> <span>Consulting the brain…</span></div>}
-                {steps.slice(-7).map((s, i, arr) => {
-                  const Icon = STEP_ICON[s.type] || ClipboardCheck
-                  const last = i === arr.length - 1
-                  return (
-                    <div key={steps.length - arr.length + i} className={last ? styles.traceStepActive : styles.traceStep}>
-                      <Icon size={12} /> <span>{s.message}</span>
-                    </div>
-                  )
-                })}
+                <div className={styles.traceList}>
+                  {(steps.length === 0
+                    ? [{ type: 'grounding', message: 'Consulting the brain…' }]
+                    : steps.slice(-7)
+                  ).map((s, i, arr) => {
+                    const Icon = STEP_ICON[s.type] || ClipboardCheck
+                    const last = i === arr.length - 1
+                    return (
+                      <div key={steps.length - arr.length + i} className={styles.traceRow}>
+                        <span className={styles.traceRail}>
+                          <span className={last ? styles.traceIconActive : styles.traceIconDone}>
+                            {last ? <Icon size={11} /> : <Check size={11} />}
+                          </span>
+                          {i < arr.length - 1 && <span className={styles.traceLine} />}
+                        </span>
+                        <span className={last ? styles.traceTextActive : styles.traceTextDone}>{s.message}</span>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             )}
           </div>

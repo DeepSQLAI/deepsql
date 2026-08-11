@@ -7,13 +7,18 @@ import { dashboardGenAPI } from '@/lib/api/client'
 // HTML document — streaming its steps to the UI. The artifact renders in a
 // sandboxed iframe and fetches data via the read-only deepsql.query bridge.
 
-// Streaming generate. Handlers: onStep({type,message}), onDone(config), onError(Error).
+// Streaming generate. Handlers: onStep({type,message}), onDone(config), onError(Error),
+// onChat(replyText) for a plain conversational reply (no dashboard change — e.g. "hi").
 // Returns an abort fn. The final config is the artifact spec
 // ({version:3, renderMode:'artifact', title, html}).
-export function generateDashboardStream(connectionId, prompt, currentConfig, { onStep, onDone, onError } = {}) {
+export function generateDashboardStream(connectionId, prompt, currentConfig, { onStep, onDone, onError, onChat } = {}) {
   return dashboardGenAPI.generateStream(connectionId, prompt, currentConfig, {
     onStep,
     onDone: (data) => {
+      if (data?.dashboardConfig?.chat) {
+        onChat && onChat(data.dashboardConfig.reply || '')
+        return
+      }
       if (!data?.dashboardConfig) {
         onError && onError(new Error(data?.error || 'Generation returned no dashboard.'))
         return
