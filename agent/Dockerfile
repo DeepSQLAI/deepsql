@@ -42,7 +42,7 @@ WORKDIR /opt/deepsql-agent
 ARG AGENT_RUNTIME_REPO=https://github.com/NousResearch/hermes-agent.git
 ARG AGENT_RUNTIME_REF=main
 ARG AGENT_API_REPO=https://github.com/nesquena/hermes-webui.git
-ARG AGENT_API_REF=main
+ARG AGENT_API_REF=master
 
 # Runtime engine (Python agent)
 RUN git clone --depth 1 --branch "${AGENT_RUNTIME_REF}" "${AGENT_RUNTIME_REPO}" runtime \
@@ -54,8 +54,10 @@ RUN git clone --depth 1 --branch "${AGENT_RUNTIME_REF}" "${AGENT_RUNTIME_REPO}" 
     # and breaks every DeepSQL tool call until the runtime catches up.
     && UV_NO_CONFIG=1 uv pip install --python venv/bin/python 'mcp>=1.0,<2' 'pyyaml>=6'
 
-# HTTP API surface the frontend / backend talk to (:8787)
+# HTTP API surface the frontend / backend talk to (:8787).
+# Default branch is master (not main). Fall back to HEAD if the ref moves.
 RUN git clone --depth 1 --branch "${AGENT_API_REF}" "${AGENT_API_REPO}" api \
+    || git clone --depth 1 "${AGENT_API_REPO}" api \
     && cd api \
     && if [ -f requirements.txt ]; then \
          /opt/deepsql-agent/runtime/venv/bin/pip install -r requirements.txt; \
