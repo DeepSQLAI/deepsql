@@ -33,15 +33,25 @@ const BRIDGE = `
     if (d.error) p.reject(new Error(d.error));
     else p.resolve({ columns: d.columns || [], rows: d.rows || [] });
   });
+  // Report only the content's own height, never the iframe's current rendered
+  // height — scrollHeight on a body with height:auto reflects content size and
+  // can't be inflated by whatever height the parent last set, so this can't
+  // feed back into itself. Debounced and deduped so parent-side layout thrash
+  // (e.g. a page scroll) can't retrigger it with the same value.
+  var lastReported=-1, reportTimer=null;
   function reportHeight(){
-    var h = Math.max(document.body ? document.body.scrollHeight : 0,
-                     document.documentElement ? document.documentElement.scrollHeight : 0);
-    send({ __deepsql:true, type:'height', value: h });
+    if (reportTimer) return;
+    reportTimer = setTimeout(function(){
+      reportTimer = null;
+      var h = document.documentElement ? document.documentElement.scrollHeight : 0;
+      if (h === lastReported) return;
+      lastReported = h;
+      send({ __deepsql:true, type:'height', value: h });
+    }, 50);
   }
   window.addEventListener('load', function(){
     reportHeight();
     try { new ResizeObserver(reportHeight).observe(document.body); } catch(e){}
-    setInterval(reportHeight, 1000);
   });
   window.addEventListener('error', function(e){
     send({ __deepsql:true, type:'jserror', message: (e && e.message) || 'script error' });
@@ -84,9 +94,13 @@ const MAX_TOTAL_QUERIES = 400
 const QUERY_TIMEOUT_MS = 25000
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+const REDUCED_MOTION = typeof window !== 'undefined'
+  && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+
 export default function DashboardArtifact({ connectionId, html, onError, queryFn }) {
   const iframeRef = useRef(null)
   const [height, setHeight] = useState(600)
+  const [loaded, setLoaded] = useState(false)
   const queueRef = useRef([])
   const inflightRef = useRef(0)
   const totalRef = useRef(0)
@@ -162,11 +176,13 @@ export default function DashboardArtifact({ connectionId, html, onError, queryFn
   }, [onMessage])
 
   // New artifact (generate/edit) reloads the iframe — reset the throttle so a
-  // fresh dashboard isn't blocked by the prior one's runaway cap.
+  // fresh dashboard isn't blocked by the prior one's runaway cap, and fade the
+  // new one in rather than popping at whatever height it first reports.
   useEffect(() => {
     queueRef.current = []
     inflightRef.current = 0
     totalRef.current = 0
+    setLoaded(false)
   }, [html])
 
   return (
@@ -175,7 +191,19 @@ export default function DashboardArtifact({ connectionId, html, onError, queryFn
       title="Dashboard"
       sandbox="allow-scripts"
       srcDoc={buildSrcDoc(html || '', connectionId)}
-      style={{ width: '100%', height, border: 'none', display: 'block', background: '#f8fafc' }}
+      onLoad={() => setLoaded(true)}
+      style={{
+        width: '100%',
+        height,
+        border: 'none',
+        display: 'block',
+        background: '#f8fafc',
+        opacity: loaded ? 1 : 0,
+        // Height snaps immediately, never transitions — animating it risked measuring
+        // the iframe's own in-transition rendered height as if it were new content,
+        // a feedback loop that made the page grow on every scroll/resize tick.
+        transition: REDUCED_MOTION ? 'opacity 150ms linear' : 'opacity 320ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+      }}
     />
   )
 }
