@@ -56,11 +56,11 @@ RUN git clone --depth 1 --branch "${AGENT_RUNTIME_REF}" "${AGENT_RUNTIME_REPO}" 
 
 # HTTP API surface the frontend / backend talk to (:8787).
 # Default branch is master (not main). Fall back to HEAD if the ref moves.
-RUN git clone --depth 1 --branch "${AGENT_API_REF}" "${AGENT_API_REPO}" api \
-    || git clone --depth 1 "${AGENT_API_REPO}" api \
+RUN (git clone --depth 1 --branch "${AGENT_API_REF}" "${AGENT_API_REPO}" api \
+      || git clone --depth 1 "${AGENT_API_REPO}" api) \
     && cd api \
     && if [ -f requirements.txt ]; then \
-         /opt/deepsql-agent/runtime/venv/bin/pip install -r requirements.txt; \
+         UV_NO_CONFIG=1 uv pip install --python /opt/deepsql-agent/runtime/venv/bin/python -r requirements.txt; \
        fi
 
 # DeepSQL product surface — persona, skills, branding, MCP, provisioner.
