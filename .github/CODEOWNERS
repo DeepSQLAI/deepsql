@@ -3,7 +3,7 @@
 # GitHub applies LAST MATCH WINS — only the final matching pattern's owners are
 # requested. Order therefore matters: the catch-all is first and the narrow
 # security paths are last, so a change under backend/.../security/ is routed to
-# @DeepSQLAI/security and not merely to the maintainers.
+# the two named security reviewers and not merely to the maintainers.
 #
 # A caveat worth stating in the file itself, because the process document implies
 # otherwise: CODEOWNERS cannot require a DIFFERENT NUMBER of approvals for
@@ -12,8 +12,11 @@
 # vault, auth and SQL-execution paths is therefore a reviewer convention here,
 # not a machine-enforced gate — see the note in SECURITY.md.
 #
-# Teams, not usernames, on purpose: a permissions change is then one edit to the
-# team roster rather than a sweep across this file.
+# Teams for the broad surface, named individuals for the security paths. The
+# catch-all stays on @DeepSQLAI/maintainers, so a roster change there is one edit
+# to the team. The security paths name @geekypunk and @venkateshsakamuri-lab
+# directly, so that review on them does not widen automatically with the
+# maintainer roster; keep those lines in sync by hand.
 
 *                                                       @DeepSQLAI/maintainers
 
@@ -34,31 +37,31 @@
 # Renaming anything here silently breaks every operator's .env on upgrade.
 /.env.example                                           @DeepSQLAI/maintainers
 
-# ── Security-critical: convention is two maintainer approvals ───────────────
+# ── Security-critical: convention is two security-reviewer approvals ───────
 # Credential vault, encryption key handling, authentication and JWT. The vault
 # holds an AES-GCM key whose loss is unrecoverable.
-/backend/src/main/java/com/dbaagent/security/           @DeepSQLAI/security
-/backend/src/main/java/com/dbaagent/service/security/   @DeepSQLAI/security
+/backend/src/main/java/com/dbaagent/security/           @geekypunk @venkateshsakamuri-lab
+/backend/src/main/java/com/dbaagent/service/security/   @geekypunk @venkateshsakamuri-lab
 
 # Read-only SQL execution enforcement. This is the guardrail standing between a
 # generated statement and a customer's production database.
-/backend/src/main/java/com/dbaagent/service/McpSqlGuardService.java              @DeepSQLAI/security
-/backend/src/main/java/com/dbaagent/service/QueryExecutionContext.java           @DeepSQLAI/security
-/backend/src/main/java/com/dbaagent/service/QueryExecutionPolicyService.java     @DeepSQLAI/security
-/backend/src/main/java/com/dbaagent/service/QueryExecutionPolicyException.java   @DeepSQLAI/security
-/backend/src/main/java/com/dbaagent/model/McpReadOnlyQueryRequest.java           @DeepSQLAI/security
-/backend/src/main/java/com/dbaagent/model/McpReadOnlyExplainRequest.java         @DeepSQLAI/security
-/backend/src/main/java/com/dbaagent/model/QueryExecutionOrigin.java              @DeepSQLAI/security
-/backend/src/main/java/com/dbaagent/provider/api/QueryExecutionProvider.java     @DeepSQLAI/security
+/backend/src/main/java/com/dbaagent/service/McpSqlGuardService.java              @geekypunk @venkateshsakamuri-lab
+/backend/src/main/java/com/dbaagent/service/QueryExecutionContext.java           @geekypunk @venkateshsakamuri-lab
+/backend/src/main/java/com/dbaagent/service/QueryExecutionPolicyService.java     @geekypunk @venkateshsakamuri-lab
+/backend/src/main/java/com/dbaagent/service/QueryExecutionPolicyException.java   @geekypunk @venkateshsakamuri-lab
+/backend/src/main/java/com/dbaagent/model/McpReadOnlyQueryRequest.java           @geekypunk @venkateshsakamuri-lab
+/backend/src/main/java/com/dbaagent/model/McpReadOnlyExplainRequest.java         @geekypunk @venkateshsakamuri-lab
+/backend/src/main/java/com/dbaagent/model/QueryExecutionOrigin.java              @geekypunk @venkateshsakamuri-lab
+/backend/src/main/java/com/dbaagent/provider/api/QueryExecutionProvider.java     @geekypunk @venkateshsakamuri-lab
 
 # SSH tunnelling: reaches into networks the operator has not otherwise exposed.
-/backend/src/main/java/com/dbaagent/service/SshTunnelService.java                @DeepSQLAI/security
+/backend/src/main/java/com/dbaagent/service/SshTunnelService.java                @geekypunk @venkateshsakamuri-lab
 
 # The dashboard sandbox and its read-only query bridge. The public controller is
 # reachable unauthenticated for as long as a dashboard is shared.
-/backend/src/main/java/com/dbaagent/controller/DashboardQueryController.java     @DeepSQLAI/security
-/backend/src/main/java/com/dbaagent/controller/PublicDashboardController.java    @DeepSQLAI/security
-/src/components/DashboardArtifact.jsx                                           @DeepSQLAI/security
+/backend/src/main/java/com/dbaagent/controller/DashboardQueryController.java     @geekypunk @venkateshsakamuri-lab
+/backend/src/main/java/com/dbaagent/controller/PublicDashboardController.java    @geekypunk @venkateshsakamuri-lab
+/src/components/DashboardArtifact.jsx                                           @geekypunk @venkateshsakamuri-lab
 
 # The MCP tool surface and its authorisation: an agent-facing remote surface.
-/mcp/                                                   @DeepSQLAI/security
+/mcp/                                                   @geekypunk @venkateshsakamuri-lab
