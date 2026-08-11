@@ -126,6 +126,13 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
     if (abortRef.current) abortRef.current()
     abortRef.current = generateDashboardStream(connectionId, prompt, config, {
       onStep: (s) => setSteps((prev) => [...prev, s]),
+      onChat: (reply) => {
+        // Just a reply — e.g. "hi" — not a dashboard change. No save, no config touch.
+        abortRef.current = null
+        setThinking(false)
+        setSteps([])
+        setMessages((m) => [...m, { role: 'agent', text: reply || '…' }])
+      },
       onDone: (next) => {
         abortRef.current = null
         setConfig(next)

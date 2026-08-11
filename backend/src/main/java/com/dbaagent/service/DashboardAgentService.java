@@ -5,6 +5,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -51,15 +56,18 @@ public class DashboardAgentService {
     private final AccessControlService accessControlService;
     private final AgentBridgeService agentBridgeService;
     private final AgentChatClient agentChatClient;
+    private final ChatClient intentChatClient;
 
     public DashboardAgentService(ObjectMapper objectMapper,
                                  AccessControlService accessControlService,
                                  AgentBridgeService agentBridgeService,
-                                 AgentChatClient agentChatClient) {
+                                 AgentChatClient agentChatClient,
+                                 ChatModel chatModel) {
         this.objectMapper = objectMapper;
         this.accessControlService = accessControlService;
         this.agentBridgeService = agentBridgeService;
         this.agentChatClient = agentChatClient;
+        this.intentChatClient = ChatClient.builder(chatModel).build();
     }
 
     public Map<String, Object> generate(String connectionId, String prompt, Object currentConfig, StepListener listener) {
@@ -73,6 +81,26 @@ public class DashboardAgentService {
         String sessionId = agentChatClient.ensureSession(profile, null);
         if (sessionId == null) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "The DeepSQL agent is unavailable right now.");
+        }
+
+        // Most messages are a real build/edit ask, so default to the full pipeline —
+        // only skip it for something that plainly isn't one (a greeting, a question
+        // about the tool itself). Answering "hi" by grounding on the schema, writing
+        // SQL, and self-reviewing an HTML document is where the multi-minute replies
+        // to trivial messages came from.
+        if (isChatOnly(prompt)) {
+            emit(l, trace, "planning", "Replying…");
+            AgentChatClient.AgentReply chatReply = agentChatClient.sendAndAwait(sessionId, buildChatTask(prompt));
+            if (chatReply.ok() && chatReply.text() != null && !chatReply.text().isBlank()) {
+                emit(l, trace, "done", "Replied");
+                Map<String, Object> chat = new LinkedHashMap<>();
+                chat.put("chat", true);
+                chat.put("reply", chatReply.text().trim());
+                chat.put("trace", trace);
+                return chat;
+            }
+            // Ambiguous or the agent didn't just answer — fall through to a real build
+            // rather than surfacing a failure for what might be a legitimate request.
         }
 
         emit(l, trace, "planning", "Agent is grounding, writing SQL, and coding the dashboard…");
@@ -104,6 +132,51 @@ public class DashboardAgentService {
         cfg.put("html", html);
         cfg.put("trace", trace);
         return cfg;
+    }
+
+    // ── chat-only detection ─────────────────────────────────────────────────
+
+    // A one-word classification call, not a keyword match: a fixed word list can't
+    // tell "make it prettier" or "no, the other one" from a real edit ask. This is a
+    // direct ChatModel call (no agent session, no tools) so it stays fast — the whole
+    // point is answering "hi" without paying for a grounding+SQL+self-review turn.
+    // Biased toward CHAT=false (i.e. toward the full pipeline) in the prompt itself:
+    // a wrong "this is chat" guess on a real request is far worse than an occasional
+    // unnecessary grounding pass on a genuine one-word greeting.
+    private static final String INTENT_SYSTEM_PROMPT = """
+        Classify one chat message from a BI dashboard builder. Decide whether it is a
+        request to build, edit, or change a chart/dashboard/metric/data view (CHAT=false),
+        or plainly just conversation — a greeting, thanks, or a question about the tool
+        itself with no dashboard content in it (CHAT=true).
+
+        If in doubt, answer false — treat anything that could plausibly be about the data
+        or the dashboard's content/appearance as a real request, even if short or vague
+        ("make it prettier", "no, the other one", "add a filter").
+
+        Reply with exactly one word, "true" or "false". No punctuation, no explanation.
+        """;
+    private static final int CHAT_ONLY_MAX_CHARS = 200;
+
+    private boolean isChatOnly(String prompt) {
+        if (prompt == null) return false;
+        String p = prompt.trim();
+        if (p.isEmpty() || p.length() > CHAT_ONLY_MAX_CHARS) return false;
+        try {
+            List<Message> messages = List.of(new SystemMessage(INTENT_SYSTEM_PROMPT), new UserMessage(p));
+            String verdict = intentChatClient.prompt().messages(messages).call().content();
+            return verdict != null && verdict.trim().toLowerCase().startsWith("true");
+        } catch (Exception e) {
+            log.warn("Chat-intent classification failed, defaulting to full pipeline: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private String buildChatTask(String prompt) {
+        return "The user sent this message in the dashboard builder's chat: \"" + prompt.trim() + "\"\n\n"
+            + "It does not read as a request to build or change a chart/dashboard — it looks like a "
+            + "greeting, small talk, or a question about what you can do. Reply briefly and naturally "
+            + "in plain text (no HTML, no code block, no tool calls, no grounding, no SQL). If it's a "
+            + "greeting, greet back and invite them to describe a dashboard. Keep it to 1-2 sentences.";
     }
 
     // ── the task the agent runs ────────────────────────────────────────────
