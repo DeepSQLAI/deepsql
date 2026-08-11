@@ -306,21 +306,81 @@ start_webui() {
   local certifi
   certifi="$("$py" -c 'import certifi; print(certifi.where())' 2>/dev/null || true)"
 
+  # CORS for browser → nginx → /agent-api (must include the frontend origin:port).
+  local allowed_origins="${HERMES_WEBUI_ALLOWED_ORIGINS:-http://localhost:${FRONTEND_PORT},http://127.0.0.1:${FRONTEND_PORT}}"
+
   echo "→ Starting Hermes webui on ${WEBUI_HOST}:${WEBUI_PORT}"
+
+  # On macOS, prefer a LaunchAgent. Shell-spawned nohup children get SIGKILL'd when
+  # some IDE/agent terminals tear down the process group — the Agent tab then
+  # immediately reports "runtime unavailable".
+  if [[ "$(uname -s)" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
+    local label="com.deepsql.hermes-webui"
+    local plist="$HOME/Library/LaunchAgents/${label}.plist"
+    local uid
+    uid="$(id -u)"
+    mkdir -p "$HOME/Library/LaunchAgents"
+    launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
+    pkill -f "${WEBUI_DIR}/server.py" 2>/dev/null || true
+    cat >"$plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${label}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${py}</string>
+    <string>${WEBUI_DIR}/server.py</string>
+  </array>
+  <key>WorkingDirectory</key><string>${WEBUI_DIR}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HERMES_HOME</key><string>${HERMES_HOME}</string>
+    <key>HERMES_WEBUI_HOST</key><string>${WEBUI_HOST}</string>
+    <key>HERMES_WEBUI_PORT</key><string>${WEBUI_PORT}</string>
+    <key>HERMES_WEBUI_ALLOWED_ORIGINS</key><string>${allowed_origins}</string>
+    <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+$(if [[ -n "$certifi" ]]; then
+  printf '    <key>SSL_CERT_FILE</key><string>%s</string>\n' "$certifi"
+  printf '    <key>REQUESTS_CA_BUNDLE</key><string>%s</string>\n' "$certifi"
+  printf '    <key>CURL_CA_BUNDLE</key><string>%s</string>\n' "$certifi"
+fi)
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>${HERMES_HOME}/logs/webui.launchd.out.log</string>
+  <key>StandardErrorPath</key><string>${HERMES_HOME}/logs/webui.launchd.err.log</string>
+</dict>
+</plist>
+PLIST
+    launchctl bootstrap "gui/${uid}" "$plist" 2>/dev/null \
+      || launchctl load -w "$plist"
+    wait_for_http "http://127.0.0.1:${WEBUI_PORT}/api/mcp/servers" "Hermes webui" 30 1
+    return 0
+  fi
+
+  # Linux / non-launchd: detach from this script's process group.
+  rm -f "$PID_FILE"
   (
+    cd "$WEBUI_DIR" || exit 1
     export HERMES_HOME
     export HERMES_WEBUI_HOST="$WEBUI_HOST"
     export HERMES_WEBUI_PORT="$WEBUI_PORT"
+    export HERMES_WEBUI_ALLOWED_ORIGINS="$allowed_origins"
     unset HERMES_WEBUI_PASSWORD
     if [[ -n "$certifi" ]]; then
       export SSL_CERT_FILE="$certifi"
       export REQUESTS_CA_BUNDLE="$certifi"
       export CURL_CA_BUNDLE="$certifi"
     fi
-    cd "$WEBUI_DIR"
-    # Prefer venv/python for the process itself (has MCP when installed there).
-    nohup "$py" server.py >>"$LOG_FILE" 2>&1 &
+    if command -v setsid >/dev/null 2>&1; then
+      setsid nohup "$py" server.py >>"$LOG_FILE" 2>&1 </dev/null &
+    else
+      nohup "$py" server.py >>"$LOG_FILE" 2>&1 </dev/null &
+    fi
     echo $! >"$PID_FILE"
+    disown $! 2>/dev/null || true
   )
   wait_for_http "http://127.0.0.1:${WEBUI_PORT}/api/mcp/servers" "Hermes webui" 30 1
 }
