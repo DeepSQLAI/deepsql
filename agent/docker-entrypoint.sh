@@ -85,7 +85,15 @@ export HERMES_WEBUI_PORT="$API_PORT"
 export HERMES_WEBUI_ALLOWED_ORIGINS="${DEEPSQL_AGENT_ALLOWED_ORIGINS:-${HERMES_WEBUI_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://frontend}}"
 
 # Trust DeepSQL nginx as an auth gateway (X-Remote-User header).
+# Setting the header name enables the upstream auth gate; without a proxy
+# allowlist only loopback peers are trusted, so every compose-network hop
+# (frontend nginx, backend AgentChatClient) was rejected with
+# "Authentication required". Allow RFC1918 by default — the agent is not
+# published without DeepSQL's own session gate on /agent-api, and the
+# published :8787 port still requires the trusted header from an allowlisted
+# peer (host curls without the header keep getting 401).
 export HERMES_WEBUI_TRUSTED_AUTH_HEADER="${DEEPSQL_AGENT_TRUSTED_AUTH_HEADER:-${HERMES_WEBUI_TRUSTED_AUTH_HEADER:-X-Remote-User}}"
+export HERMES_WEBUI_TRUSTED_PROXY_CIDRS="${DEEPSQL_AGENT_TRUSTED_PROXY_CIDRS:-${HERMES_WEBUI_TRUSTED_PROXY_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}}"
 
 log "home=$AGENT_HOME"
 log "model=$MODEL @ $BASE_URL"

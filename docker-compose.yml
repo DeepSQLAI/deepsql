@@ -132,6 +132,12 @@ services:
       # Origins allowed by the agent API CSRF check
       DEEPSQL_AGENT_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000},http://frontend
       DEEPSQL_AGENT_TRUSTED_AUTH_HEADER: X-Remote-User
+      # Frontend nginx + backend share the compose bridge; without this the
+      # agent ignores X-Remote-User (peer is not loopback) and every Agent
+      # tab / dashboard call returns 401 Authentication required.
+      DEEPSQL_AGENT_TRUSTED_PROXY_CIDRS: ${DEEPSQL_AGENT_TRUSTED_PROXY_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
+      HERMES_WEBUI_TRUSTED_PROXY_CIDRS: ${DEEPSQL_AGENT_TRUSTED_PROXY_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
+      HERMES_WEBUI_TRUSTED_AUTH_HEADER: X-Remote-User
     ports:
       - "${DEEPSQL_AGENT_PORT:-8787}:8787"
       - "${DEEPSQL_AGENT_PROVISIONER_PORT:-8788}:8788"

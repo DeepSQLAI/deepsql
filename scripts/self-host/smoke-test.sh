@@ -18,6 +18,7 @@ source "$ENV_FILE"
 set +a
 
 : "${DEEPSQL_BACKEND_PORT:=8080}"
+: "${DEEPSQL_FRONTEND_PORT:=3000}"
 : "${DB_PASSWORD:=postgres}"
 : "${DEEPSQL_INITIAL_ADMIN_EMAIL:=}"
 : "${DEEPSQL_INITIAL_ADMIN_PASSWORD:=}"
@@ -87,7 +88,19 @@ trap 'rm -f "$cookie_jar"' EXIT
 login_json=""
 login_deadline=$((SECONDS + 120))
 while (( SECONDS < login_deadline )); do
-  if login_json="$(curl -fsS -c "$cookie_jar" -H 'Content-Type: application/json' -X POST "$base/auth/login" -d "{\"email\":\"${DEEPSQL_SMOKE_EMAIL}\",\"password\":\"${DEEPSQL_SMOKE_PASSWORD}\"}" 2>/dev/null)"; then
+  # Login through the frontend proxy so the cookie jar matches the Host the
+  # browser (and /agent-api auth_request) will use. A jar filled against
+  # :8080 alone has made nginx's auth_request return 401 even when /auth/me
+  # on the backend would succeed with the same cookie.
+  if login_json="$(curl -fsS -c "$cookie_jar" -H 'Content-Type: application/json' \
+       -X POST "http://localhost:${DEEPSQL_FRONTEND_PORT}/api/auth/login" \
+       -d "{\"email\":\"${DEEPSQL_SMOKE_EMAIL}\",\"password\":\"${DEEPSQL_SMOKE_PASSWORD}\"}" 2>/dev/null)"; then
+    break
+  fi
+  # Fall back to hitting the backend directly (older installs / no frontend).
+  if login_json="$(curl -fsS -c "$cookie_jar" -H 'Content-Type: application/json' \
+       -X POST "$base/auth/login" \
+       -d "{\"email\":\"${DEEPSQL_SMOKE_EMAIL}\",\"password\":\"${DEEPSQL_SMOKE_PASSWORD}\"}" 2>/dev/null)"; then
     break
   fi
   echo "Waiting for the backend to accept logins..."
@@ -227,10 +240,13 @@ if [[ "$DEEPSQL_SMOKE_AGENT" == "1" ]]; then
   fi
 
   # Browser path through nginx: profile switch must not 403 (Host/Origin CSRF).
+  # Do NOT send Origin here — that trips the agent's browser CSRF gate, which
+  # expects X-Hermes-CSRF-Token (the React Agent tab fetches that from
+  # /api/auth/status). Smoke validates the nginx auth_request + trusted-header
+  # path the way non-browser clients (and our curl diagnostics) do.
   switch_code="$(curl -sS -o /tmp/deepsql-agent-switch.json -w '%{http_code}' \
     -b "$cookie_jar" -c "$cookie_jar" \
     -H 'Content-Type: application/json' \
-    -H "Origin: http://localhost:${DEEPSQL_FRONTEND_PORT}" \
     -X POST "http://localhost:${DEEPSQL_FRONTEND_PORT}/agent-api/api/profile/switch" \
     -d '{"name":"u-admin"}' || true)"
   if [[ "$switch_code" != "200" ]]; then
@@ -246,7 +262,6 @@ if [[ "$DEEPSQL_SMOKE_AGENT" == "1" ]]; then
     switch_code="$(curl -sS -o /tmp/deepsql-agent-switch.json -w '%{http_code}' \
       -b "$cookie_jar" -c "$cookie_jar" \
       -H 'Content-Type: application/json' \
-      -H "Origin: http://localhost:${DEEPSQL_FRONTEND_PORT}" \
       -X POST "http://localhost:${DEEPSQL_FRONTEND_PORT}/agent-api/api/profile/switch" \
       -d "{\"name\":\"${profile}\"}" || true)"
   else
@@ -254,14 +269,14 @@ if [[ "$DEEPSQL_SMOKE_AGENT" == "1" ]]; then
   fi
   if [[ "$switch_code" != "200" ]]; then
     echo "Error: /agent-api/api/profile/switch → HTTP ${switch_code} (expected 200)." >&2
-    echo "       Common cause: nginx Host header dropping :${DEEPSQL_FRONTEND_PORT} (CSRF)." >&2
+    echo "       Common cause: nginx Host header dropping :${DEEPSQL_FRONTEND_PORT} (CSRF)," >&2
+    echo "       or DEEPSQL_AGENT_TRUSTED_PROXY_CIDRS missing the compose bridge." >&2
     cat /tmp/deepsql-agent-switch.json 2>/dev/null >&2 || true
     exit 1
   fi
 
   session_json="$(curl -fsS -b "$cookie_jar" -c "$cookie_jar" \
     -H 'Content-Type: application/json' \
-    -H "Origin: http://localhost:${DEEPSQL_FRONTEND_PORT}" \
     -X POST "http://localhost:${DEEPSQL_FRONTEND_PORT}/agent-api/api/session/new" \
     -d "{\"profile\":\"${profile}\",\"enabled_toolsets\":[\"deepsql\",\"skills\"]}")"
   session_id="$(printf '%s' "$session_json" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("session",{}).get("session_id") or "")' 2>/dev/null || true)"
@@ -272,11 +287,16 @@ if [[ "$DEEPSQL_SMOKE_AGENT" == "1" ]]; then
   fi
 
   # Backend→agent session (dashboard path) — same as AgentChatClient.ensureSession.
+  # X-Remote-User is required once HERMES_WEBUI_TRUSTED_AUTH_HEADER is set; the
+  # compose bridge is allowlisted via DEEPSQL_AGENT_TRUSTED_PROXY_CIDRS.
+  remote_user="${profile#u-}"
   backend_switch="$(compose exec -T backend sh -c \
     "curl -fsS -c /tmp/hc.jar -H 'Content-Type: application/json' \
+      -H 'X-Remote-User: ${remote_user}' \
       -X POST '${AGENT_WEBUI_URL}/api/profile/switch' \
       -d '{\"name\":\"${profile}\"}' >/dev/null && \
      curl -fsS -b /tmp/hc.jar -c /tmp/hc.jar -H 'Content-Type: application/json' \
+      -H 'X-Remote-User: ${remote_user}' \
       -X POST '${AGENT_WEBUI_URL}/api/session/new' \
       -d '{\"profile\":\"${profile}\",\"enabled_toolsets\":[\"deepsql\",\"skills\"]}'")"
   if [[ "$backend_switch" != *"session_id"* ]]; then
