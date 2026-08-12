@@ -1,15 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Plus, Sparkles, Clock, RefreshCw, Trash2, Loader2 } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Plus, Sparkles, Clock, RefreshCw, Trash2, Loader2, LayoutDashboard, AlertTriangle } from 'lucide-react'
 import { savedDashboardsAPI } from '@/lib/api/client'
 import styles from './DashboardsHome.module.css'
 
-function parseConfig(d) {
-  try { return typeof d.dashboardConfig === 'string' ? JSON.parse(d.dashboardConfig || '{}') : (d.dashboardConfig || {}) }
-  catch { return {} }
-}
 // A dashboard is "live" once it's published to the web (has a public link).
 function statusOf(d) { return d.isPublic ? 'live' : 'draft' }
-function chartCount(d) { return (parseConfig(d).charts || []).length }
 
 function relTime(iso) {
   if (!iso) return ''
@@ -22,17 +17,35 @@ function relTime(iso) {
   return `${Math.round(h / 24)}d ago`
 }
 
-function Thumb({ charts }) {
-  if (charts <= 0) {
-    return <svg viewBox="0 0 160 64" width="100%" height="64" preserveAspectRatio="none" aria-hidden="true">
-      <path d="M2,46 L40,48 L78,38 L116,42 L158,24 L158,64 L2,64 Z" fill="#EEEDFE" />
-      <polyline points="2,46 40,48 78,38 116,42 158,24" fill="none" stroke="#7F77DD" strokeWidth="2" />
-    </svg>
-  }
-  const heights = [40, 62, 80, 55, 34]
+// A tiny hash of the dashboard's own id, so each card's thumbnail bars look
+// distinct and stable across reloads rather than identical or random.
+function seedFrom(id) {
+  let h = 0
+  for (let i = 0; i < (id || '').length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
+  return h
+}
+
+// Dashboard content isn't parseable from dashboardConfig (it's an opaque HTML
+// artifact, not spec data) — so the thumbnail is a stylized mini-preview, not a
+// real render. Deterministic per-id bar heights keep the gallery from looking
+// like every card is the exact same placeholder.
+function Thumb({ id }) {
+  const seed = seedFrom(id)
+  // Unsigned shift + byte mask — a signed >> with a big shift/modulo combo can
+  // yield negative numbers in JS, which collapse a bar to 0 height.
+  const heights = [0, 1, 2, 3, 4].map((i) => 30 + (((seed >>> (i * 4)) & 0xff) % 60))
   return (
-    <div className={styles.thumbBars}>
-      {heights.map((h, i) => <span key={i} style={{ height: `${h}%`, background: i === 2 ? '#534AB7' : i % 2 ? '#7F77DD' : '#AFA9EC' }} />)}
+    <div className={styles.thumbMock}>
+      <div className={styles.thumbMockKpis}>
+        <span className={styles.thumbMockKpi} />
+        <span className={styles.thumbMockKpi} />
+        <span className={styles.thumbMockKpi} />
+      </div>
+      <div className={styles.thumbBars}>
+        {heights.map((h, i) => (
+          <span key={i} style={{ height: `${Math.round(h * 0.34)}px` }} className={i === 2 ? styles.thumbBarAccent : styles.thumbBar} />
+        ))}
+      </div>
     </div>
   )
 }
@@ -42,17 +55,33 @@ export default function DashboardsHome({ connectionId, onOpen }) {
   const [loading, setLoading] = useState(false)
   const [filter, setFilter] = useState('all')
   const [deletingId, setDeletingId] = useState(null)
+  // Id of the card showing its inline "delete this?" popover (native window.confirm
+  // reads as out-of-place browser chrome next to the rest of this redesigned UI, and
+  // some embedded/webview hosts suppress it outright, silently no-opping the delete).
+  const [confirmId, setConfirmId] = useState(null)
+  const [deleteError, setDeleteError] = useState(null)
+  const confirmRef = useRef(null)
+
+  useEffect(() => {
+    if (!confirmId) return
+    const onDocClick = (e) => { if (confirmRef.current && !confirmRef.current.contains(e.target)) setConfirmId(null) }
+    const onKey = (e) => { if (e.key === 'Escape') setConfirmId(null) }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey) }
+  }, [confirmId])
 
   const remove = useCallback(async (d, e) => {
     e?.stopPropagation()
     if (deletingId) return
-    if (!window.confirm(`Delete “${d.name || 'this dashboard'}”? This can’t be undone.`)) return
+    setConfirmId(null)
+    setDeleteError(null)
     setDeletingId(d.id)
     try {
       await savedDashboardsAPI.deleteDashboard(d.id)
       setDashboards((list) => list.filter((x) => x.id !== d.id))
     } catch (err) {
-      window.alert(`Couldn’t delete: ${err?.response?.data?.message || err?.message || 'error'}`)
+      setDeleteError(err?.response?.data?.message || err?.message || 'Couldn’t delete this dashboard.')
     } finally {
       setDeletingId(null)
     }
@@ -77,7 +106,12 @@ export default function DashboardsHome({ connectionId, onOpen }) {
   return (
     <div className={styles.root}>
       <header className={styles.header}>
-        <h1 className={styles.title}>Dashboards</h1>
+        <div className={styles.headerText}>
+          <h1 className={styles.title}>Dashboards</h1>
+          {dashboards.length > 0 && (
+            <p className={styles.subtitle}>{dashboards.length} dashboard{dashboards.length === 1 ? '' : 's'} for this connection</p>
+          )}
+        </div>
         <div className={styles.actions}>
           <button className={styles.ghost} onClick={load} title="Refresh" aria-label="Refresh">
             <RefreshCw size={15} className={loading ? styles.spin : undefined} />
@@ -96,6 +130,16 @@ export default function DashboardsHome({ connectionId, onOpen }) {
         ))}
       </div>
 
+      {!loading && dashboards.length === 0 ? (
+        <div className={styles.emptyState}>
+          <span className={styles.emptyIcon}><LayoutDashboard size={22} /></span>
+          <h2 className={styles.emptyTitle}>No dashboards yet</h2>
+          <p className={styles.emptySub}>Describe what you want to see and the DeepSQL agent will build it — grounded on your schema, verified against your data.</p>
+          <button className={styles.primary} onClick={() => onOpen('new')}>
+            <Plus size={15} /> New dashboard
+          </button>
+        </div>
+      ) : (
       <div className={styles.grid}>
         {shown.map((d) => (
           <div
@@ -106,16 +150,27 @@ export default function DashboardsHome({ connectionId, onOpen }) {
             onClick={() => onOpen(d)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(d) } }}
           >
-            <button
-              className={styles.cardDelete}
-              onClick={(e) => remove(d, e)}
-              disabled={deletingId === d.id}
-              title="Delete dashboard"
-              aria-label={`Delete ${d.name || 'dashboard'}`}
-            >
-              {deletingId === d.id ? <Loader2 size={14} className={styles.spin} /> : <Trash2 size={14} />}
-            </button>
-            <div className={styles.thumb}><Thumb charts={chartCount(d)} /></div>
+            <div className={styles.deleteWrap} ref={confirmId === d.id ? confirmRef : undefined}>
+              <button
+                className={styles.cardDelete}
+                onClick={(e) => { e.stopPropagation(); if (!deletingId) setConfirmId(d.id) }}
+                disabled={deletingId === d.id}
+                title="Delete dashboard"
+                aria-label={`Delete ${d.name || 'dashboard'}`}
+              >
+                {deletingId === d.id ? <Loader2 size={14} className={styles.spin} /> : <Trash2 size={14} />}
+              </button>
+              {confirmId === d.id && (
+                <div className={styles.confirmPopover} onClick={(e) => e.stopPropagation()}>
+                  <p className={styles.confirmText}>Delete “{d.name || 'this dashboard'}”? This can’t be undone.</p>
+                  <div className={styles.confirmActions}>
+                    <button className={styles.confirmCancel} onClick={() => setConfirmId(null)}>Cancel</button>
+                    <button className={styles.confirmDelete} onClick={(e) => remove(d, e)}>Delete</button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className={styles.thumb}><Thumb id={d.id} /></div>
             <div className={styles.cardBody}>
               <div className={styles.cardTop}>
                 <span className={styles.cardName}>{d.name || 'Untitled'}</span>
@@ -134,9 +189,18 @@ export default function DashboardsHome({ connectionId, onOpen }) {
           <span className={styles.ctaSub}>“Build a revenue dashboard for last quarter”</span>
         </button>
       </div>
+      )}
 
-      {!loading && shown.length === 0 && (
-        <div className={styles.emptyNote}>No dashboards here yet — create one, or ask the agent to build it.</div>
+      {!loading && dashboards.length > 0 && shown.length === 0 && (
+        <div className={styles.emptyNote}>No {filter} dashboards — try a different filter.</div>
+      )}
+
+      {deleteError && (
+        <div className={styles.errorToast}>
+          <AlertTriangle size={14} />
+          <span>{deleteError}</span>
+          <button className={styles.errorDismiss} onClick={() => setDeleteError(null)} aria-label="Dismiss">×</button>
+        </div>
       )}
     </div>
   )

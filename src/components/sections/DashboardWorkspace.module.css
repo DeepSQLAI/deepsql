@@ -448,12 +448,22 @@
 .newCanvas {
   height: 100%;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
+  padding: 32px 24px;
+  background:
+    radial-gradient(ellipse 700px 420px at 50% 0%, rgba(83, 74, 183, 0.05), transparent 70%),
+    #fff;
+}
+
+.newCanvasInner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 10px;
-  padding: 24px;
+  width: 100%;
+  max-width: 640px;
 }
 
 .newIcon {
@@ -465,10 +475,78 @@
   align-items: center;
   justify-content: center;
   margin-bottom: 4px;
+  box-shadow: 0 1px 2px rgba(83, 74, 183, 0.08);
 }
 
-.newTitle { font-size: 18px; font-weight: 600; letter-spacing: -0.012em; color: #111; margin: 0; }
+.newTitle { font-size: 19px; font-weight: 650; letter-spacing: -0.014em; color: #111; margin: 0; }
 .newSub { font-size: 13px; color: #777; max-width: 380px; line-height: 1.6; margin: 0; }
+
+.exampleGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  margin: 18px 0 8px;
+}
+
+@media (max-width: 620px) {
+  .exampleGrid { grid-template-columns: 1fr; }
+}
+
+.exampleCard {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  text-align: left;
+  padding: 14px 15px;
+  border: 1px solid #ececec;
+  border-radius: 13px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 180ms ease-out, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 180ms ease-out;
+}
+.exampleCard:hover {
+  border-color: #cfcaf0;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px -10px rgba(83, 74, 183, 0.25), 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.exampleCard:active { transform: translateY(-1px) scale(0.99); }
+.exampleCard:disabled { opacity: 0.5; cursor: default; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .exampleCard { transition: border-color 180ms ease-out, box-shadow 180ms ease-out; }
+  .exampleCard:hover, .exampleCard:active { transform: none; }
+}
+
+.exampleIcon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #EEEDFE;
+  color: #534AB7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.exampleTitle {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: #111;
+}
+
+.examplePrompt {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #8a8a8a;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 
 .backLink {
   display: inline-flex;

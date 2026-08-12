@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { LineChart, ArrowUp, ChevronLeft, Sparkles, Check, Loader2, Brain, PencilRuler, ClipboardCheck } from 'lucide-react'
+import { LineChart, ArrowUp, ChevronLeft, Sparkles, Check, Loader2, Brain, PencilRuler, ClipboardCheck, TrendingUp, Users, PieChart, Layers } from 'lucide-react'
 import DashboardArtifact from '@/components/DashboardArtifact'
 import ShareMenu from './ShareMenu'
 import { savedDashboardsAPI } from '@/lib/api/client'
@@ -8,6 +8,15 @@ import styles from './DashboardWorkspace.module.css'
 
 // Icon per agent step phase, so the live trace reads at a glance.
 const STEP_ICON = { grounding: Brain, planning: PencilRuler, validating: ClipboardCheck, done: Check }
+
+// Starting points shown on a brand-new, empty dashboard — concrete enough to click
+// and send immediately, so the first screen a user sees isn't just an empty prompt.
+const EXAMPLE_PROMPTS = [
+  { icon: TrendingUp, title: 'Revenue by month', prompt: 'Show revenue by month for the last 12 months, with a trend line and month-over-month change.' },
+  { icon: Users, title: 'Top customers', prompt: 'Show top customers by total spend, with their order count and average order value.' },
+  { icon: PieChart, title: 'Order breakdown', prompt: 'Show order status breakdown (completed, pending, cancelled) as a share of total orders.' },
+  { icon: Layers, title: 'Business overview', prompt: 'Build a dashboard with the most important KPIs and a couple of charts summarizing overall business health.' },
+]
 
 // Focused, chrome-less builder. Left = the agent (generate / refine); main = the
 // live dashboard canvas. The DeepSQL logo and breadcrumb return to the gallery.
@@ -56,7 +65,11 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
     }
     let cfg = {}
     try { cfg = typeof dashboard.dashboardConfig === 'string' ? JSON.parse(dashboard.dashboardConfig || '{}') : (dashboard.dashboardConfig || {}) } catch { cfg = {} }
-    setConfig({ ...cfg, updatedAt: dashboard.updatedAt || new Date().toISOString() })
+    // A saved row can carry a chat-only reply object (from an in-flight chat turn
+    // that was never a real build) instead of an artifact — rendering that as-is
+    // would silently show the pristine empty canvas with no explanation, right next
+    // to chat history that says "Done — built". Treat it as no build yet instead.
+    setConfig(cfg.html ? { ...cfg, updatedAt: dashboard.updatedAt || new Date().toISOString() } : null)
     chatSyncedRef.current = false
     // Restore the persisted per-dashboard chat thread if there is one, so the
     // build/edit conversation survives a refresh; otherwise open with a greeting.
@@ -116,8 +129,8 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
     }
   }, [connectionId])
 
-  function submit() {
-    const prompt = input.trim()
+  function submit(directPrompt) {
+    const prompt = (directPrompt ?? input).trim()
     if (!prompt || thinking) return
     setInput('')
     setMessages((m) => [...m, { role: 'user', text: prompt }])
@@ -243,7 +256,7 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!thinking) submit() } }}
               autoFocus
             />
-            <button className={styles.sendBtn} onClick={submit} disabled={thinking || !input.trim()} aria-label="Send"><ArrowUp size={16} /></button>
+            <button className={styles.sendBtn} onClick={() => submit()} disabled={thinking || !input.trim()} aria-label="Send"><ArrowUp size={16} /></button>
           </div>
         </aside>
 
@@ -252,10 +265,32 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
             <DashboardArtifact connectionId={connectionId} html={config.html} onError={(msg) => console.warn('Dashboard artifact error:', msg)} />
           ) : (
             <div className={styles.newCanvas}>
-              <span className={styles.newIcon}><Sparkles size={24} color="#534AB7" /></span>
-              <h2 className={styles.newTitle}>Build a dashboard</h2>
-              <p className={styles.newSub}>Describe what you want on the left and the DeepSQL agent builds it here — read-only, grounded on your data.</p>
-              <button className={styles.backLink} onClick={onClose}><ChevronLeft size={14} /> Back to dashboards</button>
+              <div className={styles.newCanvasInner}>
+                <span className={styles.newIcon}><Sparkles size={22} color="#534AB7" /></span>
+                <h2 className={styles.newTitle}>{isNew ? 'Build a dashboard' : 'Nothing built here yet'}</h2>
+                <p className={styles.newSub}>
+                  {isNew
+                    ? 'Describe what you want on the left and the DeepSQL agent builds it here — read-only, grounded on your data.'
+                    : 'This dashboard doesn’t have a build yet — the chat on the left may just be planning so far. Ask for a chart to get started.'}
+                </p>
+
+                <div className={styles.exampleGrid}>
+                  {EXAMPLE_PROMPTS.map(({ icon: Icon, title, prompt }) => (
+                    <button
+                      key={title}
+                      className={styles.exampleCard}
+                      onClick={() => submit(prompt)}
+                      disabled={thinking}
+                    >
+                      <span className={styles.exampleIcon}><Icon size={16} /></span>
+                      <span className={styles.exampleTitle}>{title}</span>
+                      <span className={styles.examplePrompt}>{prompt}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <button className={styles.backLink} onClick={onClose}><ChevronLeft size={14} /> Back to dashboards</button>
+              </div>
             </div>
           )}
         </main>
