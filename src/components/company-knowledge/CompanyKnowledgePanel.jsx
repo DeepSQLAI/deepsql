@@ -244,7 +244,13 @@ export default function CompanyKnowledgePanel({ connectionId }) {
     retry: false,
     refetchInterval: (query) => {
       const stage = query.state.data?.currentStage
-      return stage && stage !== 'COMPLETED' && stage !== 'FAILED' ? 4000 : false
+      // Keep polling only while a non-terminal stage is running
+      // (COMPLETED / FAILED / NEEDS_ATTENTION / NONE stop).
+      if (!stage || stage === 'NONE' || stage === 'COMPLETED'
+          || stage === 'FAILED' || stage === 'NEEDS_ATTENTION' || stage === 'ERROR') {
+        return false
+      }
+      return 4000
     },
   })
 
@@ -252,6 +258,8 @@ export default function CompanyKnowledgePanel({ connectionId }) {
     if (userChoseTab || activeTab !== 'background-jobs') {
       return
     }
+    // Only auto-advance on full COMPLETED — NEEDS_ATTENTION stays on Initialize
+    // so the user sees coverage messaging and can re-init.
     if (initStatusQuery.data?.currentStage === 'COMPLETED') {
       setDefaultTab('schema-context')
     }

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { shallow } from "zustand/shallow";
+import { isInitRunning } from "@/lib/initStage";
 
 const useInitProgressStore = create((set) => ({
   connectionId: null,
@@ -66,6 +67,6 @@ export const useIsInitActive = (connectionId) =>
     (s) =>
       !!s.stage &&
       s.connectionId === connectionId &&
-      !["COMPLETED", "FAILED"].includes(s.stage),
+      isInitRunning(s.stage),
   );
 export default useInitProgressStore;

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Clock3, Database, Loader2, Network, Play, RefreshCw, Sparkles } from 'lucide-react'
 import BrainInitModal from '@/components/BrainInitModal'
 import { connectionAPI } from '@/lib/api/client'
+import { isInitRunning, isInitFailed, isInitNeedsAttention } from '@/lib/initStage'
 import { DEFAULT_ROLE_FILTERS, ERD3DErrorBoundary, SchemaDiagramFilter, SchemaERD3D } from './SchemaERD3D'
 import styles from './BrainWorkspace.module.css'
 
@@ -23,6 +24,7 @@ const STAGE_LABELS = {
   ...Object.fromEntries(STAGES.map((stage) => [stage.key, stage.label])),
   COMPLETED: 'Brain ready',
   FAILED: 'Initialization failed',
+  NEEDS_ATTENTION: 'Needs attention',
 }
 
 function stageLabel(stage) {
@@ -97,7 +99,7 @@ export default function BrainWorkspace({ connectionId }) {
       return undefined
     }
     const currentStage = status?.currentStage || status?.stage || 'NONE'
-    const isRunning = currentStage && !['NONE', 'COMPLETED', 'FAILED'].includes(currentStage)
+    const isRunning = isInitRunning(currentStage)
     const intervalMs = isRunning ? 4000 : 15000
     const intervalId = window.setInterval(() => {
       void loadWorkspace({ silent: true })
@@ -111,11 +113,11 @@ export default function BrainWorkspace({ connectionId }) {
   )
 
   const currentStage = status?.currentStage || status?.stage || 'NONE'
-  const isRunning = currentStage && !['NONE', 'COMPLETED', 'FAILED'].includes(currentStage)
+  const isRunning = isInitRunning(currentStage)
   const isReady = currentStage === 'COMPLETED' || hasCompletedInit
   const progress = Math.max(0, Math.min(100, Number(status?.progressPercent ?? status?.progress ?? (isReady ? 100 : 0))))
-  const ctaLabel = isRunning ? 'View current status' : isReady ? 'View completed stages' : currentStage === 'FAILED' ? 'View failure details' : 'Initialize Brain'
-  const primaryAutoStart = !isRunning && !isReady && currentStage !== 'FAILED'
+  const ctaLabel = isRunning ? 'View current status' : isReady ? 'View completed stages' : (isInitFailed(currentStage) || isInitNeedsAttention(currentStage)) ? 'View details' : 'Initialize Brain'
+  const primaryAutoStart = !isRunning && !isReady && !isInitFailed(currentStage) && !isInitNeedsAttention(currentStage)
   const statusText = isRunning
     ? `${stageLabel(currentStage)} · ${progress}%`
     : currentStage === 'FAILED'
@@ -308,14 +310,14 @@ export default function BrainWorkspace({ connectionId }) {
               {isRunning ? <Loader2 size={15} className={styles.spinningIcon} /> : <Sparkles size={15} />}
               {ctaLabel}
             </button>
-            {(!isRunning && (isReady || currentStage === 'FAILED' || currentStage === 'NONE')) && (
+            {(!isRunning && (isReady || isInitFailed(currentStage) || isInitNeedsAttention(currentStage) || currentStage === 'NONE')) && (
               <button
                 className={styles.secondaryButton}
                 onClick={() => openStatusModal(true)}
                 disabled={loading}
               >
                 <RefreshCw size={15} />
-                {isReady ? 'Refresh Brain' : currentStage === 'FAILED' ? 'Retry Brain init' : 'Start Brain init'}
+                {isReady ? 'Refresh Brain' : (isInitFailed(currentStage) || isInitNeedsAttention(currentStage)) ? 'Retry Brain init' : 'Start Brain init'}
               </button>
             )}
             {(!isRunning && !forceRebuilding) && (

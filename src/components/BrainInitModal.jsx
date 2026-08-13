@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { X, CheckCircle, Loader2, XCircle, RotateCcw, ArrowRight } from 'lucide-react'
 import { connectionAPI } from '@/lib/api/client'
+import { isInitRunning, isInitTerminal } from '@/lib/initStage'
 
 const STAGES = [
   { key: 'SCHEMA_SCAN',    label: 'Scanning schema',       desc: 'Reading tables, columns, and relationships' },
@@ -70,7 +71,7 @@ export default function BrainInitModal({
 
     setHasExistingRun(hasRun)
 
-    if (currentStage && !['NONE', 'COMPLETED', 'FAILED', 'ERROR'].includes(currentStage)) {
+    if (currentStage && isInitRunning(currentStage)) {
       setStatus('running')
       setActiveStage(currentStage)
       setDoneStages(completedStages.filter((stage) => stage !== currentStage))
@@ -123,7 +124,7 @@ export default function BrainInitModal({
       try {
         const nextStatus = await loadExistingStatus()
         const stage = nextStatus?.currentStage || nextStatus?.stage || ''
-        if (!stage || ['COMPLETED', 'FAILED', 'ERROR', 'NONE'].includes(stage)) {
+        if (!stage || (stage === 'NONE' || isInitTerminal(stage))) {
           stopPolling()
         }
       } catch {
@@ -163,7 +164,7 @@ export default function BrainInitModal({
     } else {
       void loadExistingStatus().then((nextStatus) => {
         const stage = nextStatus?.currentStage || nextStatus?.stage || ''
-        if (stage && !['NONE', 'COMPLETED', 'FAILED', 'ERROR'].includes(stage)) {
+        if (stage && isInitRunning(stage)) {
           startPolling()
         }
       })

@@ -16,6 +16,7 @@ import useInitProgressStore, {
 } from "../lib/stores/useInitProgressStore";
 import { connectionAPI } from "../lib/api/client";
 import InitHistoryModal from "./InitHistoryModal";
+import { isInitTerminal } from "../lib/initStage";
 
 const STAGE_LABELS = {
   SCHEMA_SCAN: "Scanning schema",
@@ -30,6 +31,7 @@ const STAGE_LABELS = {
   SEMANTIC_MODELING: "Modeling semantics",
   COMPLETED: "All set!",
   FAILED: "Initialization failed",
+  NEEDS_ATTENTION: "Needs attention",
 };
 
 const STAGE_DESCRIPTIONS = {
@@ -246,7 +248,7 @@ export function InitProgressIndicator({ connectionId }) {
         errorCountRef.current = 0;
         if (data) {
           setInitProgress(data);
-          if (["COMPLETED", "FAILED"].includes(data.currentStage)) {
+          if (isInitTerminal(data.currentStage)) {
             clearInterval(pollingRef.current);
             pollingRef.current = null;
           }
@@ -350,7 +352,7 @@ export function InitProgressIndicator({ connectionId }) {
         errorCountRef.current = 0;
         if (data) {
           setInitProgress(data);
-          if (["COMPLETED", "FAILED"].includes(data.currentStage)) {
+          if (isInitTerminal(data.currentStage)) {
             clearInterval(pollingRef.current);
             pollingRef.current = null;
           }
@@ -403,8 +405,8 @@ export function InitProgressIndicator({ connectionId }) {
   useEffect(() => {
     if (
       prevStageRef.current &&
-      !["COMPLETED", "FAILED"].includes(prevStageRef.current) &&
-      ["COMPLETED", "FAILED"].includes(stage)
+      !isInitTerminal(prevStageRef.current) &&
+      isInitTerminal(stage)
     ) {
       fetchHistory();
     }
@@ -433,6 +435,11 @@ export function InitProgressIndicator({ connectionId }) {
     chipLabel = "Brain ready";
     chipBg = "#f0fdf4";
     chipColor = "#15803d";
+  } else if (stage === "NEEDS_ATTENTION") {
+    chipIcon = <AlertCircle size={14} style={{ color: "#d97706" }} />;
+    chipLabel = "Needs attention";
+    chipBg = "#fffbeb";
+    chipColor = "#b45309";
   } else if (stage === "FAILED") {
     chipIcon = <AlertCircle size={14} style={{ color: "#dc2626" }} />;
     chipLabel = "Init failed";
@@ -723,7 +730,7 @@ export function InitProgressIndicator({ connectionId }) {
           )}
 
           {/* Action buttons — re-init + view history */}
-          {(stage === "COMPLETED" || stage === "FAILED" || !stage) && (
+          {(stage === "COMPLETED" || stage === "FAILED" || stage === "NEEDS_ATTENTION" || !stage) && (
             <div
               style={{
                 display: "flex",

@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { CheckCircle, Loader2, XCircle, AlertCircle, RotateCcw, ArrowRight } from 'lucide-react'
 import { connectionAPI } from '@/lib/api/client'
+import { isInitComplete, isInitFailed, isInitNeedsAttention } from '@/lib/initStage'
 
 const STAGES = [
   { key: 'SCHEMA_SCAN',   label: 'Scanning schema',         desc: 'Reading tables, columns, and relationships' },
@@ -31,11 +32,11 @@ export default function StepBrainInit({ connectionId, onComplete }) {
 
         const stage       = s.currentStage || s.stage || ''
         const prog        = s.progressPercent ?? s.progress ?? 0
-        const isCompleted = stage === 'COMPLETED' || prog >= 100
-        const isFailed    = stage === 'FAILED' || stage === 'ERROR'
         const timings     = s.stageTimings || {}
 
-        if (isCompleted) {
+        // Do NOT treat progress>=100 alone as complete — coverage can stop at
+        // NEEDS_ATTENTION with a high percent while still incomplete.
+        if (isInitComplete(stage)) {
           clearInterval(pollRef.current)
           setDoneStages(STAGES.map(st => st.key))
           setActiveStage(null)
@@ -45,7 +46,7 @@ export default function StepBrainInit({ connectionId, onComplete }) {
           return
         }
 
-        if (isFailed) {
+        if (isInitNeedsAttention(stage) || isInitFailed(stage)) {
           clearInterval(pollRef.current)
           const lastAttempted = [...STAGES].reverse().find(st => timings[st.key]?.startedAt)
           const failedKey = lastAttempted?.key
@@ -55,7 +56,12 @@ export default function StepBrainInit({ connectionId, onComplete }) {
           setActiveStage(null)
           setProgress(prog)
           setStatus('error')
-          setErrorMsg(s.errorMessage || 'Initialization failed')
+          setErrorMsg(
+            s.errorMessage
+              || (isInitNeedsAttention(stage)
+                ? 'Brain indexed only part of the schema. Fix grants or schema access, then retry.'
+                : 'Initialization failed'),
+          )
           return
         }
 

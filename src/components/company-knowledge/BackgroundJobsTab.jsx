@@ -146,6 +146,8 @@ export default function BackgroundJobsTab({ connectionId }) {
     const initActive = initStatus
       && initStatus.currentStage !== 'COMPLETED'
       && initStatus.currentStage !== 'FAILED'
+      && initStatus.currentStage !== 'NEEDS_ATTENTION'
+      && initStatus.currentStage !== 'ERROR'
       && !initStatus.completedAt
     const intervalMs = (anyRunning || initActive) ? 4000 : 15000
     const intervalId = window.setInterval(() => {
