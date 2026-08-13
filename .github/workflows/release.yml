@@ -1,0 +1,78 @@
+name: release
+
+# Cut a GitHub Release when a version tag is pushed.
+# Artifacts match scripts/release/build-artifacts.sh (source, JAR, frontend,
+# MCP pack, SBOMs, checksums, manifest).
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    name: build artifacts + GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v5.6.0
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Build release artifacts
+        run: |
+          chmod +x scripts/release/build-artifacts.sh
+          ./scripts/release/build-artifacts.sh "${GITHUB_REF_NAME}"
+
+      - name: Verify checksums
+        run: |
+          cd "release-artifacts/${GITHUB_REF_NAME}"
+          sha256sum -c SHA256SUMS
+          sha512sum -c SHA512SUMS
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepsql-${{ github.ref_name }}
+          path: release-artifacts/${{ github.ref_name }}/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          NOTES="docs/releases/RELEASE_NOTES-${TAG}.md"
+          if [[ ! -f "$NOTES" ]]; then
+            NOTES="CHANGELOG.md"
+          fi
+          # Idempotent: if the release already exists (re-run), upload assets only.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "release-artifacts/${TAG}"/* --clobber
+          else
+            gh release create "$TAG" \
+              --title "DeepSQL ${TAG}" \
+              --notes-file "$NOTES" \
+              --verify-tag \
+              "release-artifacts/${TAG}"/*
+          fi
