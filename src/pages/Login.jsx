@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
-import { authAPI } from '@/lib/api/client'
+import { authAPI, setupAPI } from '@/lib/api/client'
 import { ArrowLeft, Database, KeyRound, Mail, ShieldCheck, Sparkles, Zap, Activity, LineChart } from 'lucide-react'
 
 const STEP_LOGIN = 'login'
@@ -27,12 +27,20 @@ export default function Login() {
   const [error, setError] = useState(initialError)
   const [info, setInfo] = useState('')
   const [loading, setLoading] = useState(false)
+  const [setupStatus, setSetupStatus] = useState(null)
 
   useEffect(() => {
     if (initialError) {
       setError(initialError)
     }
   }, [initialError])
+
+  // Public endpoint — no auth required. Lets a returning admin who never
+  // finished the wizard jump straight back into it instead of guessing why
+  // the dashboard looks empty after login.
+  useEffect(() => {
+    setupAPI.getStatus().then(setSetupStatus).catch(() => {})
+  }, [])
 
   const handleAuthenticated = (payload) => {
     setError('')
@@ -94,7 +102,7 @@ export default function Login() {
     <form onSubmit={handlePasswordLogin} className="space-y-5">
       <div>
         <label htmlFor="email" className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">
-          Work Email
+          Email
         </label>
         <div className="relative group">
           <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 group-focus-within:text-gray-600 transition-colors" />
@@ -203,7 +211,7 @@ export default function Login() {
   const stepTitle = step === STEP_OTP ? 'Verify your sign-in' : 'Secure sign-in'
   const stepSubtitle = step === STEP_OTP
     ? 'Complete the extra email verification step for this workspace.'
-    : 'Use your work email and password to access DeepSQL.'
+    : 'Sign in with your email and password to access DeepSQL.'
 
   return (
     <div className="flex min-h-screen w-full bg-white text-gray-900 overflow-x-hidden">
@@ -281,6 +289,15 @@ export default function Login() {
           )}
 
           {step === STEP_OTP ? renderOtpStep() : renderLoginStep()}
+
+          {step === STEP_LOGIN && setupStatus && setupStatus.hasConnections === false && (
+            <p className="mt-5 text-center text-sm text-gray-500">
+              No database connected yet.{' '}
+              <Link to="/onboarding" className="text-gray-900 hover:text-gray-700 font-medium underline underline-offset-2">
+                Finish setup
+              </Link>
+            </p>
+          )}
         </div>
 
         <div className="absolute bottom-6 left-0 right-0 text-center text-gray-500 text-sm px-6">

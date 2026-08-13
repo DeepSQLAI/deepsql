@@ -11,11 +11,16 @@ public enum InitStage {
     RAG_EMBEDDING,
     BRAIN_ANALYSIS,
     SEMANTIC_MODELING,
+    /**
+     * Schema coverage incomplete — Brain must not claim Complete 100%.
+     * Surfaced when indexed base tables are far below live user tables (W2b).
+     */
+    NEEDS_ATTENTION,
     COMPLETED,
     FAILED;
 
     public boolean isTerminal() {
-        return this == COMPLETED || this == FAILED;
+        return this == COMPLETED || this == FAILED || this == NEEDS_ATTENTION;
     }
 
     public InitStage next() {
@@ -29,7 +34,7 @@ public enum InitStage {
             case AI_DESCRIPTION -> RAG_EMBEDDING;
             case RAG_EMBEDDING -> BRAIN_ANALYSIS;
             case BRAIN_ANALYSIS -> SEMANTIC_MODELING;
-            case SEMANTIC_MODELING, COMPLETED, FAILED -> null;
+            case SEMANTIC_MODELING, COMPLETED, FAILED, NEEDS_ATTENTION -> null;
         };
     }
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect, createContext, useContext, useMemo, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { getActionPermission, getActionConfig } from '@/lib/actions'
-import { authAPI, AUTH_CHANGE_EVENT } from '@/lib/api/client'
+import { authAPI, setupAPI, AUTH_CHANGE_EVENT } from '@/lib/api/client'
 import { queryClient } from '@/lib/queryClient'
 import { useChatStore } from '@/lib/stores/useChatStore'
 import { useConnectionStore } from '@/lib/stores/useConnectionStore'
@@ -170,10 +170,26 @@ export function AuthProvider({ children }) {
     }
   }, [applyAuthPayload, handleLoggedOut, navigate, refreshCurrentUser])
 
+  // Product-ready ≠ "an admin exists" — a fresh install has no connections
+  // yet, so send a just-logged-in user into the setup wizard instead of a
+  // dashboard with nothing to show. Best-effort: if the status check itself
+  // fails, don't block login on it — fall through to the dashboard.
+  const postLoginDestination = useCallback(async () => {
+    try {
+      const status = await setupAPI.getStatus()
+      if (status && status.hasConnections === false) {
+        return '/onboarding'
+      }
+    } catch {
+      /* status check failed — don't block login on it */
+    }
+    return '/dashboard'
+  }, [])
+
   const login = useCallback((payload) => {
     applyAuthPayload(payload)
-    navigate('/dashboard', { replace: true })
-  }, [applyAuthPayload, navigate])
+    postLoginDestination().then((destination) => navigate(destination, { replace: true }))
+  }, [applyAuthPayload, navigate, postLoginDestination])
 
   const logout = useCallback(async () => {
     try {

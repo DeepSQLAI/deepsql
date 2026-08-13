@@ -63,7 +63,12 @@ async function postJson(url, body, _retried = false) {
     await ensureAgentCsrf();
     return postJson(url, body, true);
   }
-  if (!res.ok) throw new Error(`${url} → ${res.status}`);
+  if (!res.ok) {
+    // Surface the backend's clear-error JSON (e.g. agent_provisioning_failed)
+    // instead of a bare status code — the caller shows this text verbatim.
+    const errBody = await res.json().catch(() => null);
+    throw new Error(errBody?.message || errBody?.error || `${url} → ${res.status}`);
+  }
   return res.json();
 }
 

@@ -41,9 +41,17 @@ public class SchemaIntrospectionService {
                 Long rowCount = provider.getTableRowCount(connection, database, tableName);
                 String tableSize = provider.getTableSize(connection, database, tableName);
 
+                String schemaName = provider.getDefaultSchema();
+                String bareName = tableName;
+                if (tableName != null && tableName.contains(".")) {
+                    int dot = tableName.indexOf('.');
+                    schemaName = tableName.substring(0, dot);
+                    bareName = tableName.substring(dot + 1);
+                }
+
                 return TableDetails.builder()
-                        .tableName(tableName)
-                        .tableSchema(provider.getDefaultSchema())
+                        .tableName(bareName != null ? bareName : tableName)
+                        .tableSchema(schemaName)
                         .columns(columns)
                         .indexes(indexes)
                         .constraints(constraints)

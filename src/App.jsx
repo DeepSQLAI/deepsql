@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Signup from './pages/Signup'
 import ActivateInvite from './pages/ActivateInvite'
 import CliAuthorize from './pages/CliAuthorize'
+import Onboarding from './pages/Onboarding'
 import PublicDashboardPage from './pages/PublicDashboardPage'
 import SharedDashboardPage from './pages/SharedDashboardPage'
 import { Component } from 'react'
@@ -123,6 +124,15 @@ function App() {
               </ProtectedRoute>
             }
           />
+          {/* First-run setup wizard — add a connection, configure the LLM, kick Brain init. */}
+          <Route
+            path="/onboarding"
+            element={
+              <ProtectedRoute>
+                <Onboarding />
+              </ProtectedRoute>
+            }
+          />
           {/* Public shared dashboard — no login; the token is the authorization. */}
           <Route path="/share/dashboard/:token" element={<PublicDashboardPage />} />
           {/* Internal deep link to one dashboard (login + access required). */}
@@ -134,8 +144,8 @@ function App() {
               </ProtectedRoute>
             }
           />
-          {/* Legacy /setup route — redirect to dashboard */}
-          <Route path="/setup" element={<Navigate to="/dashboard" replace />} />
+          {/* Legacy /setup route — now the real onboarding wizard, not a dead end. */}
+          <Route path="/setup" element={<Navigate to="/onboarding" replace />} />
           <Route path="/cli-authorize" element={<CliAuthorize />} />
           <Route path="/cli-authorize/device" element={<CliAuthorize />} />
         </Routes>

@@ -33,12 +33,16 @@ function formatTimestamp(value) {
  */
 const STAGE_LABELS = {
   SCHEMA_SCAN: 'Schema scan',
+  DATA_SAMPLING: 'Data sampling',
   KEY_COLUMN_ANALYSIS: 'Key column analysis',
-  TABLE_RELATIONSHIPS: 'Table relationships',
-  WORKLOAD_FINGERPRINT: 'Workload fingerprint',
-  BUSINESS_RULE_DRAFT: 'Business rule draft',
-  EMBEDDINGS: 'Embeddings',
-  READINESS_CALCULATION: 'Readiness calculation',
+  COLUMN_VALUE_COLLECTION: 'Column value collection',
+  INFERRED_RELATIONSHIPS: 'Inferred relationships',
+  SCHEMA_CLASSIFICATION: 'Schema classification',
+  AI_DESCRIPTION: 'AI description',
+  RAG_EMBEDDING: 'RAG embedding',
+  BRAIN_ANALYSIS: 'Brain analysis',
+  SEMANTIC_MODELING: 'Semantic modeling',
+  NEEDS_ATTENTION: 'Needs attention',
   COMPLETED: 'Complete',
   FAILED: 'Failed',
 }
@@ -48,20 +52,23 @@ function stageLabel(stage) {
 }
 
 /**
- * Canonical stage order — matches the backend InitStage enum's progression
- * order. Used to render the stages timeline in the order they actually run,
- * not insertion order of the stage_timings JSON map.
+ * Canonical stage order — matches the backend InitStage enum exactly
+ * (com.dbaagent.model.InitStage), excluding the terminal COMPLETED/FAILED
+ * states which aren't pipeline steps. Any drift here is how "Complete 100%"
+ * used to render with grey/pending dots for stages the frontend didn't know
+ * existed.
  */
 const STAGE_ORDER = [
   'SCHEMA_SCAN',
+  'DATA_SAMPLING',
   'KEY_COLUMN_ANALYSIS',
+  'COLUMN_VALUE_COLLECTION',
+  'INFERRED_RELATIONSHIPS',
   'SCHEMA_CLASSIFICATION',
-  'TABLE_RELATIONSHIPS',
   'AI_DESCRIPTION',
-  'WORKLOAD_FINGERPRINT',
-  'BUSINESS_RULE_DRAFT',
-  'EMBEDDINGS',
-  'READINESS_CALCULATION',
+  'RAG_EMBEDDING',
+  'BRAIN_ANALYSIS',
+  'SEMANTIC_MODELING',
 ]
 
 function formatDuration(ms) {
@@ -86,6 +93,10 @@ export default function BackgroundJobsTab({ connectionId }) {
   const [initStatusLoading, setInitStatusLoading] = useState(false)
   // Stages-timeline collapse + action-button busy/notice state.
   const [stagesExpanded, setStagesExpanded] = useState(false)
+  // Scheduled maintenance jobs are power-user content — ten job cards
+  // shouldn't dominate the first paint of "teach your business". Collapsed
+  // by default; the count in the toggle label is enough for most visits.
+  const [jobsExpanded, setJobsExpanded] = useState(false)
   const [initActionBusy, setInitActionBusy] = useState(null)  // 'reinit' | 'cancel' | 'refresh' | null
   const [initActionNotice, setInitActionNotice] = useState(null)
 
@@ -282,8 +293,24 @@ export default function BackgroundJobsTab({ connectionId }) {
     ? Math.max(0, Math.min(100, initStatus.progressPercent))
     : 0
   const isComplete = stage === 'COMPLETED'
-  const isFailed = stage === 'FAILED' || !!initStatus?.errorMessage
-  const isRunning = !!initStatus && !isComplete && !isFailed
+  const isNeedsAttention = stage === 'NEEDS_ATTENTION'
+  const isFailed = (stage === 'FAILED' || !!initStatus?.errorMessage) && !isNeedsAttention
+  const isRunning = !!initStatus && !isComplete && !isFailed && !isNeedsAttention
+  const schemaScanDetails = initStatus?.stageDetails?.SCHEMA_SCAN || {}
+  const coverageLine = (() => {
+    const live = schemaScanDetails.liveUserTableCount
+    const discovered = schemaScanDetails.baseTablesDiscovered ?? schemaScanDetails.tablesDiscovered
+    const coverage = schemaScanDetails.coveragePercent
+    const schemas = Array.isArray(schemaScanDetails.schemasScanned)
+      ? schemaScanDetails.schemasScanned.length
+      : null
+    if (typeof live === 'number' && typeof discovered === 'number') {
+      const schemaBit = schemas != null ? ` across ${schemas} schema${schemas === 1 ? '' : 's'}` : ''
+      const covBit = typeof coverage === 'number' ? ` (${coverage}%)` : ''
+      return `Indexed ${discovered}/${live} base tables${covBit}${schemaBit}`
+    }
+    return null
+  })()
   const initStartedText = formatTimestamp(initStatus?.startedAt)
   const initCompletedText = formatTimestamp(initStatus?.completedAt)
 
@@ -294,6 +321,8 @@ export default function BackgroundJobsTab({ connectionId }) {
           <div className={styles.brainInitHeading}>
             {isComplete ? (
               <CheckCircle2 size={16} className={styles.brainInitIconOk} />
+            ) : isNeedsAttention ? (
+              <AlertTriangle size={16} className={styles.brainInitIconFail} />
             ) : isFailed ? (
               <AlertTriangle size={16} className={styles.brainInitIconFail} />
             ) : isRunning ? (
@@ -342,7 +371,7 @@ export default function BackgroundJobsTab({ connectionId }) {
               if the previous run completed cleanly. Disabled mid-run to
               avoid stomping on an in-progress pipeline.
             */}
-            {(!isRunning || isFailed) && (
+            {(!isRunning || isFailed || isNeedsAttention) && (
               <button
                 type="button"
                 className={styles.brainInitBtn}
@@ -372,13 +401,18 @@ export default function BackgroundJobsTab({ connectionId }) {
           />
         </div>
 
-        {(initStatus?.stageMessage || initStatus?.errorMessage || initStartedText || initCompletedText) && (
+        {(initStatus?.stageMessage || initStatus?.errorMessage || coverageLine || initStartedText || initCompletedText) && (
           <div className={styles.brainInitMeta}>
             {initStatus?.errorMessage ? (
               <span className={styles.brainInitError}>{initStatus.errorMessage}</span>
             ) : initStatus?.stageMessage ? (
               <span>{initStatus.stageMessage}</span>
             ) : null}
+            {coverageLine && (
+              <span className={isNeedsAttention ? styles.brainInitError : undefined}>
+                {coverageLine}
+              </span>
+            )}
             <span className={styles.brainInitTimings}>
               {initStartedText && <>Started {initStartedText}</>}
               {initStartedText && initCompletedText && <> · </>}
@@ -419,7 +453,13 @@ export default function BackgroundJobsTab({ connectionId }) {
                 {STAGE_ORDER.map(stageKey => {
                   const timing = initStatus.stageTimings?.[stageKey]
                   const isCurrent = stage === stageKey
-                  const isDone = !!timing?.endedAt
+                  // Once the pipeline reports COMPLETED, every stage is done —
+                  // regardless of whether its individual timing entry made it
+                  // into stage_timings (e.g. an older init run predating a
+                  // stage, or a timing write that raced completion). Without
+                  // this, a fully-finished Brain could still show grey/pending
+                  // dots for stages the backend has already finished.
+                  const isDone = isComplete || !!timing?.endedAt
                   const dotClass = isDone
                     ? styles.brainInitStageDotDone
                     : isCurrent
@@ -445,130 +485,148 @@ export default function BackgroundJobsTab({ connectionId }) {
         )}
       </section>
 
-      <div className={styles.bgJobsStatsRow}>
-        <button
-          type="button"
-          className={`${styles.bgJobsStat} ${selectedJobsFilter === 'all' ? styles.bgJobsStatActive : ''}`}
-          onClick={() => setSelectedJobsFilter('all')}
-        >
-          <span className={styles.bgJobsStatLabel}>Scheduled</span>
-          <strong className={styles.bgJobsStatValue}>{stats.totalCount}</strong>
-        </button>
-        <button
-          type="button"
-          className={`${styles.bgJobsStat} ${selectedJobsFilter === 'active' ? styles.bgJobsStatActive : ''}`}
-          onClick={() => setSelectedJobsFilter('active')}
-        >
-          <span className={styles.bgJobsStatLabel}>Active</span>
-          <strong className={styles.bgJobsStatValue}>{stats.activeCount}</strong>
-        </button>
-        <button
-          type="button"
-          className={`${styles.bgJobsStat} ${selectedJobsFilter === 'running' ? styles.bgJobsStatActive : ''}`}
-          onClick={() => setSelectedJobsFilter('running')}
-        >
-          <span className={styles.bgJobsStatLabel}>Running</span>
-          <strong className={styles.bgJobsStatValue}>{stats.runningCount}</strong>
-        </button>
-        <button
-          type="button"
-          className={`${styles.bgJobsStat} ${selectedJobsFilter === 'next' ? styles.bgJobsStatActive : ''}`}
-          onClick={() => setSelectedJobsFilter('next')}
-        >
-          <span className={styles.bgJobsStatLabel}>By next run</span>
-          <strong className={styles.bgJobsStatValue}>Sort</strong>
-        </button>
-        {jobsLoading && (
-          <span className={styles.bgJobsLoading}>
-            <Loader2 size={14} className={styles.spinner} /> Refreshing
-          </span>
-        )}
-      </div>
+      {/* Scheduled maintenance — collapsed by default. This is power-user
+          content (recurring jobs like re-scans and re-embeddings); the
+          "teach your business" flow above is what most visits are for. */}
+      <button
+        type="button"
+        className={styles.brainInitStagesToggle}
+        onClick={() => setJobsExpanded(v => !v)}
+        aria-expanded={jobsExpanded}
+      >
+        {jobsExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {jobsExpanded ? 'Hide' : 'Show'} scheduled maintenance ({stats.totalCount})
+        {jobsLoading && <Loader2 size={12} className={styles.spinner} />}
+      </button>
 
-      {jobNotice && (
-        <div className={`${styles.diagnosticsPanel} ${jobNotice.tone === 'error' ? styles.danger : styles.muted}`}>
-          <div className={styles.diagnosticsHeader}>{jobNotice.message}</div>
-        </div>
-      )}
+      {jobsExpanded && (
+        <>
+          <div className={styles.bgJobsStatsRow}>
+            <button
+              type="button"
+              className={`${styles.bgJobsStat} ${selectedJobsFilter === 'all' ? styles.bgJobsStatActive : ''}`}
+              onClick={() => setSelectedJobsFilter('all')}
+            >
+              <span className={styles.bgJobsStatLabel}>Scheduled</span>
+              <strong className={styles.bgJobsStatValue}>{stats.totalCount}</strong>
+            </button>
+            <button
+              type="button"
+              className={`${styles.bgJobsStat} ${selectedJobsFilter === 'active' ? styles.bgJobsStatActive : ''}`}
+              onClick={() => setSelectedJobsFilter('active')}
+            >
+              <span className={styles.bgJobsStatLabel}>Active</span>
+              <strong className={styles.bgJobsStatValue}>{stats.activeCount}</strong>
+            </button>
+            <button
+              type="button"
+              className={`${styles.bgJobsStat} ${selectedJobsFilter === 'running' ? styles.bgJobsStatActive : ''}`}
+              onClick={() => setSelectedJobsFilter('running')}
+            >
+              <span className={styles.bgJobsStatLabel}>Running</span>
+              <strong className={styles.bgJobsStatValue}>{stats.runningCount}</strong>
+            </button>
+            <button
+              type="button"
+              className={`${styles.bgJobsStat} ${selectedJobsFilter === 'next' ? styles.bgJobsStatActive : ''}`}
+              onClick={() => setSelectedJobsFilter('next')}
+            >
+              <span className={styles.bgJobsStatLabel}>By next run</span>
+              <strong className={styles.bgJobsStatValue}>Sort</strong>
+            </button>
+            {jobsLoading && (
+              <span className={styles.bgJobsLoading}>
+                <Loader2 size={14} className={styles.spinner} /> Refreshing
+              </span>
+            )}
+          </div>
 
-      {jobsError && (
-        <div className={`${styles.diagnosticsPanel} ${styles.danger}`}>
-          <div className={styles.diagnosticsHeader}>{jobsError}</div>
-        </div>
-      )}
+          {jobNotice && (
+            <div className={`${styles.diagnosticsPanel} ${jobNotice.tone === 'error' ? styles.danger : styles.muted}`}>
+              <div className={styles.diagnosticsHeader}>{jobNotice.message}</div>
+            </div>
+          )}
 
-      {filteredJobs.length === 0 ? (
-        <div className={styles.emptyState}>
-          {jobs.length === 0
-            ? 'No scheduled Brain jobs are registered for this connection yet.'
-            : 'No jobs match this filter right now.'}
-        </div>
-      ) : (
-        <div className={styles.bgJobsList}>
-          {filteredJobs.map((job) => {
-            const nextRunText = formatTimestamp(job.nextRunAt)
-            const lastSuccessText = formatTimestamp(job.lastSuccessAt)
-            const lastFailureText = formatTimestamp(job.lastFailureAt)
-            const running = job.status === 'running'
-            return (
-              <article key={job.key} className={styles.bgJobCard}>
-                <div className={styles.bgJobTopRow}>
-                  <div className={styles.bgJobTitleBlock}>
-                    <div className={styles.bgJobTitleRow}>
-                      <h3 className={styles.bgJobTitle}>{job.title}</h3>
-                      <span className={styles.bgJobScope}>
-                        {job.scope === 'global' ? 'All connections' : 'This connection'}
+          {jobsError && (
+            <div className={`${styles.diagnosticsPanel} ${styles.danger}`}>
+              <div className={styles.diagnosticsHeader}>{jobsError}</div>
+            </div>
+          )}
+
+          {filteredJobs.length === 0 ? (
+            <div className={styles.emptyState}>
+              {jobs.length === 0
+                ? 'No scheduled Brain jobs are registered for this connection yet.'
+                : 'No jobs match this filter right now.'}
+            </div>
+          ) : (
+            <div className={styles.bgJobsList}>
+              {filteredJobs.map((job) => {
+                const nextRunText = formatTimestamp(job.nextRunAt)
+                const lastSuccessText = formatTimestamp(job.lastSuccessAt)
+                const lastFailureText = formatTimestamp(job.lastFailureAt)
+                const running = job.status === 'running'
+                return (
+                  <article key={job.key} className={styles.bgJobCard}>
+                    <div className={styles.bgJobTopRow}>
+                      <div className={styles.bgJobTitleBlock}>
+                        <div className={styles.bgJobTitleRow}>
+                          <h3 className={styles.bgJobTitle}>{job.title}</h3>
+                          <span className={styles.bgJobScope}>
+                            {job.scope === 'global' ? 'All connections' : 'This connection'}
+                          </span>
+                        </div>
+                        <p className={styles.bgJobDescription}>{job.description}</p>
+                      </div>
+                      <span
+                        className={`${styles.bgJobStatusBadge} ${
+                          running
+                            ? styles.bgJobStatusRunning
+                            : job.status === 'active'
+                              ? styles.bgJobStatusActive
+                              : styles.bgJobStatusInactive
+                        }`}
+                      >
+                        {job.status}
                       </span>
                     </div>
-                    <p className={styles.bgJobDescription}>{job.description}</p>
-                  </div>
-                  <span
-                    className={`${styles.bgJobStatusBadge} ${
-                      running
-                        ? styles.bgJobStatusRunning
-                        : job.status === 'active'
-                          ? styles.bgJobStatusActive
-                          : styles.bgJobStatusInactive
-                    }`}
-                  >
-                    {job.status}
-                  </span>
-                </div>
 
-                <div className={styles.bgJobMeta}>
-                  <span>
-                    <Clock3 size={13} />
-                    {nextRunText ? ` Next run ${nextRunText}` : ' No next run scheduled'}
-                  </span>
-                  {lastSuccessText && <span>Last success {lastSuccessText}</span>}
-                  {lastFailureText && <span>Last failure {lastFailureText}</span>}
-                  {job.consecutiveFailures > 0 && (
-                    <span>{job.consecutiveFailures} consecutive failure{job.consecutiveFailures > 1 ? 's' : ''}</span>
-                  )}
-                </div>
+                    <div className={styles.bgJobMeta}>
+                      <span>
+                        <Clock3 size={13} />
+                        {nextRunText ? ` Next run ${nextRunText}` : ' No next run scheduled'}
+                      </span>
+                      {lastSuccessText && <span>Last success {lastSuccessText}</span>}
+                      {lastFailureText && <span>Last failure {lastFailureText}</span>}
+                      {job.consecutiveFailures > 0 && (
+                        <span>{job.consecutiveFailures} consecutive failure{job.consecutiveFailures > 1 ? 's' : ''}</span>
+                      )}
+                    </div>
 
-                {job.statusReason && (
-                  <p className={styles.bgJobReason}>{job.statusReason}</p>
-                )}
-
-                <div className={styles.bgJobActions}>
-                  <button
-                    type="button"
-                    className={styles.secondaryButton}
-                    onClick={() => handleRunJob(job.key)}
-                    disabled={jobActionKey === job.key || running}
-                  >
-                    {jobActionKey === job.key ? (
-                      <><Loader2 size={14} className={styles.spinner} /> Starting…</>
-                    ) : (
-                      <><Play size={14} /> Run now</>
+                    {job.statusReason && (
+                      <p className={styles.bgJobReason}>{job.statusReason}</p>
                     )}
-                  </button>
-                </div>
-              </article>
-            )
-          })}
-        </div>
+
+                    <div className={styles.bgJobActions}>
+                      <button
+                        type="button"
+                        className={styles.secondaryButton}
+                        onClick={() => handleRunJob(job.key)}
+                        disabled={jobActionKey === job.key || running}
+                      >
+                        {jobActionKey === job.key ? (
+                          <><Loader2 size={14} className={styles.spinner} /> Starting…</>
+                        ) : (
+                          <><Play size={14} /> Run now</>
+                        )}
+                      </button>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          )}
+        </>
       )}
     </div>
   )

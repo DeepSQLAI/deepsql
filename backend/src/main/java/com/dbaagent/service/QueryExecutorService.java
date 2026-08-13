@@ -394,42 +394,48 @@ public class QueryExecutorService {
 
     private List<DatabaseObject> getPostgreSQLObjects(Connection connection) throws SQLException {
         List<DatabaseObject> objects = new ArrayList<>();
+        // Keep in sync with PostgresIntrospectionProvider non-system schema filter (W2a).
+        String nonSystem = "NOT IN ('pg_catalog','information_schema','pg_toast') "
+            + "AND %1$s NOT LIKE 'pg_temp_%%' AND %1$s NOT LIKE 'pg_toast_temp_%%'";
 
         // Get tables and views
-        String tablesQuery = "SELECT t.tablename as name, 'table' as type, " +
-            "(SELECT reltuples::bigint FROM pg_class WHERE relname = t.tablename) as row_count " +
-            "FROM pg_tables t WHERE t.schemaname = 'public' " +
-            "UNION ALL " +
-            "SELECT v.viewname as name, 'view' as type, 0 as row_count " +
-            "FROM pg_views v WHERE v.schemaname = 'public' " +
-            "ORDER BY type, name";
+        String tablesQuery = "SELECT t.schemaname as schema_name, t.tablename as name, 'table' as type, "
+            + "(SELECT reltuples::bigint FROM pg_class c "
+            + " JOIN pg_namespace n ON c.relnamespace = n.oid "
+            + " WHERE n.nspname = t.schemaname AND c.relname = t.tablename) as row_count "
+            + "FROM pg_tables t WHERE t.schemaname " + String.format(nonSystem, "t.schemaname") + " "
+            + "UNION ALL "
+            + "SELECT v.schemaname as schema_name, v.viewname as name, 'view' as type, 0 as row_count "
+            + "FROM pg_views v WHERE v.schemaname " + String.format(nonSystem, "v.schemaname") + " "
+            + "ORDER BY schema_name, type, name";
 
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery(tablesQuery)) {
             while (rs.next()) {
                 DatabaseObject obj = new DatabaseObject();
+                String schemaName = rs.getString("schema_name");
                 obj.setName(rs.getString("name"));
-                obj.setSchema("public");
+                obj.setSchema(schemaName);
                 obj.setType(rs.getString("type"));
                 obj.setRowCount(rs.getLong("row_count"));
-                obj.setColumns(getPostgreSQLColumns(connection, obj.getName()));
+                obj.setColumns(getPostgreSQLColumns(connection, schemaName, obj.getName()));
                 objects.add(obj);
             }
         }
 
         // Get functions
-        String functionsQuery = "SELECT p.proname as name, pg_get_functiondef(p.oid) as definition " +
-            "FROM pg_proc p " +
-            "JOIN pg_namespace n ON p.pronamespace = n.oid " +
-            "WHERE n.nspname = 'public' AND p.prokind = 'f' " +
-            "ORDER BY p.proname";
+        String functionsQuery = "SELECT n.nspname as schema_name, p.proname as name, pg_get_functiondef(p.oid) as definition "
+            + "FROM pg_proc p "
+            + "JOIN pg_namespace n ON p.pronamespace = n.oid "
+            + "WHERE n.nspname " + String.format(nonSystem, "n.nspname") + " AND p.prokind = 'f' "
+            + "ORDER BY n.nspname, p.proname";
 
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery(functionsQuery)) {
             while (rs.next()) {
                 DatabaseObject obj = new DatabaseObject();
                 obj.setName(rs.getString("name"));
-                obj.setSchema("public");
+                obj.setSchema(rs.getString("schema_name"));
                 obj.setType("function");
                 obj.setDefinition(rs.getString("definition"));
                 objects.add(obj);
@@ -437,18 +443,18 @@ public class QueryExecutorService {
         }
 
         // Get procedures
-        String proceduresQuery = "SELECT p.proname as name, pg_get_functiondef(p.oid) as definition " +
-            "FROM pg_proc p " +
-            "JOIN pg_namespace n ON p.pronamespace = n.oid " +
-            "WHERE n.nspname = 'public' AND p.prokind = 'p' " +
-            "ORDER BY p.proname";
+        String proceduresQuery = "SELECT n.nspname as schema_name, p.proname as name, pg_get_functiondef(p.oid) as definition "
+            + "FROM pg_proc p "
+            + "JOIN pg_namespace n ON p.pronamespace = n.oid "
+            + "WHERE n.nspname " + String.format(nonSystem, "n.nspname") + " AND p.prokind = 'p' "
+            + "ORDER BY n.nspname, p.proname";
 
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery(proceduresQuery)) {
             while (rs.next()) {
                 DatabaseObject obj = new DatabaseObject();
                 obj.setName(rs.getString("name"));
-                obj.setSchema("public");
+                obj.setSchema(rs.getString("schema_name"));
                 obj.setType("procedure");
                 obj.setDefinition(rs.getString("definition"));
                 objects.add(obj);
@@ -458,23 +464,26 @@ public class QueryExecutorService {
         return objects;
     }
 
-    private List<ColumnInfo> getPostgreSQLColumns(Connection connection, String tableName) throws SQLException {
+    private List<ColumnInfo> getPostgreSQLColumns(Connection connection, String schemaName, String tableName) throws SQLException {
         List<ColumnInfo> columns = new ArrayList<>();
-        String query = "SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, " +
-            "CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary_key " +
-            "FROM information_schema.columns c " +
-            "LEFT JOIN ( " +
-            "    SELECT ku.column_name " +
-            "    FROM information_schema.table_constraints tc " +
-            "    JOIN information_schema.key_column_usage ku ON tc.constraint_name = ku.constraint_name " +
-            "    WHERE tc.constraint_type = 'PRIMARY KEY' AND ku.table_name = ? " +
-            ") pk ON c.column_name = pk.column_name " +
-            "WHERE c.table_name = ? AND c.table_schema = 'public' " +
-            "ORDER BY c.ordinal_position";
+        String query = "SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, "
+            + "CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary_key "
+            + "FROM information_schema.columns c "
+            + "LEFT JOIN ( "
+            + "    SELECT ku.column_name "
+            + "    FROM information_schema.table_constraints tc "
+            + "    JOIN information_schema.key_column_usage ku ON tc.constraint_name = ku.constraint_name "
+            + "      AND tc.table_schema = ku.table_schema "
+            + "    WHERE tc.constraint_type = 'PRIMARY KEY' AND ku.table_schema = ? AND ku.table_name = ? "
+            + ") pk ON c.column_name = pk.column_name "
+            + "WHERE c.table_schema = ? AND c.table_name = ? "
+            + "ORDER BY c.ordinal_position";
 
         try (PreparedStatement stmt = connection.prepareStatement(query)) {
-            stmt.setString(1, tableName);
+            stmt.setString(1, schemaName);
             stmt.setString(2, tableName);
+            stmt.setString(3, schemaName);
+            stmt.setString(4, tableName);
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     ColumnInfo col = new ColumnInfo();

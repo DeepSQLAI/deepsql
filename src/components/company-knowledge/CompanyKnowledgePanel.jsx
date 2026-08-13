@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, Cog, FileCode, Inbox, Loader2, Map as MapIcon, NotebookText, Plus, Save, Trash2, X } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { schemaAPI } from '@/lib/api/client'
+import { connectionAPI, schemaAPI } from '@/lib/api/client'
+import { queryKeys } from '@/lib/queryKeys'
 import { useCompanyKnowledgeStore } from '@/lib/stores/useCompanyKnowledgeStore'
 import {
   useCodeScanSuggestions,
@@ -10,7 +11,6 @@ import {
   useDeleteCompanyKnowledge,
   useUpdateCompanyKnowledge,
 } from '@/lib/hooks/queries'
-import { queryKeys } from '@/lib/queryKeys'
 import sectionStyles from '@/components/sections/TopLevelSection.module.css'
 import styles from './CompanyKnowledgePanel.module.css'
 import BackgroundJobsTab from './BackgroundJobsTab'
@@ -213,6 +213,8 @@ export default function CompanyKnowledgePanel({ connectionId }) {
   const clearLinkedFilters = useCompanyKnowledgeStore((state) => state.clearLinkedFilters)
   const activeTab = useCompanyKnowledgeStore((state) => state.activeTab)
   const setActiveTab = useCompanyKnowledgeStore((state) => state.setActiveTab)
+  const userChoseTab = useCompanyKnowledgeStore((state) => state.userChoseTab)
+  const setDefaultTab = useCompanyKnowledgeStore((state) => state.setDefaultTab)
 
   const pendingSuggestionsQuery = useCodeScanSuggestions({
     connectionId,
@@ -231,6 +233,29 @@ export default function CompanyKnowledgePanel({ connectionId }) {
     queryFn: () => schemaAPI.getSchema(connectionId),
     enabled: Boolean(connectionId),
   })
+
+  // Drives the one-time auto-advance off the default 'background-jobs' tab
+  // once the Brain finishes initializing (see setDefaultTab in the store).
+  // 404 (no init record yet) is normalized to null, same as BackgroundJobsTab.
+  const initStatusQuery = useQuery({
+    queryKey: queryKeys.brain.initStatus(connectionId),
+    queryFn: () => connectionAPI.getInitStatus(connectionId),
+    enabled: Boolean(connectionId),
+    retry: false,
+    refetchInterval: (query) => {
+      const stage = query.state.data?.currentStage
+      return stage && stage !== 'COMPLETED' && stage !== 'FAILED' ? 4000 : false
+    },
+  })
+
+  useEffect(() => {
+    if (userChoseTab || activeTab !== 'background-jobs') {
+      return
+    }
+    if (initStatusQuery.data?.currentStage === 'COMPLETED') {
+      setDefaultTab('schema-context')
+    }
+  }, [activeTab, initStatusQuery.data, setDefaultTab, userChoseTab])
 
   const tableOptions = useMemo(
     () => (schemaQuery.data?.schema?.tables || schemaQuery.data?.tables || [])

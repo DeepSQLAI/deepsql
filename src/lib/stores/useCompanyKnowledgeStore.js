@@ -9,12 +9,21 @@ export const useCompanyKnowledgeStore = create((set, get) => ({
 
   // Active tab inside the Brain surface (formerly Company Knowledge).
   // Valid: 'business-rules' | 'schema-context' | 'sources' | 'suggestions' | 'background-jobs'
-  // Default 'background-jobs' (rendered as "Brain Init") so users land on
-  // the enrichment progress + scheduled-jobs view first — it's the natural
-  // "is my brain ready?" entry point. Key kept as 'background-jobs' for
-  // backwards compatibility with any persisted state.
+  // Default 'background-jobs' (rendered as "Initialize") so users land on the
+  // enrichment progress view while the Brain is still running. Once init
+  // reports COMPLETED, CompanyKnowledgePanel auto-advances to 'schema-context'
+  // via setDefaultTab (see userChoseTab below) — there's nothing left to watch
+  // on the init tab, and "add context" is the next real step.
   activeTab: 'background-jobs',
-  setActiveTab: (tab) => set({ activeTab: tab }),
+  // True once the user has explicitly clicked a tab. Gates the COMPLETED
+  // auto-advance so it only fires while the user is still sitting on the
+  // untouched default — it must never yank someone back to 'schema-context'
+  // after they've deliberately navigated elsewhere (e.g. to review suggestions).
+  userChoseTab: false,
+  setActiveTab: (tab) => set({ activeTab: tab, userChoseTab: true }),
+  // Used only by the one-time COMPLETED auto-advance — does not count as the
+  // user "choosing" a tab, so it can only fire once per session.
+  setDefaultTab: (tab) => set({ activeTab: tab }),
 
   // Suggestion-tab status filter.
   suggestionStatusFilter: 'PENDING',

@@ -1107,8 +1107,16 @@ public class KeyColumnAnalysisService {
         LocalDateTime now = LocalDateTime.now();
 
         for (KeyColumnAnalysis analysis : analyses) {
+            // A column that is already indexed (indexName set by enrichWithIndexStats)
+            // or is a known key (TRUE_KEY, or a PRIMARY/UNIQUE label from any future
+            // classifier) can never be flagged UNINDEXED_* — that combination is a
+            // contradiction, not a finding. This is what stops resolved primary keys
+            // from generating "unindexed join/filter" noise every single run.
+            boolean isKnownKeyOrIndexed = analysis.getIndexName() != null
+                || isKeyLikeType(analysis.getKeyType());
+
             // Rule 1: Unindexed filter columns (skip if already indexed)
-            if (analysis.getWhereCount() >= 5 && analysis.getIndexName() == null) {
+            if (analysis.getWhereCount() >= 5 && !isKnownKeyOrIndexed) {
                 ColumnAntiPattern pattern = ColumnAntiPattern.builder()
                     .connectionId(connectionId)
                     .tableName(analysis.getTableName())
@@ -1133,7 +1141,7 @@ public class KeyColumnAnalysisService {
             }
 
             // Rule 2: Unindexed JOIN columns (skip if already indexed)
-            if (analysis.getJoinCount() >= 5 && analysis.getIndexName() == null) {
+            if (analysis.getJoinCount() >= 5 && !isKnownKeyOrIndexed) {
                 ColumnAntiPattern pattern = ColumnAntiPattern.builder()
                     .connectionId(connectionId)
                     .tableName(analysis.getTableName())
@@ -1158,7 +1166,7 @@ public class KeyColumnAnalysisService {
             }
 
             // Rule 3: Unindexed ORDER BY (skip if already indexed)
-            if (analysis.getOrderByCount() >= 3 && analysis.getIndexName() == null) {
+            if (analysis.getOrderByCount() >= 3 && !isKnownKeyOrIndexed) {
                 ColumnAntiPattern pattern = ColumnAntiPattern.builder()
                     .connectionId(connectionId)
                     .tableName(analysis.getTableName())
@@ -1271,6 +1279,16 @@ public class KeyColumnAnalysisService {
         }
 
         return patterns;
+    }
+
+    /**
+     * True for any keyType label that means "this column is already a real key" —
+     * TRUE_KEY is what this classifier actually assigns (see classifyKeys), while
+     * PRIMARY/UNIQUE are accepted defensively in case a future classifier or an
+     * imported/legacy row uses those labels instead.
+     */
+    private boolean isKeyLikeType(String keyType) {
+        return "TRUE_KEY".equals(keyType) || "PRIMARY".equals(keyType) || "UNIQUE".equals(keyType);
     }
 
     /**
@@ -1939,32 +1957,74 @@ public class KeyColumnAnalysisService {
     }
 
     /**
-     * Fetch index usage statistics from database metadata
+     * Fetch index metadata via {@link QueryExecutorService#getTableIndexes} (dialect-agnostic —
+     * dispatches through {@code IntrospectionProvider}, not a Postgres-specific query) and set
+     * {@code indexName} on every analysis whose column is covered by an index. This is what
+     * {@link #detectAntiPatterns} gates UNINDEXED_* on — before this method actually populated
+     * indexName, every column (including primary keys) looked unindexed forever, so PK/UK
+     * columns kept generating UNINDEXED_JOIN/UNINDEXED_FILTER noise no matter how they were
+     * actually indexed.
      */
     private void enrichWithIndexStats(List<KeyColumnAnalysis> analyses, String connectionId) {
-        log.info("Fetching index usage statistics");
+        log.info("Fetching index metadata for {} key column analyses", analyses.size());
 
+        Map<String, List<TableIndex>> indexesByTable = new HashMap<>();
         for (KeyColumnAnalysis analysis : analyses) {
-            try {
-                // Query database for index info - PostgreSQL specific
-                String sql = String.format(
-                    "SELECT indexname, idx_scan FROM pg_stat_user_indexes " +
-                    "WHERE schemaname = 'public' AND tablename = '%s' " +
-                    "AND indexdef LIKE '%%%s%%'",
-                    analysis.getTableName(), analysis.getColumnName()
-                );
+            String tableName = analysis.getTableName();
+            if (tableName == null) {
+                continue;
+            }
+            List<TableIndex> indexes = indexesByTable.computeIfAbsent(tableName, t -> {
+                try {
+                    return queryExecutorService.getTableIndexes(connectionId, t);
+                } catch (Exception e) {
+                    log.debug("Could not fetch indexes for table {}: {}", t, e.getMessage());
+                    return Collections.emptyList();
+                }
+            });
+            if (indexes.isEmpty()) {
+                continue;
+            }
 
-                // Execute query using QueryExecutorService
-                // Note: This would need proper implementation based on database type
-                // For now, just mark as analyzed
-                analysis.setIndexUsageCount(0L);
-                analysis.setIndexScanCount(0L);
+            String columnName = analysis.getColumnName();
+            // Prefer the primary-key index, then any unique index, then any index
+            // that covers the column — matches how detectAntiPatterns treats
+            // PRIMARY/UNIQUE as strictly stronger signal than a plain index.
+            TableIndex best = null;
+            for (TableIndex index : indexes) {
+                if (index.getColumns() == null || !containsColumnIgnoreCase(index.getColumns(), columnName)) {
+                    continue;
+                }
+                if (index.isPrimary()) {
+                    best = index;
+                    break;
+                }
+                if (best == null || (index.isUnique() && !best.isUnique())) {
+                    best = index;
+                }
+            }
 
-            } catch (Exception e) {
-                log.debug("Could not fetch index stats for {}.{}: {}",
-                    analysis.getTableName(), analysis.getColumnName(), e.getMessage());
+            if (best != null) {
+                analysis.setIndexName(best.getName());
+                if ("NON_KEY".equals(analysis.getKeyType()) || analysis.getKeyType() == null) {
+                    if (best.isPrimary()) {
+                        analysis.setKeyType("TRUE_KEY");
+                    }
+                }
             }
         }
+    }
+
+    private boolean containsColumnIgnoreCase(List<String> columns, String columnName) {
+        if (columnName == null) {
+            return false;
+        }
+        for (String column : columns) {
+            if (columnName.equalsIgnoreCase(column)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

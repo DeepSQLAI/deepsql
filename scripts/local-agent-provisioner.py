@@ -7,13 +7,21 @@ this OSS checkout. For Cursor Cloud / native local dev, this script provides the
 same contract so /api/agent/session can create `u-<user>` agent profiles with
 MCP credentials before the Agent tab opens.
 
-Contract (matches AgentBridgeService.callProvisioner):
+Contract (matches AgentBridgeService.callProvisioner / revokeAgentTokens):
   POST /provision
   Header: X-Provision-Secret: <AGENT_PROVISION_SECRET>
   Body:   { "user": "<username>", "token": "<mcp-or-jwt>", "connectionId": "<uuid>" }
 
+  POST /revoke
+  Header: X-Provision-Secret: <AGENT_PROVISION_SECRET>
+  Body:   { "user": "<username>" }
+  Clears the on-disk token file and blanks DEEPSQL_AUTH_TOKEN in both the MCP
+  server env and the profile .env — called after a DB-side token revoke so no
+  stale plaintext credential keeps the agent working post-logout.
+
 Idempotent: creates the profile on first call (cloning default), then refreshes
-DEEPSQL_AUTH_TOKEN / DEEPSQL_API_BASE_URL / DEEPSQL_MCP_USER_ID in the profile .env.
+DEEPSQL_TOKEN_FILE / DEEPSQL_AUTH_TOKEN / DEEPSQL_API_BASE_URL /
+DEEPSQL_MCP_USER_ID in the profile .env and MCP server env.
 """
 from __future__ import annotations
 
@@ -39,6 +47,23 @@ def profile_for(username: str) -> str:
     return f"u-{safe or 'user'}"
 
 
+def token_file_for(home: Path) -> Path:
+    return home / "deepsql.token"
+
+
+def write_token_file(home: Path, token: str) -> Path:
+    """Write the MCP token atomically (temp file + rename) so the long-lived
+    MCP subprocess (which re-reads this file on every request, see
+    deepsql-phase1-lib.js readTokenFile) never observes a partially-written
+    token mid-rotation. 0600 — same secrecy bar as the profile .env."""
+    path = token_file_for(home)
+    tmp = path.with_suffix(f".tmp-{os.getpid()}")
+    tmp.write_text((token or "") + "\n")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+    return path
+
+
 def ensure_profile(name: str) -> Path:
     home = HERMES_HOME / "profiles" / name
     if home.exists():
@@ -49,7 +74,7 @@ def ensure_profile(name: str) -> Path:
     return home
 
 
-def write_profile_env(home: Path, *, user: str, token: str) -> None:
+def write_profile_env(home: Path, *, user: str, token: str, token_file: Path) -> None:
     env_path = home / ".env"
     keys: dict[str, str] = {}
     if env_path.exists():
@@ -67,6 +92,10 @@ def write_profile_env(home: Path, *, user: str, token: str) -> None:
                     keys["AZURE_OPENAI_KEY"] = line.split("=", 1)[1]
                     keys["OPENAI_API_KEY"] = keys["AZURE_OPENAI_KEY"]
     keys["DEEPSQL_API_BASE_URL"] = API_BASE
+    # DEEPSQL_TOKEN_FILE is read live (mtime-checked) by the MCP subprocess, so
+    # a rotated token takes effect without restarting Hermes. DEEPSQL_AUTH_TOKEN
+    # stays as a fallback for any consumer that only reads the env snapshot.
+    keys["DEEPSQL_TOKEN_FILE"] = str(token_file)
     keys["DEEPSQL_AUTH_TOKEN"] = token or ""
     keys["DEEPSQL_MCP_USER_ID"] = user
     keys["DEEPSQL_MCP_PROJECT_ID"] = "deepsql-agent"
@@ -100,13 +129,16 @@ def _load_profile_config(home: Path):
     return cfg if isinstance(cfg, dict) else {}
 
 
-def write_profile_mcp(home: Path, *, user: str, token: str) -> None:
+def write_profile_mcp(home: Path, *, user: str, token: str, token_file: Path) -> None:
     import yaml  # agent venv / system PyYAML
 
     cfg_path = home / "config.yaml"
     cfg = _load_profile_config(home)
     # Token must live on the MCP subprocess env — the agent runtime does not auto-forward
-    # the profile .env into mcp_servers.*.env.
+    # the profile .env into mcp_servers.*.env. DEEPSQL_TOKEN_FILE lets the MCP
+    # process pick up a rotated token live (mtime-checked re-read) without
+    # Hermes respawning the subprocess; DEEPSQL_AUTH_TOKEN is kept as a
+    # fallback for the env-snapshot path.
     cfg.setdefault("mcp_servers", {})["deepsql"] = {
         "command": "node",
         "args": [str(REPO_ROOT / "mcp" / "deepsql-phase1-server.js")],
@@ -114,6 +146,7 @@ def write_profile_mcp(home: Path, *, user: str, token: str) -> None:
             "DEEPSQL_API_BASE_URL": API_BASE,
             "DEEPSQL_MCP_USER_ID": user,
             "DEEPSQL_MCP_PROJECT_ID": "deepsql-agent",
+            "DEEPSQL_TOKEN_FILE": str(token_file),
             "DEEPSQL_AUTH_TOKEN": token or "",
         },
     }
@@ -151,8 +184,14 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
-        if self.path.rstrip("/") != "/provision":
-            return self._send(404, {"error": "not found"})
+        path = self.path.rstrip("/")
+        if path == "/provision":
+            return self._handle_provision()
+        if path == "/revoke":
+            return self._handle_revoke()
+        return self._send(404, {"error": "not found"})
+
+    def _handle_provision(self):
         if not SECRET:
             return self._send(500, {"error": "AGENT_PROVISION_SECRET unset"})
         if self.headers.get("X-Provision-Secret") != SECRET:
@@ -168,8 +207,37 @@ class Handler(BaseHTTPRequestHandler):
         profile = profile_for(user)
         try:
             home = ensure_profile(profile)
-            write_profile_mcp(home, user=user, token=token)
-            write_profile_env(home, user=user, token=token)
+            token_file = write_token_file(home, token)
+            write_profile_mcp(home, user=user, token=token, token_file=token_file)
+            write_profile_env(home, user=user, token=token, token_file=token_file)
+        except Exception as e:
+            return self._send(500, {"error": str(e)})
+        return self._send(200, {"ok": True, "profile": profile, "home": str(home)})
+
+    def _handle_revoke(self):
+        """Best-effort disk cleanup on logout: blank the token file and the
+        DEEPSQL_AUTH_TOKEN fallback in both the MCP env and the profile .env
+        so a revoked DB token doesn't keep working via a stale plaintext copy
+        on disk. Does not delete the profile itself — just its credential."""
+        if not SECRET:
+            return self._send(500, {"error": "AGENT_PROVISION_SECRET unset"})
+        if self.headers.get("X-Provision-Secret") != SECRET:
+            return self._send(401, {"error": "unauthorized"})
+        try:
+            body = self._read_json()
+        except Exception:
+            return self._send(400, {"error": "invalid json"})
+        user = str(body.get("user") or "").strip()
+        if not user:
+            return self._send(400, {"error": "user required"})
+        profile = profile_for(user)
+        home = HERMES_HOME / "profiles" / profile
+        if not home.exists():
+            return self._send(200, {"ok": True, "profile": profile, "note": "no profile on disk"})
+        try:
+            write_token_file(home, "")
+            write_profile_mcp(home, user=user, token="", token_file=token_file_for(home))
+            write_profile_env(home, user=user, token="", token_file=token_file_for(home))
         except Exception as e:
             return self._send(500, {"error": str(e)})
         return self._send(200, {"ok": True, "profile": profile, "home": str(home)})

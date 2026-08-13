@@ -30,16 +30,25 @@ function deriveTitle(messages) {
   return firstUser.content.replace(/\s+/g, ' ').trim().slice(0, 80)
 }
 
+// Generic, schema-agnostic prompts — must work for any connection (booking
+// systems, SaaS multi-tenant DBs, analytics warehouses, ...). Never hardcode
+// a domain-specific table/column name here (see the chat guardrail in
+// AGENTS.md); AgentChatPanel has no idea what tables the active connection has.
 const SUGGESTIONS = [
-  'How many bookings are in this database?',
-  'What does this database track, and the 5 largest tables?',
-  'What indexes should I add or drop to speed things up?',
+  'How many tables are there?',
+  'Show the largest tables',
+  'What are the top slow queries?',
 ]
 
 export default function AgentChatPanel({ connectionId, connectionName }) {
   const [sessionId, setSessionId] = useState(null)
   const [booting, setBooting] = useState(true)
   const [bootError, setBootError] = useState(null)
+  // True once /api/agent/session comes back with mcpAuthOk===false — the
+  // freshly provisioned MCP token can't reach DeepSQL's API. Chat must stay
+  // blocked until a retry goes green (W1: fail loud before the first message,
+  // not six tool-call failures in).
+  const [authBlocked, setAuthBlocked] = useState(false)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -52,12 +61,18 @@ export default function AgentChatPanel({ connectionId, connectionName }) {
   const restoredRef = useRef(false) // guards the persist effect until boot finishes
 
   const boot = useCallback(async ({ fresh = false } = {}) => {
-    setBooting(true); setBootError(null)
+    setBooting(true); setBootError(null); setAuthBlocked(false)
     restoredRef.current = false
     convIdRef.current = null
     esRef.current?.close(); esRef.current = null
     try {
-      const { profile } = await agentChatAPI.bootstrap(connectionId)
+      const { profile, mcpAuthOk, mcpAuthError } = await agentChatAPI.bootstrap(connectionId)
+      if (mcpAuthOk === false) {
+        setAuthBlocked(true)
+        setBootError(mcpAuthError || 'Agent cannot reach DeepSQL (auth). Reconnect / check Agent runtime.')
+        setBooting(false)
+        return
+      }
       profileRef.current = profile
       // Hermes requires the hermes_profile cookie before session/chat calls;
       // without it, chat/start 404s and the UI loader never resolves.
@@ -116,7 +131,7 @@ export default function AgentChatPanel({ connectionId, connectionName }) {
 
   const send = async (preset) => {
     const text = (preset ?? input).trim()
-    if (!text || sending || !sessionId) return
+    if (!text || sending || !sessionId || authBlocked) return
     setInput('')
     setMessages((m) => [...m, { role: 'user', content: text }, { role: 'assistant', content: '', tools: [], streaming: true }])
     setSending(true)
@@ -221,17 +236,17 @@ export default function AgentChatPanel({ connectionId, connectionName }) {
       <div className={styles.composer}>
         <textarea
           className={styles.textarea}
-          placeholder={sessionId ? 'Message the DeepSQL Agent…' : 'Starting…'}
+          placeholder={authBlocked ? 'Agent unavailable — reconnect above' : sessionId ? 'Message the DeepSQL Agent…' : 'Starting…'}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
           rows={1}
-          disabled={!sessionId || booting}
+          disabled={!sessionId || booting || authBlocked}
         />
         {sending ? (
           <button className={styles.stopBtn} onClick={stop} title="Stop"><Square size={15} /></button>
         ) : (
-          <button className={styles.sendBtn} onClick={() => send()} disabled={!input.trim() || !sessionId} title="Send"><ArrowUp size={16} /></button>
+          <button className={styles.sendBtn} onClick={() => send()} disabled={!input.trim() || !sessionId || authBlocked} title="Send"><ArrowUp size={16} /></button>
         )}
       </div>
     </div>

@@ -47,6 +47,7 @@ export const queryKeys = {
   brain: {
     all: (connectionId) => ["brain", connectionId],
     understanding: (connectionId) => ["brain", connectionId, "understanding"],
+    initStatus: (connectionId) => ["brain", connectionId, "initStatus"],
 
     // Tasks
     tasks: (connectionId, status) => [

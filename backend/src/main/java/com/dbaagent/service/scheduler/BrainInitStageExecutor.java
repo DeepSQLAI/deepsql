@@ -120,7 +120,7 @@ public class BrainInitStageExecutor {
                 case RAG_EMBEDDING -> executeRagEmbedding(connectionId, status, taskRunId);
                 case BRAIN_ANALYSIS -> executeBrainAnalysis(connectionId, status, taskRunId);
                 case SEMANTIC_MODELING -> executeSemanticModeling(connectionId, status, taskRunId);
-                case COMPLETED, FAILED -> null;
+                case COMPLETED, FAILED, NEEDS_ATTENTION -> null;
             };
         } catch (Exception e) {
             if (isStaleOrCancelled(connectionId, taskRunId)) {
@@ -143,26 +143,94 @@ public class BrainInitStageExecutor {
 
         var schema = schemaScannerService.scanSchema(connectionId);
         int tablesDiscovered = schema.getTables() != null ? schema.getTables().size() : 0;
+        int baseTablesDiscovered = schema.getTables() != null
+            ? (int) schema.getTables().stream()
+                .filter(t -> t.getType() == null || "table".equalsIgnoreCase(t.getType()))
+                .count()
+            : 0;
         int columnsDiscovered = schema.getTables() != null
             ? schema.getTables().stream().mapToInt(table ->
                 table.getColumns() != null ? table.getColumns().size() : 0).sum()
             : 0;
         var snapshot = schemaSnapshotService.captureSnapshot(connectionId, false);
 
+        int liveUserTableCount = countLiveUserBaseTables(connectionId);
+        java.util.Set<String> schemasScanned = new java.util.LinkedHashSet<>();
+        if (schema.getTables() != null) {
+            for (var table : schema.getTables()) {
+                if (table.getSchema() != null && !table.getSchema().isBlank()) {
+                    schemasScanned.add(table.getSchema());
+                }
+            }
+        }
+        int coveragePercent = liveUserTableCount <= 0
+            ? (baseTablesDiscovered > 0 ? 100 : 0)
+            : (int) Math.min(100, Math.round((baseTablesDiscovered * 100.0) / liveUserTableCount));
+
         Map<String, Object> details = new HashMap<>();
         details.put("tablesDiscovered", tablesDiscovered);
+        details.put("baseTablesDiscovered", baseTablesDiscovered);
         details.put("columnsDiscovered", columnsDiscovered);
+        details.put("liveUserTableCount", liveUserTableCount);
+        details.put("coveragePercent", coveragePercent);
+        details.put("schemasScanned", new java.util.ArrayList<>(schemasScanned));
         if (snapshot != null && snapshot.getCapturedAt() != null) {
             details.put("snapshotCapturedAt", snapshot.getCapturedAt());
         }
         if (snapshot != null && snapshot.getSchemaHash() != null) {
             details.put("schemaFingerprint", snapshot.getSchemaHash());
         }
-        details.put("method", "Evicts cached schema/object metadata, rescans the live schema, and stores a fresh snapshot");
+        details.put("method", "Evicts cached schema/object metadata, rescans non-system schemas, and stores a fresh snapshot");
         recordStageDetails(status, InitStage.SCHEMA_SCAN, details);
+
+        // Coverage gate (W2b): never claim a healthy Brain when we indexed nothing
+        // while live user tables exist, or when coverage is badly incomplete.
+        if (liveUserTableCount > 0 && baseTablesDiscovered == 0) {
+            markFailed(status,
+                "Brain found 0 user tables but the database has " + liveUserTableCount
+                    + " live base table(s). Check USAGE/SELECT grants on non-system schemas.",
+                taskRunId);
+            return null;
+        }
+        if (liveUserTableCount > 0 && coveragePercent < 80) {
+            markNeedsAttention(status, taskRunId, coveragePercent, baseTablesDiscovered, liveUserTableCount, schemasScanned);
+            return null;
+        }
+
         updateProgress(status, 18,
-            "Scanned " + tablesDiscovered + " tables and captured a fresh schema snapshot", taskRunId);
+            "Scanned " + tablesDiscovered + " objects (" + baseTablesDiscovered
+                + "/" + Math.max(liveUserTableCount, baseTablesDiscovered)
+                + " base tables across " + schemasScanned.size() + " schema(s))",
+            taskRunId);
         return InitStage.DATA_SAMPLING;
+    }
+
+    /**
+     * Count live non-system base tables visible to the JDBC user. Postgres uses
+     * the same exclusion pattern as introspection (W2a); other dialects fall
+     * back to discovered object counts so the gate stays a no-op.
+     */
+    private int countLiveUserBaseTables(String connectionId) {
+        try {
+            var jdbc = connectionService.getJdbcTemplateForBackgroundJob(connectionId);
+            String dbType = connectionService.getDbType(connectionId);
+            if (dbType != null && dbType.toLowerCase().contains("postgres")) {
+                Integer count = jdbc.queryForObject("""
+                    SELECT COUNT(*)::int
+                    FROM pg_tables t
+                    JOIN pg_namespace n ON n.nspname = t.schemaname
+                    JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = t.tablename
+                    WHERE t.schemaname NOT IN ('pg_catalog','information_schema','pg_toast')
+                      AND t.schemaname NOT LIKE 'pg_temp_%'
+                      AND t.schemaname NOT LIKE 'pg_toast_temp_%'
+                      AND c.relkind IN ('r', 'p')
+                    """, Integer.class);
+                return count != null ? count : 0;
+            }
+        } catch (Exception e) {
+            log.warn("Could not count live user tables for {}: {}", connectionId, e.getMessage());
+        }
+        return 0;
     }
 
     private InitStage executeDataSampling(String connectionId, ConnectionInitStatus status, UUID taskRunId) {
@@ -549,6 +617,33 @@ public class BrainInitStageExecutor {
         saveHistory(fresh);
     }
 
+    private void markNeedsAttention(
+            ConnectionInitStatus status,
+            UUID taskRunId,
+            int coveragePercent,
+            int baseTablesDiscovered,
+            int liveUserTableCount,
+            java.util.Set<String> schemasScanned) {
+        var current = initStatusRepo.findById(status.getConnectionId());
+        if (current.isEmpty() || !taskRunId.equals(current.get().getActiveRunId())) {
+            return;
+        }
+        ConnectionInitStatus fresh = current.get();
+        closeActiveStage(fresh);
+        fresh.setCurrentStage(InitStage.NEEDS_ATTENTION);
+        fresh.setProgressPercent(Math.min(99, Math.max(coveragePercent, 1)));
+        fresh.setStageMessage(
+            "Indexed " + baseTablesDiscovered + "/" + liveUserTableCount
+                + " live base tables (" + coveragePercent + "% coverage across "
+                + schemasScanned.size() + " schema(s)). Fix grants or schema list, then re-initialize."
+        );
+        fresh.setErrorMessage(null);
+        fresh.setCompletedAt(LocalDateTime.now());
+        initStatusRepo.save(fresh);
+        broadcast(fresh.getConnectionId(), fresh);
+        saveHistory(fresh);
+    }
+
     private void markCompleted(ConnectionInitStatus status, UUID taskRunId) {
         var current = initStatusRepo.findById(status.getConnectionId());
         if (current.isEmpty() || !taskRunId.equals(current.get().getActiveRunId())) {
@@ -579,7 +674,7 @@ public class BrainInitStageExecutor {
             case RAG_EMBEDDING -> 80;
             case BRAIN_ANALYSIS -> 92;
             case SEMANTIC_MODELING -> 96;
-            case COMPLETED, FAILED -> 100;
+            case COMPLETED, FAILED, NEEDS_ATTENTION -> 100;
         };
     }
 

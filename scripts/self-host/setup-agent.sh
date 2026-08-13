@@ -244,11 +244,23 @@ cfg = cfg or {}
 repo = os.environ["REPO_ROOT"]
 port = os.environ["BACKEND_PORT"]
 token = os.environ["TOKEN"]
+
+# Token file: written atomically (temp + rename) so the long-lived MCP
+# subprocess (mtime-checked re-read, see deepsql-phase1-lib.js readTokenFile)
+# never observes a partial write mid-rotation. DEEPSQL_AUTH_TOKEN stays as a
+# fallback for any consumer that only reads the env snapshot.
+token_file = home / "deepsql.token"
+tmp = token_file.with_suffix(f".tmp-{os.getpid()}")
+tmp.write_text(token + "\n")
+tmp.chmod(0o600)
+os.replace(tmp, token_file)
+
 cfg.setdefault("mcp_servers", {})["deepsql"] = {
     "command": "node",
     "args": [f"{repo}/mcp/deepsql-phase1-server.js"],
     "env": {
         "DEEPSQL_API_BASE_URL": f"http://localhost:{port}/api/",
+        "DEEPSQL_TOKEN_FILE": str(token_file),
         "DEEPSQL_AUTH_TOKEN": token,
         "DEEPSQL_MCP_USER_ID": os.environ["PROFILE"],
         "DEEPSQL_MCP_PROJECT_ID": os.environ["PROFILE"],
@@ -260,6 +272,7 @@ cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
 env_path = home / ".env"
 env_path.write_text(
     f"DEEPSQL_API_BASE_URL=http://localhost:{port}/api/\n"
+    f"DEEPSQL_TOKEN_FILE={token_file}\n"
     f"DEEPSQL_AUTH_TOKEN={token}\n"
     f"DEEPSQL_MCP_USER_ID={os.environ['PROFILE']}\n"
     f"DEEPSQL_MCP_PROJECT_ID={os.environ['PROFILE']}\n"

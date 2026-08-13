@@ -94,17 +94,20 @@ export default function Onboarding() {
           setSaveError('Please test your database connection before continuing.')
           return
         }
-        // Create the connection so Brain init has a connectionId
+        // Create the connection so Brain init has a connectionId. Field names
+        // must match ConnectionRequest exactly (connectionName / dbType /
+        // database) — the wizard previously sent name/databaseType/databaseName,
+        // which ConnectionRequest silently ignored (they deserialize to null).
         try {
           const created = await connectionAPI.saveConnection({
-            name:         dbData.database || dbData.host,
-            databaseType: dbData.dbType,
-            host:         dbData.host,
-            port:         parseInt(dbData.port) || 5432,
-            databaseName: dbData.database,
-            username:     dbData.username,
-            password:     dbData.password,
-            sslMode:      dbData.sslMode,
+            connectionName: dbData.database || dbData.host,
+            dbType:         dbData.dbType,
+            host:           dbData.host,
+            port:           parseInt(dbData.port) || 5432,
+            database:       dbData.database,
+            username:       dbData.username,
+            password:       dbData.password,
+            sslMode:        dbData.sslMode,
           })
           setConnectionId(created.id ?? created.connectionId)
         } catch (err) {

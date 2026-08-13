@@ -2,6 +2,7 @@ package com.dbaagent.service;
 
 import com.dbaagent.model.ConnectionRequest;
 import com.dbaagent.model.DatabaseConnection;
+import com.dbaagent.provider.DatabaseProviderRegistry;
 import com.dbaagent.repository.CredentialRepository;
 import com.dbaagent.security.EncryptionService;
 import com.dbaagent.service.security.ConnectionAccessService;
@@ -33,16 +34,21 @@ class CredentialServiceTelemetryTest {
     @Mock private EncryptionService encryptionService;
     @Mock private ConnectionAccessService connectionAccessService;
     @Mock private TelemetryClient telemetryClient;
+    @Mock private DatabaseProviderRegistry providerRegistry;
 
     private CredentialService service;
 
     @BeforeEach
     void setup() {
         service = new CredentialService(credentialRepository, encryptionService,
-                connectionAccessService, telemetryClient);
+                connectionAccessService, telemetryClient, providerRegistry);
         when(encryptionService.encrypt(any(), anyString())).thenReturn(new byte[]{1, 2, 3});
         when(credentialRepository.save(any(DatabaseConnection.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
+        // Telemetry dialect labels (postgres/mysql/unknown) come from normalizeDialect,
+        // not the canonicalizer under test elsewhere — echo the input back so these
+        // assertions stay about telemetry, not canonicalization.
+        when(providerRegistry.getCanonicalName(anyString())).thenAnswer(inv -> inv.getArgument(0));
     }
 
     @Test

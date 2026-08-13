@@ -549,7 +549,7 @@ public class BrainInitSchedulerService {
             case RAG_EMBEDDING -> 80;
             case BRAIN_ANALYSIS -> 92;
             case SEMANTIC_MODELING -> 96;
-            case COMPLETED, FAILED -> 100;
+            case COMPLETED, FAILED, NEEDS_ATTENTION -> 100;
         };
     }
 

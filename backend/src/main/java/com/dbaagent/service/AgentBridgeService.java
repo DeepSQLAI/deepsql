@@ -26,8 +26,10 @@ import java.util.Map;
  *
  * <p>The Java backend can't run the agent shell tooling itself (no agent runtime
  * in its image), so provisioning is delegated over the compose network to the
- * agent's internal, secret-gated provisioner endpoint. Failures never block the
- * tab — we still return the profile name.
+ * agent's internal, secret-gated provisioner endpoint. The browser Agent-tab
+ * boot path ({@link #ensureProfile}) is fail-loud — a configured-but-failing
+ * provisioner throws rather than returning a profile with a stale disk token.
+ * Headless channels ({@link #ensureProfileForUser}) stay best-effort.
  */
 @Service
 public class AgentBridgeService {
@@ -91,24 +93,60 @@ public class AgentBridgeService {
     @Value("${security.session.refresh-days:7}")
     private long sessionWindowDays;
 
+    /**
+     * Base URL for this same backend's own REST API, used only by
+     * {@link #probeMcpAuth} to verify a freshly minted token actually works
+     * before the Agent tab opens chat. Loopback by default — the probe never
+     * needs to leave the box, so no external base-URL config is required.
+     */
+    @Value("${agent.local-api-base-url:http://127.0.0.1:${server.port:8080}/api}")
+    private String localApiBaseUrl;
+
     public String profileFor(String username) {
         String safe = username.toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("(^-+|-+$)", "");
         return "u-" + safe;
     }
 
     /**
-     * Ensure the user's agent profile exists and is bound to their current token;
-     * returns the profile name. Best-effort — provisioning problems are logged but
-     * never thrown (the Agent tab still opens, just without fresh per-user scope).
+     * Thrown when provisioning is configured (enabled + secret set) but the
+     * provisioner call itself fails — non-2xx response or a connect/timeout
+     * error. Callers must surface this rather than silently returning a
+     * profile name that may point at a stale disk token (the W1 fix for
+     * "Agent tab opens, tool calls 401 six steps later").
      */
-    public String ensureProfile(String username, String authToken, String connectionId) {
+    public static class ProvisioningException extends RuntimeException {
+        public ProvisioningException(String message) {
+            super(message);
+        }
+        public ProvisioningException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /** Result of {@link #ensureProfile}: the resolved profile plus the token actually provisioned with it. */
+    public record ProfileBootstrap(String profile, String token) {}
+
+    /**
+     * Ensure the user's agent profile exists and is bound to their current token;
+     * returns the profile name plus the token that was provisioned with it (so
+     * the caller can probe that exact credential — see
+     * {@link AgentBridgeService#probeMcpAuth}).
+     *
+     * <p>Fail-loud: when provisioning is configured (enabled + secret set), a
+     * non-2xx or unreachable provisioner throws {@link ProvisioningException}
+     * instead of returning a profile that may still carry a stale/expired disk
+     * token. When provisioning is disabled or unconfigured, the tab still opens
+     * against the shared default profile (documented, not silent) and the
+     * returned token is the caller-supplied session token, unprovisioned.
+     */
+    public ProfileBootstrap ensureProfile(String username, String authToken, String connectionId) {
         String profile = profileFor(username);
         if (!provisionEnabled) {
-            return profile;
+            return new ProfileBootstrap(profile, authToken);
         }
         if (provisionSecret == null || provisionSecret.isBlank()) {
             log.warn("agent.provision-secret is unset — skipping per-user provisioning for {}", username);
-            return profile;
+            return new ProfileBootstrap(profile, authToken);
         }
         // The agent profile must carry a credential that outlives a single chat
         // session. The user's session JWT lives only ~15 min and is coupled to a
@@ -122,16 +160,21 @@ public class AgentBridgeService {
             agentToken = authToken == null ? "" : authToken;
         }
         callProvisioner(username, profile, agentToken, connectionId);
-        return profile;
+        return new ProfileBootstrap(profile, agentToken);
     }
 
     /**
-     * Headless variant for non-browser channels (Slack, etc.): provision the
-     * user's profile with a dedicated CHANNEL token minted directly for the
-     * DeepSQL user — no inbound session/cookie needed. The channel token has its
-     * own name so the UI login/logout lifecycle (which extends/revokes the
-     * {@code (auto)} token) never touches it; a web logout won't kill the user's
-     * Slack agent access. Best-effort — never throws.
+     * Headless variant for non-browser channels (Slack, dashboard generation,
+     * the agent-chat turn API): provision the user's profile with a dedicated
+     * CHANNEL token minted directly for the DeepSQL user — no inbound
+     * session/cookie needed. The channel token has its own name so the UI
+     * login/logout lifecycle (which extends/revokes the {@code (auto)} token)
+     * never touches it; a web logout won't kill the user's Slack agent access.
+     *
+     * <p>Unlike {@link #ensureProfile} (the browser Agent-tab boot path, which
+     * is fail-loud), this stays best-effort: a provisioner hiccup here must not
+     * take down dashboard generation or a Slack turn over a transient network
+     * blip. Provisioning failures are logged, not propagated.
      */
     public String ensureProfileForUser(String username, String connectionId) {
         String profile = profileFor(username);
@@ -147,11 +190,24 @@ public class AgentBridgeService {
             log.warn("Could not mint channel token for {} — skipping headless provisioning", username);
             return profile;
         }
-        callProvisioner(username, profile, channelToken, connectionId);
+        try {
+            callProvisioner(username, profile, channelToken, connectionId);
+        } catch (ProvisioningException e) {
+            log.warn("Headless agent provisioning failed for {}: {}", username, e.getMessage());
+        }
         return profile;
     }
 
-    /** POST the provision request to the agent container's internal provisioner. */
+    /**
+     * POST the provision request to the agent container's internal provisioner.
+     *
+     * <p>Throws {@link ProvisioningException} on a non-2xx response or any
+     * connect/timeout/IO failure — the caller (both {@code ensureProfile}
+     * variants) has already confirmed provisioning is enabled and configured, so
+     * a failure here means the Agent tab is about to open against a profile the
+     * provisioner never actually refreshed. That must block the tab, not log a
+     * warning and proceed.
+     */
     private void callProvisioner(String username, String profile, String token, String connectionId) {
         try {
             String body = objectMapper.writeValueAsString(Map.of(
@@ -168,10 +224,91 @@ public class AgentBridgeService {
             if (resp.statusCode() / 100 == 2) {
                 log.info("Provisioned/refreshed agent profile {} for user {}", profile, username);
             } else {
-                log.warn("Agent provisioning HTTP {} for user {}: {}", resp.statusCode(), username, resp.body());
+                String message = "Agent provisioning HTTP " + resp.statusCode() + " for user " + username
+                    + ": " + resp.body();
+                log.warn(message);
+                throw new ProvisioningException(message);
             }
+        } catch (ProvisioningException e) {
+            throw e;
         } catch (Exception e) {
             log.warn("Agent provisioning call failed for user {}: {}", username, e.getMessage());
+            throw new ProvisioningException(
+                "Agent provisioning call failed for user " + username + ": " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Derive the provisioner's revoke endpoint from its configured provision
+     * URL ({@code .../provision} -> {@code .../revoke}). Returns null if the
+     * configured URL doesn't follow that convention (best-effort only).
+     */
+    private String revokeUrl() {
+        if (provisionerUrl == null || !provisionerUrl.contains("/provision")) {
+            return null;
+        }
+        return provisionerUrl.replace("/provision", "/revoke");
+    }
+
+    /**
+     * Best-effort POST to the provisioner's {@code /revoke} so the on-disk
+     * token file / env fallback are cleared alongside the DB-side revoke.
+     * Never throws — this runs after the DB token is already gone, so a
+     * provisioner hiccup here must not fail the logout request itself.
+     */
+    private void callProvisionerRevoke(String username) {
+        if (!provisionEnabled) {
+            return;
+        }
+        String url = revokeUrl();
+        if (url == null || provisionSecret == null || provisionSecret.isBlank()) {
+            return;
+        }
+        try {
+            String body = objectMapper.writeValueAsString(Map.of("user", username));
+            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                .header("Content-Type", "application/json")
+                .header("X-Provision-Secret", provisionSecret)
+                .timeout(Duration.ofSeconds(10))
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() / 100 == 2) {
+                log.info("Revoked on-disk agent token for user {}", username);
+            } else {
+                log.warn("Agent token revoke HTTP {} for user {}: {}", resp.statusCode(), username, resp.body());
+            }
+        } catch (Exception e) {
+            log.warn("Agent token revoke call failed for user {}: {}", username, e.getMessage());
+        }
+    }
+
+    /**
+     * Probe whether the just-minted/refreshed MCP token can actually reach the
+     * DeepSQL API — the health check the Agent tab boot depends on to decide
+     * whether to show the chat composer or a blocking "Agent cannot reach
+     * DeepSQL (auth)" banner. GETs {@code /connections} with the token as a
+     * bearer credential against the local backend (loopback — this call never
+     * leaves the box, so no external base-URL config is needed).
+     *
+     * @return true if the API accepted the token (2xx), false on any
+     *         non-2xx/auth failure or network error.
+     */
+    public boolean probeMcpAuth(String token) {
+        if (token == null || token.isBlank()) {
+            return false;
+        }
+        try {
+            HttpRequest req = HttpRequest.newBuilder(URI.create(localApiBaseUrl + "/connections"))
+                .header("Authorization", "Bearer " + token)
+                .timeout(Duration.ofSeconds(5))
+                .GET()
+                .build();
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            return resp.statusCode() / 100 == 2;
+        } catch (Exception e) {
+            log.warn("MCP auth probe failed: {}", e.getMessage());
+            return false;
         }
     }
 
@@ -258,5 +395,10 @@ public class AgentBridgeService {
         } catch (Exception e) {
             log.warn("Could not revoke agent token(s) for {}: {}", username, e.getMessage());
         }
+        // DB-side revoke only kills future auth checks — the plaintext token can
+        // still live on disk in the profile's .env / token file / MCP server env
+        // until the provisioner overwrites it. Clear that copy too so a revoked
+        // token can't keep the agent working. Best-effort: never blocks logout.
+        callProvisionerRevoke(username);
     }
 }

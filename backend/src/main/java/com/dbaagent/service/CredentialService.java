@@ -2,6 +2,7 @@ package com.dbaagent.service;
 
 import com.dbaagent.model.ConnectionRequest;
 import com.dbaagent.model.DatabaseConnection;
+import com.dbaagent.provider.DatabaseProviderRegistry;
 import com.dbaagent.repository.CredentialRepository;
 import com.dbaagent.security.EncryptionService;
 import com.dbaagent.service.security.ConnectionAccessService;
@@ -26,13 +27,18 @@ public class CredentialService {
     private final EncryptionService encryptionService;
     private final ConnectionAccessService connectionAccessService;
     private final TelemetryClient telemetryClient;
+    private final DatabaseProviderRegistry providerRegistry;
 
     @Transactional
     public DatabaseConnection saveConnection(ConnectionRequest request, String ownerUsername) {
         DatabaseConnection connection = new DatabaseConnection();
         connection.setId(UUID.randomUUID().toString());
         connection.setConnectionName(request.getConnectionName());
-        connection.setDbType(request.getDbType());
+        // Canonicalize through the provider registry ("postgresql" -> "postgres", etc.) so
+        // every downstream consumer that switches on dbType (DatabaseProviderRegistry.getDialect,
+        // frontend badges, telemetry) sees one spelling per dialect regardless of which alias
+        // the caller (onboarding wizard, API client, import) happened to send.
+        connection.setDbType(providerRegistry.getCanonicalName(request.getDbType()));
         connection.setOwnerUsername(ownerUsername);
         connection.setCreatedAt(LocalDateTime.now());
         connection.setLastUsed(LocalDateTime.now());
@@ -377,7 +383,7 @@ public class CredentialService {
 
         // Update non-encrypted fields
         connection.setConnectionName(request.getConnectionName());
-        connection.setDbType(request.getDbType());
+        connection.setDbType(providerRegistry.getCanonicalName(request.getDbType()));
         connection.setLastUsed(LocalDateTime.now());
 
         // Update and re-encrypt sensitive fields

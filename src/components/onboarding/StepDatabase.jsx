@@ -11,7 +11,7 @@ const DEFAULT_PORTS = { postgres: '5432', mysql: '3306' }
 
 export default function StepDatabase({ data, onUpdate }) {
   const [form, setForm] = useState({
-    dbType:   data.dbType   || 'postgresql',
+    dbType:   data.dbType   || 'postgres',
     host:     data.host     || '',
     port:     data.port     || '5432',
     database: data.database || '',
@@ -37,13 +37,13 @@ export default function StepDatabase({ data, onUpdate }) {
     setTestError('')
     try {
       await connectionAPI.testConnection({
-        databaseType: form.dbType,
-        host:         form.host,
-        port:         parseInt(form.port) || 5432,
-        databaseName: form.database,
-        username:     form.username,
-        password:     form.password,
-        sslMode:      form.sslMode,
+        dbType:   form.dbType,
+        host:     form.host,
+        port:     parseInt(form.port) || 5432,
+        database: form.database,
+        username: form.username,
+        password: form.password,
+        sslMode:  form.sslMode,
       })
       setTestState('ok')
       onUpdate({ ...form, tested: true })
