@@ -228,26 +228,25 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
                   </span>
                   <span className={styles.traceTime}>{elapsed}s</span>
                 </div>
-                <div className={styles.traceList}>
-                  {(steps.length === 0
-                    ? [{ type: 'grounding', message: 'Consulting the brain…' }]
-                    : steps.slice(-7)
-                  ).map((s, i, arr) => {
-                    const Icon = STEP_ICON[s.type] || ClipboardCheck
-                    const last = i === arr.length - 1
-                    return (
-                      <div key={steps.length - arr.length + i} className={styles.traceRow}>
-                        <span className={styles.traceRail}>
-                          <span className={last ? styles.traceIconActive : styles.traceIconDone}>
-                            {last ? <Icon size={11} /> : <Check size={11} />}
+                {steps.length > 0 && (
+                  <div className={styles.traceList}>
+                    {steps.slice(-7).map((s, i, arr) => {
+                      const Icon = STEP_ICON[s.type] || ClipboardCheck
+                      const last = i === arr.length - 1
+                      return (
+                        <div key={steps.length - arr.length + i} className={styles.traceRow}>
+                          <span className={styles.traceRail}>
+                            <span className={last ? styles.traceIconActive : styles.traceIconDone}>
+                              {last ? <Icon size={11} /> : <Check size={11} />}
+                            </span>
+                            {i < arr.length - 1 && <span className={styles.traceLine} />}
                           </span>
-                          {i < arr.length - 1 && <span className={styles.traceLine} />}
-                        </span>
-                        <span className={last ? styles.traceTextActive : styles.traceTextDone}>{s.message}</span>
-                      </div>
-                    )
-                  })}
-                </div>
+                          <span className={last ? styles.traceTextActive : styles.traceTextDone}>{s.message}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>
