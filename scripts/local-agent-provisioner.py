@@ -147,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path in ("/health", "/"):
-            return self._send(200, {"ok": True, "service": "deepsql-local-agent-provisioner"})
+            return self._send(200, {"ok": True, "service": "deepsql-agent-provisioner"})
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):

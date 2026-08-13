@@ -1,0 +1,19 @@
+# Shared by frontend (./Dockerfile) and deepsql-agent (agent/Dockerfile),
+# both of which use the repo root as build context.
+.git
+.github
+**/.venv
+**/venv
+**/node_modules
+**/__pycache__
+backend/target
+backend/.mvn/wrapper/maven-wrapper.jar
+*.log
+.env
+.env.*
+!.env.example
+dist
+coverage
+tmp
+.cursor
+.hermes

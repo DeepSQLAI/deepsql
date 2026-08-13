@@ -310,10 +310,11 @@ wait_for_login() {
 }
 
 build_application_images() {
-  echo "Building the DeepSQL backend and frontend from source..."
-  echo "The first build compiles the Java backend and bundles the frontend; expect"
-  echo "several minutes. Subsequent runs reuse the Docker layer cache and are quick."
-  compose build backend frontend
+  echo "Building the DeepSQL backend, frontend, and DeepSQL Agent from source..."
+  echo "The first build compiles the Java backend, bundles the frontend, and builds"
+  echo "the DeepSQL Agent image; expect several minutes. Subsequent runs reuse the"
+  echo "Docker layer cache and are quick."
+  compose build backend frontend deepsql-agent
 }
 
 require_command docker
@@ -340,6 +341,7 @@ generate_secret SECURITY_JWT_SECRET "openssl rand -base64 64 | tr -d '\n'"
 generate_secret ENCRYPTION_KEY "openssl rand -base64 32 | tr -d '\n'"
 generate_secret DB_PASSWORD "openssl rand -base64 16 | tr -d '\n'"
 generate_secret ADMIN_BOOTSTRAP_SECRET "openssl rand -base64 32 | tr -d '\n'"
+generate_secret AGENT_PROVISION_SECRET "openssl rand -base64 32 | tr -d '\n'"
 
 # Prompt for the chat LLM key if still a placeholder. DeepSQL brings no model
 # credentials of its own, and AZURE_OPENAI_* no longer configures chat — chat is
@@ -452,28 +454,35 @@ echo
 echo "DeepSQL self-hosted stack is ready."
 echo "Frontend: http://localhost:${DEEPSQL_FRONTEND_PORT}"
 echo "Backend:  http://localhost:${DEEPSQL_BACKEND_PORT}/api"
+echo "Agent:    http://localhost:${DEEPSQL_AGENT_PORT:-8787} (DeepSQL Agent)"
 echo "Project:  $PROJECT_NAME"
-echo "Images:   built from source in this checkout (backend/Dockerfile, ./Dockerfile)."
+echo "Images:   built from source in this checkout"
+echo "          (backend/Dockerfile, ./Dockerfile, agent/Dockerfile)."
 echo "          After pulling new code, re-run this script to rebuild."
 echo
 
-# Agent tab + AI dashboards need Hermes on the host (:8787). Install/start it
-# unless the operator explicitly opted out.
-if [[ "${DEEPSQL_SKIP_AGENT_SETUP:-0}" != "1" ]]; then
+# Wait for the DeepSQL Agent container (Agent tab + AI dashboards).
+# Host-side setup-agent.sh is only for native (non-Compose) development.
+if wait_for_http "http://localhost:${DEEPSQL_AGENT_PROVISIONER_PORT:-8788}/health" "DeepSQL Agent" 60 2; then
+  echo "DeepSQL Agent is healthy."
+else
+  echo "Warning: DeepSQL Agent did not become healthy in time." >&2
+  echo "         The core UI still works. Check: docker compose logs deepsql-agent" >&2
+fi
+echo
+
+# Optional host-side agent for native (non-Compose) development only.
+# Compose already runs deepsql-agent; skip unless DEEPSQL_HOST_AGENT_SETUP=1.
+if [[ "${DEEPSQL_HOST_AGENT_SETUP:-0}" == "1" ]]; then
   if [[ -x "$SCRIPT_DIR/setup-agent.sh" ]]; then
-    echo "Setting up the DeepSQL Agent (Hermes webui on :8787)…"
+    echo "Starting host-side DeepSQL Agent (DEEPSQL_HOST_AGENT_SETUP=1)…"
     if "$SCRIPT_DIR/setup-agent.sh"; then
-      echo "Agent setup complete."
+      echo "Host agent setup complete."
     else
-      echo "Warning: agent setup failed. The core UI still works, but the Agent tab" >&2
-      echo "         and AI dashboards need: ./scripts/self-host/setup-agent.sh" >&2
+      echo "Warning: host agent setup failed." >&2
     fi
     echo
   fi
-else
-  echo "Skipped agent setup (DEEPSQL_SKIP_AGENT_SETUP=1)."
-  echo "Run ./scripts/self-host/setup-agent.sh when you want the Agent tab / AI dashboards."
-  echo
 fi
 
 # ── DeepSQL CLI (@deepsql/mcp) ───────────────────────────────────────────────
@@ -598,7 +607,7 @@ fi
 echo "Useful commands:"
 echo "  ./scripts/self-host/status.sh"
 echo "  ./scripts/self-host/smoke-test.sh"
-echo "  ./scripts/self-host/setup-agent.sh          # Hermes webui + MCP profile"
 echo "  ./scripts/self-host/seed-demo-data.sh       # Seed demo e-commerce database"
 echo "  python3 scripts/self-host/e2e-agent-check.py <connectionId>  # live Agent+dashboard turn"
+echo "  docker compose logs deepsql-agent          # DeepSQL Agent logs"
 echo "  ./scripts/self-host/uninstall.sh"

@@ -50,17 +50,23 @@ public class AgentChatClient {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
-     * Base URL of the agent webui. Self-host Compose sets
-     * {@code AGENT_WEBUI_URL=http://host.docker.internal:8787} (no deepsql-agent
-     * service in the four-container stack). Override for a dedicated agent
-     * container on the compose network.
+     * Base URL of the DeepSQL Agent API. Self-host Compose sets
+     * {@code AGENT_WEBUI_URL=http://deepsql-agent:8787}. Override for a
+     * native (non-Compose) agent process on localhost.
      */
-    @Value("${agent.webui-url:http://host.docker.internal:8787}")
+    @Value("${agent.webui-url:http://deepsql-agent:8787}")
     private String webuiUrl;
 
     /** Hard ceiling on a single agent turn for a channel reply. */
     @Value("${agent.channel-turn-timeout-seconds:300}")
     private long turnTimeoutSeconds;
+
+    /**
+     * Identity asserted to the agent via {@code X-Remote-User}. The agent only
+     * accepts this header from peers in {@code HERMES_WEBUI_TRUSTED_PROXY_CIDRS}
+     * (the compose bridge). Updated on each {@link #switchProfile(String)}.
+     */
+    private volatile String remoteUser = "admin";
 
     public record AgentReply(boolean ok, String text, List<String> toolSteps, String error) {
         public static AgentReply ok(String text, List<String> steps) { return new AgentReply(true, text, steps, null); }
@@ -127,6 +133,9 @@ public class AgentChatClient {
         if (profile == null || profile.isBlank()) {
             throw new IllegalArgumentException("agent profile is required");
         }
+        // Profiles are provisioned as u-<username>; the trusted-auth header is the
+        // bare username (nginx hard-codes X-Remote-User: admin for the browser path).
+        remoteUser = profile.startsWith("u-") ? profile.substring(2) : profile;
         postJson("/api/profile/switch", Map.of("name", profile));
     }
 
@@ -154,6 +163,7 @@ public class AgentChatClient {
         String url = webuiUrl + "/api/chat/stream?stream_id=" + URLEncoder.encode(streamId, StandardCharsets.UTF_8);
         HttpRequest req = HttpRequest.newBuilder(URI.create(url))
             .header("Accept", "text/event-stream")
+            .header("X-Remote-User", remoteUser)
             .timeout(Duration.ofSeconds(turnTimeoutSeconds + 10))
             .GET()
             .build();
@@ -218,6 +228,8 @@ public class AgentChatClient {
     private JsonNode postJson(String path, Map<String, Object> body) throws Exception {
         HttpRequest req = HttpRequest.newBuilder(URI.create(webuiUrl + path))
             .header("Content-Type", "application/json")
+            // Trusted-proxy identity for the agent auth gate (compose bridge).
+            .header("X-Remote-User", remoteUser)
             .timeout(Duration.ofSeconds(30))
             .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
             .build();

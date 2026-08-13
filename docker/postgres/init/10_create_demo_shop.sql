@@ -390,7 +390,7 @@ SELECT
     (RANDOM() * 10000)::integer,
     true,
     true,
-    CURRENT_TIMESTAMP - (RANDOM() * 730 || ' days')::interval
+    CURRENT_TIMESTAMP - (RANDOM() * INTERVAL '730 days')
 FROM generate_series(1, 500) AS seq;
 
 -- ============================================================================
@@ -427,7 +427,7 @@ FROM customers c;
 
 INSERT INTO orders (order_number, customer_id, status, shipping_address_id, subtotal, tax_amount, shipping_amount, total_amount, payment_method, payment_status, created_at)
 SELECT 
-    'ORD-' || TO_CHAR(CURRENT_DATE - (seq / 7 || ' days')::interval, 'YYYYMMDD') || '-' || LPAD(seq::text, 5, '0'),
+    'ORD-' || TO_CHAR(CURRENT_DATE - make_interval(days => seq / 7), 'YYYYMMDD') || '-' || LPAD(seq::text, 5, '0'),
     (RANDOM() * 499 + 1)::integer,
     CASE (seq % 10)
         WHEN 0 THEN 'pending'
@@ -457,7 +457,9 @@ SELECT
         WHEN seq % 10 = 9 THEN 'refunded'
         ELSE 'paid'
     END,
-    CURRENT_TIMESTAMP - (seq / 7 || ' days')::interval - (RANDOM() * 6 || ' hours')::interval
+    -- Use interval math, not float||' hours' text casts: RANDOM() floats can
+    -- stringify as scientific notation ("4.6e-05 hours") which ::interval rejects.
+    CURRENT_TIMESTAMP - make_interval(days => seq / 7) - (RANDOM() * INTERVAL '6 hours')
 FROM generate_series(1, 5000) AS seq;
 
 -- Update total_amount
@@ -514,7 +516,7 @@ SELECT
     RANDOM() > 0.3,
     RANDOM() > 0.1,
     (RANDOM() * 50)::integer,
-    CURRENT_TIMESTAMP - (RANDOM() * 365 || ' days')::interval
+    CURRENT_TIMESTAMP - (RANDOM() * INTERVAL '365 days')
 FROM generate_series(1, 1500) AS seq
 CROSS JOIN LATERAL (SELECT id FROM products ORDER BY RANDOM() LIMIT 1) p;
 
@@ -539,7 +541,7 @@ SELECT
     CASE WHEN seq % 5 IN (1,2,3) THEN 'ORD-' || (RANDOM() * 5000 + 1)::integer ELSE NULL END,
     CASE WHEN seq % 5 = 4 THEN 'Inventory count adjustment' ELSE NULL END,
     'system',
-    CURRENT_TIMESTAMP - (RANDOM() * 180 || ' days')::interval
+    CURRENT_TIMESTAMP - (RANDOM() * INTERVAL '180 days')
 FROM generate_series(1, 10000) AS seq
 CROSS JOIN LATERAL (SELECT id FROM products ORDER BY RANDOM() LIMIT 1) p;
 
@@ -571,7 +573,7 @@ SELECT
     CASE (seq % 3) WHEN 0 THEN 'INSERT' WHEN 1 THEN 'UPDATE' ELSE 'INSERT' END,
     '{"status": "updated"}'::jsonb,
     'system',
-    CURRENT_TIMESTAMP - (seq / 100 || ' hours')::interval
+    CURRENT_TIMESTAMP - make_interval(hours => seq / 100)
 FROM generate_series(1, 50000) AS seq;
 
 -- ============================================================================

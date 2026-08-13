@@ -15,11 +15,32 @@
 import { requestSessionRefresh } from "./client";
 
 const AGENT_BASE = "/agent-api";
+const CSRF_HEADER = "X-Hermes-CSRF-Token";
+
+/** Cached CSRF token for the agent API (required once trusted-auth is on). */
+let agentCsrfToken = null;
+
+async function ensureAgentCsrf() {
+  if (agentCsrfToken) return agentCsrfToken;
+  const res = await fetch(`${AGENT_BASE}/api/auth/status`, { credentials: "include" });
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => ({}));
+  agentCsrfToken = data?.csrf_token || null;
+  return agentCsrfToken;
+}
 
 async function postJson(url, body, _retried = false) {
+  const headers = { "Content-Type": "application/json" };
+  // Browser fetch always sends Origin; once HERMES_WEBUI_TRUSTED_AUTH_HEADER
+  // enables the agent auth gate, unsafe POSTs need the session CSRF token or
+  // the agent answers 403 "Session expired - reload the page".
+  if (url.startsWith(AGENT_BASE) || url.includes("/agent-api/")) {
+    const csrf = await ensureAgentCsrf();
+    if (csrf) headers[CSRF_HEADER] = csrf;
+  }
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     credentials: "include",
     body: JSON.stringify(body || {}),
   });
@@ -33,6 +54,13 @@ async function postJson(url, body, _retried = false) {
     } catch {
       /* refresh failed — fall through and surface the original 401 */
     }
+    agentCsrfToken = null;
+    return postJson(url, body, true);
+  }
+  // CSRF token can rotate when trusted-auth mints a fresh hermes_session.
+  if (res.status === 403 && !_retried && (url.startsWith(AGENT_BASE) || url.includes("/agent-api/"))) {
+    agentCsrfToken = null;
+    await ensureAgentCsrf();
     return postJson(url, body, true);
   }
   if (!res.ok) throw new Error(`${url} → ${res.status}`);

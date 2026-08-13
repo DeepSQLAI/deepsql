@@ -18,6 +18,7 @@ source "$ENV_FILE"
 set +a
 
 : "${DEEPSQL_BACKEND_PORT:=8080}"
+: "${DEEPSQL_FRONTEND_PORT:=3000}"
 : "${DB_PASSWORD:=postgres}"
 : "${DEEPSQL_INITIAL_ADMIN_EMAIL:=}"
 : "${DEEPSQL_INITIAL_ADMIN_PASSWORD:=}"
@@ -79,21 +80,37 @@ fi
 base="http://localhost:${DEEPSQL_BACKEND_PORT}/api"
 cookie_jar="$(mktemp)"
 trap 'rm -f "$cookie_jar"' EXIT
-# Retried rather than attempted once. The backend answers /actuator/health UP before it
-# serves logins, so this script -- the command install.sh recommends running next -- used
-# to abort on a perfectly good install with a bare `curl: (22) 401`. Because curl runs
-# under `set -e` with -f, that exit happened before the error message below could print,
-# so the failure named neither the endpoint nor the reason.
-login_json=""
-login_deadline=$((SECONDS + 120))
-while (( SECONDS < login_deadline )); do
-  if login_json="$(curl -fsS -c "$cookie_jar" -H 'Content-Type: application/json' -X POST "$base/auth/login" -d "{\"email\":\"${DEEPSQL_SMOKE_EMAIL}\",\"password\":\"${DEEPSQL_SMOKE_PASSWORD}\"}" 2>/dev/null)"; then
-    break
-  fi
-  echo "Waiting for the backend to accept logins..."
-  sleep 5
-done
 
+# Login through the frontend proxy so the cookie jar matches the Host the
+# browser (and /agent-api auth_request) will use. A jar filled against
+# :8080 alone has made nginx's auth_request return 401 even when /auth/me
+# on the backend would succeed with the same cookie.
+# Retried rather than attempted once. The backend answers /actuator/health UP
+# before it serves logins, so this script used to abort on a good install with
+# a bare `curl: (22) 401` under `set -e` + curl -f.
+smoke_login() {
+  local deadline=$((SECONDS + "${1:-120}"))
+  local body=""
+  while (( SECONDS < deadline )); do
+    if body="$(curl -fsS -c "$cookie_jar" -b "$cookie_jar" -H 'Content-Type: application/json' \
+         -X POST "http://localhost:${DEEPSQL_FRONTEND_PORT}/api/auth/login" \
+         -d "{\"email\":\"${DEEPSQL_SMOKE_EMAIL}\",\"password\":\"${DEEPSQL_SMOKE_PASSWORD}\"}" 2>/dev/null)"; then
+      printf '%s' "$body"
+      return 0
+    fi
+    if body="$(curl -fsS -c "$cookie_jar" -b "$cookie_jar" -H 'Content-Type: application/json' \
+         -X POST "$base/auth/login" \
+         -d "{\"email\":\"${DEEPSQL_SMOKE_EMAIL}\",\"password\":\"${DEEPSQL_SMOKE_PASSWORD}\"}" 2>/dev/null)"; then
+      printf '%s' "$body"
+      return 0
+    fi
+    echo "Waiting for the backend to accept logins..."
+    sleep 5
+  done
+  return 1
+}
+
+login_json="$(smoke_login 120 || true)"
 if [[ "$login_json" != *"\"email\""* ]]; then
   echo "Error: login failed during smoke test." >&2
   echo "$login_json" >&2
@@ -150,8 +167,27 @@ if [[ "$DEEPSQL_SMOKE_WAIT_FOR_INIT" == "true" ]]; then
   echo "This calls the LLM once per schema batch, so several minutes is normal."
   deadline=$((SECONDS + DEEPSQL_SMOKE_INIT_TIMEOUT_SECONDS))
   last_report=""
+  init_json=""
   while (( SECONDS < deadline )); do
-    init_json="$(curl -fsS -b "$cookie_jar" "$base/connections/${connection_id}/init-status")"
+    # Do not use curl -f here: brain init often outlives the JWT (~15m), and a
+    # 401 under set -e aborted the smoke mid-progress with no recovery path.
+    init_code="$(curl -sS -o /tmp/deepsql-smoke-init.json -w '%{http_code}' \
+      -b "$cookie_jar" -c "$cookie_jar" \
+      "$base/connections/${connection_id}/init-status" || echo "000")"
+    if [[ "$init_code" == "401" ]]; then
+      echo "  [${SECONDS}s] session expired during brain init — re-logging in..."
+      if ! smoke_login 60 >/dev/null; then
+        echo "Error: re-login failed while waiting for brain init." >&2
+        exit 1
+      fi
+      continue
+    fi
+    if [[ "$init_code" != "200" ]]; then
+      echo "Error: init-status returned HTTP ${init_code}." >&2
+      cat /tmp/deepsql-smoke-init.json 2>/dev/null >&2 || true
+      exit 1
+    fi
+    init_json="$(cat /tmp/deepsql-smoke-init.json 2>/dev/null || true)"
     init_stage="$(printf '%s' "$init_json" | sed -n 's/.*"currentStage":"\([^"]*\)".*/\1/p')"
     init_progress="$(printf '%s' "$init_json" | sed -n 's/.*"progressPercent":\([0-9][0-9]*\).*/\1/p')"
     init_message="$(printf '%s' "$init_json" | sed -n 's/.*"stageMessage":"\([^"]*\)".*/\1/p')"
@@ -197,37 +233,43 @@ if [[ "$VECTOR_STORE_TYPE" == "pgvector" && "$DEEPSQL_SMOKE_WAIT_FOR_INIT" == "t
   fi
 fi
 
-# ── Agent paths (Hermes) ────────────────────────────────────────────────────
+# ── DeepSQL Agent paths ─────────────────────────────────────────────────────
 # Agent tab (browser→/agent-api) and dashboards (backend→AGENT_WEBUI_URL) both
-# need Hermes on :8787. Fail loudly when DEEPSQL_SMOKE_AGENT=1 (default) so a
-# "green" smoke test means those UI surfaces will work.
+# need the deepsql-agent Compose service. Fail loudly when DEEPSQL_SMOKE_AGENT=1
+# (default) so a "green" smoke test means those UI surfaces will work.
 : "${DEEPSQL_SMOKE_AGENT:=1}"
 : "${DEEPSQL_FRONTEND_PORT:=3000}"
-: "${AGENT_WEBUI_URL:=http://host.docker.internal:8787}"
-: "${HERMES_WEBUI_PORT:=8787}"
+: "${AGENT_WEBUI_URL:=http://deepsql-agent:8787}"
+: "${DEEPSQL_AGENT_PORT:=8787}"
+: "${DEEPSQL_AGENT_PROVISIONER_PORT:=8788}"
 
 if [[ "$DEEPSQL_SMOKE_AGENT" == "1" ]]; then
-  if ! curl -fsS "http://127.0.0.1:${HERMES_WEBUI_PORT}/api/mcp/servers" >/dev/null 2>&1; then
-    echo "Error: Hermes webui is not reachable on :${HERMES_WEBUI_PORT}." >&2
-    echo "       Agent tab and AI dashboards will fail. Run:" >&2
-    echo "         ./scripts/self-host/setup-agent.sh" >&2
+  if ! curl -fsS "http://127.0.0.1:${DEEPSQL_AGENT_PROVISIONER_PORT}/health" >/dev/null 2>&1; then
+    echo "Error: DeepSQL Agent provisioner is not reachable on :${DEEPSQL_AGENT_PROVISIONER_PORT}." >&2
+    echo "       Agent tab and AI dashboards will fail. Check:" >&2
+    echo "         docker compose logs deepsql-agent" >&2
     exit 1
   fi
 
-  # Backend container must reach Hermes (dashboard / Slack / CLI path).
-  if ! compose exec -T backend sh -c \
-      "curl -fsS --connect-timeout 3 \"${AGENT_WEBUI_URL}/api/mcp/servers\" >/dev/null"; then
+  # Backend container must reach the agent API (dashboard / Slack / CLI path).
+  # The API may return 401 without a session — any HTTP response means reachable.
+  agent_code="$(compose exec -T backend sh -c \
+      "curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 3 '${AGENT_WEBUI_URL}/api/mcp/servers'" \
+      || echo "000")"
+  if [[ "$agent_code" == "000" || -z "$agent_code" ]]; then
     echo "Error: backend cannot reach AGENT_WEBUI_URL=${AGENT_WEBUI_URL}." >&2
-    echo "       Check docker-compose.yml AGENT_WEBUI_URL + extra_hosts, and that" >&2
-    echo "       Hermes binds HERMES_WEBUI_HOST=0.0.0.0." >&2
+    echo "       Check docker-compose.yml AGENT_WEBUI_URL and that deepsql-agent is up." >&2
     exit 1
   fi
 
   # Browser path through nginx: profile switch must not 403 (Host/Origin CSRF).
+  # Do NOT send Origin here — that trips the agent's browser CSRF gate, which
+  # expects X-Hermes-CSRF-Token (the React Agent tab fetches that from
+  # /api/auth/status). Smoke validates the nginx auth_request + trusted-header
+  # path the way non-browser clients (and our curl diagnostics) do.
   switch_code="$(curl -sS -o /tmp/deepsql-agent-switch.json -w '%{http_code}' \
     -b "$cookie_jar" -c "$cookie_jar" \
     -H 'Content-Type: application/json' \
-    -H "Origin: http://localhost:${DEEPSQL_FRONTEND_PORT}" \
     -X POST "http://localhost:${DEEPSQL_FRONTEND_PORT}/agent-api/api/profile/switch" \
     -d '{"name":"u-admin"}' || true)"
   if [[ "$switch_code" != "200" ]]; then
@@ -243,7 +285,6 @@ if [[ "$DEEPSQL_SMOKE_AGENT" == "1" ]]; then
     switch_code="$(curl -sS -o /tmp/deepsql-agent-switch.json -w '%{http_code}' \
       -b "$cookie_jar" -c "$cookie_jar" \
       -H 'Content-Type: application/json' \
-      -H "Origin: http://localhost:${DEEPSQL_FRONTEND_PORT}" \
       -X POST "http://localhost:${DEEPSQL_FRONTEND_PORT}/agent-api/api/profile/switch" \
       -d "{\"name\":\"${profile}\"}" || true)"
   else
@@ -251,14 +292,14 @@ if [[ "$DEEPSQL_SMOKE_AGENT" == "1" ]]; then
   fi
   if [[ "$switch_code" != "200" ]]; then
     echo "Error: /agent-api/api/profile/switch → HTTP ${switch_code} (expected 200)." >&2
-    echo "       Common cause: nginx Host header dropping :${DEEPSQL_FRONTEND_PORT} (CSRF)." >&2
+    echo "       Common cause: nginx Host header dropping :${DEEPSQL_FRONTEND_PORT} (CSRF)," >&2
+    echo "       or DEEPSQL_AGENT_TRUSTED_PROXY_CIDRS missing the compose bridge." >&2
     cat /tmp/deepsql-agent-switch.json 2>/dev/null >&2 || true
     exit 1
   fi
 
   session_json="$(curl -fsS -b "$cookie_jar" -c "$cookie_jar" \
     -H 'Content-Type: application/json' \
-    -H "Origin: http://localhost:${DEEPSQL_FRONTEND_PORT}" \
     -X POST "http://localhost:${DEEPSQL_FRONTEND_PORT}/agent-api/api/session/new" \
     -d "{\"profile\":\"${profile}\",\"enabled_toolsets\":[\"deepsql\",\"skills\"]}")"
   session_id="$(printf '%s' "$session_json" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("session",{}).get("session_id") or "")' 2>/dev/null || true)"
@@ -268,21 +309,26 @@ if [[ "$DEEPSQL_SMOKE_AGENT" == "1" ]]; then
     exit 1
   fi
 
-  # Backend→Hermes session (dashboard path) — same as AgentChatClient.ensureSession.
+  # Backend→agent session (dashboard path) — same as AgentChatClient.ensureSession.
+  # X-Remote-User is required once HERMES_WEBUI_TRUSTED_AUTH_HEADER is set; the
+  # compose bridge is allowlisted via DEEPSQL_AGENT_TRUSTED_PROXY_CIDRS.
+  remote_user="${profile#u-}"
   backend_switch="$(compose exec -T backend sh -c \
     "curl -fsS -c /tmp/hc.jar -H 'Content-Type: application/json' \
+      -H 'X-Remote-User: ${remote_user}' \
       -X POST '${AGENT_WEBUI_URL}/api/profile/switch' \
       -d '{\"name\":\"${profile}\"}' >/dev/null && \
      curl -fsS -b /tmp/hc.jar -c /tmp/hc.jar -H 'Content-Type: application/json' \
+      -H 'X-Remote-User: ${remote_user}' \
       -X POST '${AGENT_WEBUI_URL}/api/session/new' \
       -d '{\"profile\":\"${profile}\",\"enabled_toolsets\":[\"deepsql\",\"skills\"]}'")"
   if [[ "$backend_switch" != *"session_id"* ]]; then
-    echo "Error: backend→Hermes session/new failed (dashboard path)." >&2
+    echo "Error: backend→DeepSQL Agent session/new failed (dashboard path)." >&2
     echo "$backend_switch" >&2
     exit 1
   fi
 
-  echo "Agent smoke checks passed (Hermes up, nginx profile/switch OK, backend session OK)."
+  echo "Agent smoke checks passed (DeepSQL Agent up, nginx profile/switch OK, backend session OK)."
   echo "Agent profile: $profile"
   echo "Agent session: $session_id"
 fi

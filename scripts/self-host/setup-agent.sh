@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Install and start the DeepSQL Agent (Hermes) for self-host.
+# Install and start the DeepSQL Agent on the *host* for native (non-Compose) development.
 #
-# The four Compose services alone are NOT enough for the Agent tab or AI
-# dashboards — those need a host Hermes webui on :8787 with:
-#   - Python MCP SDK installed in the webui's interpreter
+# For self-host / enterprise, prefer the `deepsql-agent` Compose service
+# (agent/Dockerfile) — install.sh builds and starts it automatically.
+#
+# This script remains for Cursor Cloud / `mvn spring-boot:run` workflows where
+# there is no Compose agent container. It installs the agent runtime under the
+# product home, wires DeepSQL MCP, and starts the Agent API on :8787 with:
+#   - Python MCP SDK installed in the runtime interpreter
 #   - DeepSQL MCP wired to localhost:8080 with a per-user MCP token
-#   - Binding 0.0.0.0 (so Docker nginx/backend can reach it)
-#   - No HERMES_WEBUI_PASSWORD (DeepSQL's /agent-api proxy has no Hermes password)
+#   - Binding 0.0.0.0 (so Docker nginx/backend can reach it, if used)
+#   - No agent-side password (DeepSQL's /agent-api proxy has its own session gate)
 #
 # Idempotent. Safe to re-run after `git pull` or credential rotation.
 set -euo pipefail
@@ -406,13 +410,15 @@ provision_user_profile
 start_webui
 
 echo
-echo "DeepSQL Agent is ready."
-echo "  Hermes webui:  http://127.0.0.1:${WEBUI_PORT}"
-echo "  Frontend uses: http://localhost:${FRONTEND_PORT}/agent-api/ → webui"
-echo "  Backend uses:  AGENT_WEBUI_URL=http://host.docker.internal:${WEBUI_PORT}"
+echo "DeepSQL Agent is ready (host mode)."
+echo "  Agent API:     http://127.0.0.1:${WEBUI_PORT}"
+echo "  Frontend uses: http://localhost:${FRONTEND_PORT}/agent-api/ → agent"
+echo "  Backend uses:  AGENT_WEBUI_URL=http://127.0.0.1:${WEBUI_PORT}"
 echo "  Logs:          $LOG_FILE"
 echo
 echo "UI paths that need this process:"
 echo "  • Agent tab (chat)"
 echo "  • Dashboards → AI generate"
 echo "  • Slack (when slack.brain=agent) / CLI deepsql agent"
+echo
+echo "Prefer Compose for self-host: the deepsql-agent service replaces this script."

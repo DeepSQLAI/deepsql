@@ -55,24 +55,54 @@ echo "=========================================="
 if [[ "$DEEPSQL_SEED_SKIP_DEMO_DB" != "1" ]]; then
     echo ""
     echo "Step 1: Creating demo_shop database..."
-    
-    # Check if demo_shop already exists
+
+    demo_sql="$ROOT_DIR/docker/postgres/init/10_create_demo_shop.sql"
     demo_exists="$(compose exec -T postgres psql -U postgres -At -c "SELECT 1 FROM pg_database WHERE datname = 'demo_shop'" 2>/dev/null || echo "")"
-    
+    # Presence alone is not enough: a failed init leaves an empty-ish catalog
+    # (products/customers seeded, orders aborted on interval cast) and the old
+    # skip path permanently left customers with a half-built demo.
+    order_count="0"
     if [[ "$demo_exists" == "1" ]]; then
-        echo "  demo_shop database already exists. Skipping creation."
-        echo "  (Set DEEPSQL_SEED_SKIP_DEMO_DB=1 to always skip, or drop the database to recreate)"
+        order_count="$(compose exec -T postgres psql -U postgres -d demo_shop -At -c "SELECT COUNT(*) FROM orders" 2>/dev/null || echo "0")"
+    fi
+
+    recreate_demo=0
+    if [[ "${DEEPSQL_SEED_FORCE_DEMO_DB:-0}" == "1" ]]; then
+        recreate_demo=1
+    elif [[ "$demo_exists" == "1" && "${order_count:-0}" -lt 1000 ]]; then
+        # Full seed inserts 5000 orders. Anything well below that means the
+        # init script aborted mid-file (historically: float||' hours' interval
+        # casts) — treat it as incomplete and rebuild.
+        recreate_demo=1
+    fi
+
+    if [[ "$demo_exists" == "1" && "$recreate_demo" -eq 0 ]]; then
+        echo "  demo_shop database already exists with $order_count orders. Skipping creation."
+        echo "  (Set DEEPSQL_SEED_FORCE_DEMO_DB=1 to drop and recreate, or DEEPSQL_SEED_SKIP_DEMO_DB=1 to skip)"
+    elif [[ ! -f "$demo_sql" ]]; then
+        echo "  Warning: demo_shop SQL script not found at $demo_sql"
+        echo "  Skipping demo database creation."
     else
-        demo_sql="$ROOT_DIR/docker/postgres/init/10_create_demo_shop.sql"
-        if [[ -f "$demo_sql" ]]; then
-            echo "  Running demo_shop creation script..."
-            compose exec -T postgres psql -U postgres -f /docker-entrypoint-initdb.d/10_create_demo_shop.sql >/dev/null 2>&1 || \
-                compose exec -T postgres psql -U postgres < "$demo_sql"
-            echo "  demo_shop database created successfully."
-        else
-            echo "  Warning: demo_shop SQL script not found at $demo_sql"
-            echo "  Skipping demo database creation."
+        if [[ "$demo_exists" == "1" ]]; then
+            echo "  demo_shop exists but looks incomplete (orders=${order_count:-0}). Recreating…"
+            # DROP DATABASE cannot run inside a multi-statement -c transaction.
+            compose exec -T postgres psql -U postgres -v ON_ERROR_STOP=1 -c \
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'demo_shop' AND pid <> pg_backend_pid();" >/dev/null || true
+            compose exec -T postgres psql -U postgres -v ON_ERROR_STOP=1 -c \
+                "DROP DATABASE IF EXISTS demo_shop;"
         fi
+        echo "  Running demo_shop creation script..."
+        # Prefer the bind-mounted init script so recreate matches first-boot.
+        # ON_ERROR_STOP so a mid-file failure cannot look like success.
+        # The SQL file itself starts with DROP/CREATE DATABASE — run it against
+        # the postgres maintenance DB, not demo_shop.
+        if compose exec -T postgres test -f /docker-entrypoint-initdb.d/10_create_demo_shop.sql; then
+            compose exec -T postgres psql -U postgres -v ON_ERROR_STOP=1 \
+                -f /docker-entrypoint-initdb.d/10_create_demo_shop.sql
+        else
+            compose exec -T postgres psql -U postgres -v ON_ERROR_STOP=1 < "$demo_sql"
+        fi
+        echo "  demo_shop database created successfully."
     fi
 else
     echo "Step 1: Skipping demo_shop database creation (DEEPSQL_SEED_SKIP_DEMO_DB=1)"
@@ -146,18 +176,25 @@ else
   "password": "${DB_PASSWORD}",
   "cloudProvider": "self-hosted",
   "ssl": false,
-  "sslMode": "disable",
+  "sslMode": "none",
   "sshEnabled": false
 }
 JSON
 )
 
-    save_json="$(curl -fsS -b "$cookie_jar" -H 'Content-Type: application/json' \
-        -X POST "$base/connections" -d "$payload" 2>/dev/null || echo "{}")"
+    # Match smoke-test.sh: sslMode must be "none" (not "disable"). Any other value
+    # is treated as SSL-on by ConnectionRequest.getEffectiveSsl(), and the vault
+    # Postgres image rejects SSL — so the connection test fails and the seed
+    # used to report only an opaque "{}".
+    http_code="$(curl -sS -o /tmp/deepsql-seed-conn.json -w '%{http_code}' -b "$cookie_jar" \
+        -H 'Content-Type: application/json' \
+        -X POST "$base/connections" -d "$payload" || true)"
+    save_json="$(cat /tmp/deepsql-seed-conn.json 2>/dev/null || echo "{}")"
+    rm -f /tmp/deepsql-seed-conn.json
     connection_id="$(printf '%s' "$save_json" | sed -n 's/.*"connectionId":"\([^"]*\)".*/\1/p')"
     
     if [[ -z "$connection_id" ]]; then
-        echo "  Warning: Could not create demo connection."
+        echo "  Warning: Could not create demo connection (HTTP ${http_code:-?})."
         echo "  Response: $save_json"
         echo "  Continuing with other seed data..."
     else

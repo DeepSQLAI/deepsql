@@ -74,5 +74,44 @@ else
     && grep -qF 'aria-label="DeepSQL Agent"' "$STATIC/index.html" && echo "+ swapped logo to DeepSQL database mark" || echo "! logo swap skipped"
 fi
 
+# 6. Expose csrf_token on GET /api/auth/status so DeepSQL's React Agent tab
+#    (credentials:include fetch with Origin) can send X-Hermes-CSRF-Token.
+#    Upstream only injects the token into the HTML shell; our UI never loads it.
+ROUTES="$WEBUI/api/routes.py"
+CSRF_MARKER="deepsql_csrf_token_on_auth_status"
+if [[ -f "$ROUTES" ]]; then
+  if grep -qF "$CSRF_MARKER" "$ROUTES"; then
+    echo "= auth/status already returns csrf_token"
+  else
+    python3 - "$ROUTES" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+needle = '        if session_info and session_info.get("auth_type") == "trusted":\n            payload["auth_type"] = session_info.get("auth_type")\n            payload["user"] = session_info.get("username")\n            payload["bound_profile"] = session_info.get("bound_profile")\n        return j(handler, payload)'
+insert = '''        if session_info and session_info.get("auth_type") == "trusted":
+            payload["auth_type"] = session_info.get("auth_type")
+            payload["user"] = session_info.get("username")
+            payload["bound_profile"] = session_info.get("bound_profile")
+        # deepsql_csrf_token_on_auth_status — React Agent tab needs this for
+        # X-Hermes-CSRF-Token on unsafe /agent-api POSTs (profile/switch, chat).
+        try:
+            from api.auth import csrf_token_for_session, parse_cookie
+            cookie_val = getattr(handler, "_trusted_auth_session_cookie_value", None) or parse_cookie(handler)
+            if cookie_val:
+                token = csrf_token_for_session(cookie_val)
+                if token:
+                    payload["csrf_token"] = token
+        except Exception:
+            pass
+        return j(handler, payload)'''
+if needle not in text:
+    print("! could not locate auth/status return to patch csrf_token")
+    sys.exit(0)
+path.write_text(text.replace(needle, insert, 1))
+print("+ auth/status now returns csrf_token for DeepSQL Agent tab")
+PY
+  fi
+fi
+
 echo "✓ Overlay applied to $WEBUI"
 echo "  Default theme/skin set. (Hard-refresh an open tab to clear cached assets.)"
