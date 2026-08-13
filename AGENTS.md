@@ -265,3 +265,6 @@ only covers cloud-specific, non-obvious caveats.
 - **`/opt/cursor/artifacts/` is ephemeral and agent-scoped.** It is wiped on new Cloud Agent
   VMs and is **not** shared with other agents. Durable OSS go-live handoff lives in
   [`docs/oss-ux/`](docs/oss-ux/) (usability critique, E2E fix proposal, security review).
+- **Release manager.** This environment’s owning user (`venkateshsakamuri-lab`) is the
+  release manager for OSS PRs. Prefer reviewing/merging against `docs/oss-ux/` criteria.
+  Daily 9 AM triage setup: [`docs/oss-ux/DAILY_RELEASE_AUTOMATION.md`](docs/oss-ux/DAILY_RELEASE_AUTOMATION.md).
