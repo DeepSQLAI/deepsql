@@ -729,7 +729,7 @@ public class BrainInitStageExecutor {
                 return;
             }
             ConnectionInitStatus fresh = current.get();
-            Map<String, Object> merged = fresh.getStageDetails() != null
+            Map<String, Map<String, Object>> merged = fresh.getStageDetails() != null
                 ? new HashMap<>(fresh.getStageDetails())
                 : new HashMap<>();
             merged.put(stage.name(), new HashMap<>(details));
