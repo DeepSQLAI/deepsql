@@ -28,8 +28,9 @@ import java.util.concurrent.TimeUnit;
  * <ul>
  *   <li>{@code POST /api/dashboards/generate} — blocking; returns the validated config.</li>
  *   <li>{@code POST /api/dashboards/generate/stream} — SSE; streams the agent's live
- *       steps ({@code step} events: grounding → planning → validating) then a {@code done}
- *       event with the final config (or an {@code error} event).</li>
+ *       steps ({@code step} events: grounding → planning → validating) then either a
+ *       {@code chat} event (out-of-context reply) or a {@code done} event with the
+ *       artifact config (or an {@code error} event).</li>
  * </ul>
  *
  * Read-only: generates a config and validates queries by running them read-only; it never
@@ -101,8 +102,20 @@ public class DashboardGenerationController {
                             throw new ClientGoneException(io);
                         }
                     });
-                emitter.send(SseEmitter.event().name("done")
-                    .data(Map.of("success", true, "dashboardConfig", config)));
+                // Chat-only replies (greetings / tool questions) must not share the
+                // `done` event with a real artifact — the FE's done handler always
+                // appends "Done — built…" and auto-saves. A dedicated `chat` event
+                // keeps that path from swallowing out-of-context messages.
+                if (Boolean.TRUE.equals(config.get("chat"))) {
+                    emitter.send(SseEmitter.event().name("chat")
+                        .data(Map.of(
+                            "success", true,
+                            "reply", String.valueOf(config.getOrDefault("reply", "")),
+                            "dashboardConfig", config)));
+                } else {
+                    emitter.send(SseEmitter.event().name("done")
+                        .data(Map.of("success", true, "dashboardConfig", config)));
+                }
                 emitter.complete();
             } catch (ClientGoneException gone) {
                 emitter.complete();

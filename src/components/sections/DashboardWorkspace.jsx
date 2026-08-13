@@ -148,9 +148,15 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
       },
       onDone: (next) => {
         abortRef.current = null
-        setConfig(next)
         setThinking(false)
         setSteps([])
+        // Belt-and-braces: a chat-shaped payload must never hit the "built" path
+        // (that appends the canned save line and would clobber a real artifact).
+        if (!next?.html || next?.chat) {
+          setMessages((m) => [...m, { role: 'agent', text: next?.reply || '…' }])
+          return
+        }
+        setConfig(next)
         // Auto-save as a draft so a refresh never loses it (create first time, update after).
         const updated = [...messagesRef.current, { role: 'agent', text: 'Done — built and verified against your data. Saved as a draft — tell me what to change.' }]
         setMessages(updated)
