@@ -15,15 +15,20 @@ export function generateDashboardStream(connectionId, prompt, currentConfig, { o
   return dashboardGenAPI.generateStream(connectionId, prompt, currentConfig, {
     onStep,
     onDone: (data) => {
-      if (data?.dashboardConfig?.chat) {
-        onChat && onChat(data.dashboardConfig.reply || '')
+      // Chat-only can arrive as event:chat (reply at top level) or legacy done
+      // with dashboardConfig.chat=true. Treat either as a plain reply — never as
+      // a successful build (that path hardcodes "Done — built…" in the UI).
+      const cfg = data?.dashboardConfig
+      const chatReply = (typeof data?.reply === 'string' && data.reply) || cfg?.reply || ''
+      if (data?.chat === true || cfg?.chat === true || (chatReply && !cfg?.html && !cfg?.renderMode)) {
+        onChat && onChat(chatReply)
         return
       }
-      if (!data?.dashboardConfig) {
+      if (!cfg) {
         onError && onError(new Error(data?.error || 'Generation returned no dashboard.'))
         return
       }
-      onDone && onDone({ ...data.dashboardConfig, updatedAt: new Date().toISOString() })
+      onDone && onDone({ ...cfg, updatedAt: new Date().toISOString() })
     },
     onError,
   })

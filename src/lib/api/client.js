@@ -2724,6 +2724,9 @@ export const dashboardGenAPI = {
           let data = {};
           try { data = JSON.parse(dataLines.join("\n")); } catch { return; }
           if (event === "step") onStep && onStep(data);
+          // `chat` = out-of-context reply (hi/thanks); must not fall through to `done`
+          // or the workspace appends the canned "Done — built…" save message.
+          else if (event === "chat") { finished = true; onDone && onDone(data); }
           else if (event === "done") { finished = true; onDone && onDone(data); }
           else if (event === "error") { finished = true; onError && onError(new Error(data?.error || "Generation failed")); }
         };

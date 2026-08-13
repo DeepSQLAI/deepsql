@@ -97,6 +97,9 @@ public class DashboardAgentService {
                 chat.put("chat", true);
                 chat.put("reply", chatReply.text().trim());
                 chat.put("trace", trace);
+                log.info("Dashboard chat-only reply ({} chars) for prompt: {}",
+                    chat.get("reply").toString().length(),
+                    prompt == null ? "" : prompt.trim());
                 return chat;
             }
             // Ambiguous or the agent didn't just answer — fall through to a real build
