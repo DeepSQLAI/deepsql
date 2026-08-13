@@ -381,7 +381,7 @@ connections have to be re-initialised.
 |---|---|---|
 | `DB_PASSWORD` | [`docker-compose.yml:25,72`](../../docker-compose.yml) | Used for both the postgres container's `POSTGRES_PASSWORD` and the backend's datasource, so the two cannot drift. Changing it after first start does **not** change the password already stored in the volume. |
 | `DB_URL`, `DB_USERNAME` | `application.properties:52,54` | Compose pins these to its own `postgres` service ([`docker-compose.yml:70-71`](../../docker-compose.yml)) and its values win over `.env`. Only relevant when running the backend outside Compose. |
-| `DEEPSQL_VALKEY_PASSWORD` | [`docker-compose.yml:77`](../../docker-compose.yml) → `spring.data.redis.password` | Empty by default. The bundled `valkey` container has no password configured, so setting this alone will break the connection. |
+| `DEEPSQL_VALKEY_PASSWORD` | [`docker-compose.yml`](../../docker-compose.yml) → Valkey `--requirepass` and `spring.data.redis.password` | **Required.** Compose fails to start without it. `install.sh` generates a strong value when the placeholder is blank. Backend and Valkey must share the same password. |
 
 ### Public URLs — the one that breaks `deepsql login`
 
@@ -424,8 +424,8 @@ serve from.
 |---|---|---|
 | `DEEPSQL_FRONTEND_PORT` | 3000 | [`docker-compose.yml:116`](../../docker-compose.yml) |
 | `DEEPSQL_BACKEND_PORT` | 8080 | [`docker-compose.yml:94`](../../docker-compose.yml) |
-| `DEEPSQL_POSTGRES_PORT` | 5432 | [`docker-compose.yml:32`](../../docker-compose.yml) |
-| `DEEPSQL_VALKEY_PORT` | 6379 | [`docker-compose.yml:47`](../../docker-compose.yml) |
+| `DEEPSQL_POSTGRES_PORT` | 5432 (published as `127.0.0.1:…` only) | [`docker-compose.yml`](../../docker-compose.yml) |
+| `DEEPSQL_VALKEY_PORT` | 6379 (published as `127.0.0.1:…` only) | [`docker-compose.yml`](../../docker-compose.yml) |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | `application.properties:87` → [`SecurityConfig.java`](../../backend/src/main/java/com/dbaagent/config/SecurityConfig.java) |
 
 ```env

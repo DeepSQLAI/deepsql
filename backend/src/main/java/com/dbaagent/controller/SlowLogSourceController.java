@@ -200,9 +200,14 @@ public class SlowLogSourceController {
         try {
             Long executionId = Long.parseLong(jobId);
             Optional<BatchIngestionStatus> status = batchIngestionService.getJobStatus(executionId);
-            if (status.isPresent()) {
-                accessControlService.assertCanManageConnectionContent(status.get().connectionId());
+            // Fail closed: unknown job → 404 (do not call stop without ACL).
+            if (status.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
+                    "success", false,
+                    "message", "Job not found or already completed"
+                ));
             }
+            accessControlService.assertCanManageConnectionContent(status.get().connectionId());
             boolean stopped = batchIngestionService.stopJob(executionId);
             if (!stopped) {
                 return ResponseEntity.ok(Map.of(
@@ -232,9 +237,14 @@ public class SlowLogSourceController {
         try {
             Long executionId = Long.parseLong(jobId);
             Optional<BatchIngestionStatus> status = batchIngestionService.getJobStatus(executionId);
-            if (status.isPresent()) {
-                accessControlService.assertCanManageConnectionContent(status.get().connectionId());
+            // Fail closed: unknown job → 404 (do not restart without ACL).
+            if (status.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
+                    "success", false,
+                    "message", "Job not found"
+                ));
             }
+            accessControlService.assertCanManageConnectionContent(status.get().connectionId());
             BatchIngestionStatus job = batchIngestionService.restartJob(executionId);
             return ResponseEntity.ok(Map.of(
                 "success", true,

@@ -12,7 +12,8 @@ public final class SessionKillSupport {
      * Parse a session/backend id. Rejects null, empty, signed, hex, or any non-digit input.
      */
     public static long requireNumericPid(String pid) {
-        if (pid == null || pid.isBlank() || !pid.chars().allMatch(Character::isDigit)) {
+        // ASCII digits only — avoid Unicode numeric characters that Long.parseLong accepts.
+        if (pid == null || pid.isBlank() || !pid.matches("[0-9]+")) {
             throw new IllegalArgumentException("Invalid session id: must be a non-negative integer");
         }
         try {
