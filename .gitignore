@@ -15,6 +15,8 @@
 
 # production
 /build
+# Local / CI release bundles (JAR, source archives, SBOMs, checksums)
+/release-artifacts/
 
 # misc
 .DS_Store
