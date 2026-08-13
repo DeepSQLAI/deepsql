@@ -43,7 +43,23 @@ npm run build     # Build (dev)
 npm run build:production  # Build (prod)
 ```
 
-**Dev credentials**: admin/admin (auth bypass in dev mode)
+**Dev credentials**: There is no baked-in admin/admin login — `AuthController.login` requires a
+real `User` row matched by **email**, not username, so a fresh database (new Postgres volume)
+has no account to log in with at all. `SECURITY_AUTH_ENABLED=false` only bypasses JWT/MCP token
+*validation* (`JwtAuthenticationFilter`, `McpTokenAuthenticationFilter`); it does not create a
+user or skip the login form. Create the first admin via the bootstrap endpoint, gated by
+`SECURITY_ADMIN_BOOTSTRAP_ENABLED=true` + `ADMIN_BOOTSTRAP_SECRET`, and only callable from
+localhost:
+
+```bash
+curl -X POST http://localhost:8080/api/users/admin/bootstrap \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Bootstrap-Secret: $ADMIN_BOOTSTRAP_SECRET" \
+  -d '{"email":"admin@localhost","password":"<your-password>"}'
+```
+
+Then log in with that **email** (not `admin`) and password. `POST /users/admin/reset` (same
+header) replaces the existing admin if you need to rotate the password.
 
 ### Database
 
