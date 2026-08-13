@@ -262,3 +262,6 @@ only covers cloud-specific, non-obvious caveats.
   deadlock on an `ALTER TABLE`. Test env vars are documented in `CLAUDE.md` (Testing).
 - `npm run lint` currently reports many pre-existing warnings/errors in the repo; that is the
   baseline, not a setup failure.
+- **`/opt/cursor/artifacts/` is ephemeral and agent-scoped.** It is wiped on new Cloud Agent
+  VMs and is **not** shared with other agents. Durable OSS go-live handoff lives in
+  [`docs/oss-ux/`](docs/oss-ux/) (usability critique, E2E fix proposal, security review).
