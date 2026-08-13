@@ -714,7 +714,33 @@ public class BrainInitStageExecutor {
     }
 
     private void recordStageDetails(ConnectionInitStatus status, InitStage stage, Map<String, Object> details) {
+        // Mutate the in-memory handle used by later markCompleted/history…
+        if (status.getStageDetails() == null) {
+            status.setStageDetails(new HashMap<>());
+        }
         status.getStageDetails().put(stage.name(), new HashMap<>(details));
+
+        // …and persist onto the live row. updateProgress/updateStage reload from
+        // the DB, so writing only the in-memory object used to leave stageDetails
+        // permanently empty — which hid the W2b coverage fields from the UI.
+        try {
+            var current = initStatusRepo.findById(status.getConnectionId());
+            if (current.isEmpty()) {
+                return;
+            }
+            ConnectionInitStatus fresh = current.get();
+            Map<String, Object> merged = fresh.getStageDetails() != null
+                ? new HashMap<>(fresh.getStageDetails())
+                : new HashMap<>();
+            merged.put(stage.name(), new HashMap<>(details));
+            fresh.setStageDetails(merged);
+            initStatusRepo.save(fresh);
+            // Keep the caller’s handle in sync with what we just wrote.
+            status.setStageDetails(merged);
+        } catch (Exception e) {
+            log.warn("Failed to persist stageDetails for {} / {}: {}",
+                status.getConnectionId(), stage, e.getMessage());
+        }
     }
 
     private void broadcast(String connectionId, ConnectionInitStatus status) {
