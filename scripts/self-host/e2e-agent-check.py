@@ -48,8 +48,29 @@ def main() -> int:
     conn = sys.argv[1] if len(sys.argv) > 1 else None
 
     opener = build_opener(HTTPCookieProcessor(CookieJar()))
+    csrf_token: str | None = None
+    csrf_header = "X-Hermes-CSRF-Token"
 
-    def req(url: str, data=None, *, origin: str | None = None, timeout: int = 180):
+    def fetch_agent_csrf() -> str | None:
+        nonlocal csrf_token
+        r = urllib.request.Request(
+            f"{frontend}/agent-api/api/auth/status",
+            headers={"Accept": "application/json"},
+        )
+        with opener.open(r, timeout=30) as resp:
+            data = json.loads(resp.read().decode() or "{}")
+        csrf_token = data.get("csrf_token") or None
+        return csrf_token
+
+    def req(
+        url: str,
+        data=None,
+        *,
+        origin: str | None = None,
+        timeout: int = 180,
+        _retried: bool = False,
+    ):
+        nonlocal csrf_token
         body = None
         headers: dict[str, str] = {}
         if data is not None:
@@ -58,15 +79,37 @@ def main() -> int:
         if origin:
             headers["Origin"] = origin
             headers["Referer"] = origin.rstrip("/") + "/"
+        # Browser Origin POSTs to /agent-api need the Hermes CSRF token once
+        # trusted-auth is on — same contract as src/lib/api/agentClient.js.
+        if data is not None and "/agent-api/" in url:
+            if not csrf_token:
+                fetch_agent_csrf()
+            if csrf_token:
+                headers[csrf_header] = csrf_token
         r = urllib.request.Request(
             url, data=body, headers=headers, method="POST" if data is not None else "GET"
         )
-        with opener.open(r, timeout=timeout) as resp:
-            raw = resp.read().decode() or "null"
-            return json.loads(raw)
+        try:
+            with opener.open(r, timeout=timeout) as resp:
+                raw = resp.read().decode() or "null"
+                return json.loads(raw)
+        except urllib.error.HTTPError as e:
+            if e.code == 403 and not _retried and "/agent-api/" in url and data is not None:
+                csrf_token = None
+                fetch_agent_csrf()
+                return req(url, data, origin=origin, timeout=timeout, _retried=True)
+            raise
 
     print("→ login")
-    req(f"{backend}/auth/login", {"email": email, "password": password})
+    # Prefer the frontend proxy so cookies match the Host /agent-api auth_request uses.
+    try:
+        req(
+            f"{frontend}/api/auth/login",
+            {"email": email, "password": password},
+            origin=frontend,
+        )
+    except Exception:
+        req(f"{backend}/auth/login", {"email": email, "password": password})
 
     if not conn:
         conns = req(f"{backend}/connections")
@@ -80,6 +123,27 @@ def main() -> int:
         print("No connectionId available", file=sys.stderr)
         return 1
     print(f"→ connection {conn}")
+
+    # Resolve the expected current_database() value from the connection record.
+    # Hardcoding dba_agent falsely fails when the demo seed connection (demo_shop)
+    # is selected — the agent is correct; the gate was wrong.
+    expected_db = "dba_agent"
+    try:
+        conns = req(f"{backend}/connections")
+        items = conns if isinstance(conns, list) else (conns.get("connections") or conns.get("items") or [])
+        for c in items:
+            cid = c.get("connectionId") or c.get("id")
+            if str(cid) == str(conn):
+                expected_db = (
+                    c.get("databaseName")
+                    or c.get("database")
+                    or c.get("dbName")
+                    or expected_db
+                )
+                break
+    except Exception as e:
+        print(f"WARN: could not resolve expected DB name ({e}); defaulting to {expected_db}")
+    print(f"→ expected current_database() = {expected_db}")
 
     # ── Agent tab ──────────────────────────────────────────────────────────
     print("\n=== Agent tab (browser → /agent-api → DeepSQL Agent → MCP) ===")
@@ -184,14 +248,14 @@ def main() -> int:
     )
     seen_failures = [m for m in failure_markers if m in answer_l]
     called_sql = any("execute_sql" in t for t in tools)
-    answered = "dba_agent" in answer_l
+    answered = expected_db.lower() in answer_l
 
     agent_ok = answered and called_sql and not seen_failures
     if not agent_ok:
         if not called_sql:
             print("AGENT_FAIL: execute_sql was never called")
         if not answered:
-            print("AGENT_FAIL: reply lacks the expected database name 'dba_agent'")
+            print(f"AGENT_FAIL: reply lacks the expected database name '{expected_db}'")
         if seen_failures:
             print(f"AGENT_FAIL: reply reports tool failure {seen_failures}")
     print("AGENT_OK", agent_ok)

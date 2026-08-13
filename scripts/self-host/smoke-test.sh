@@ -80,33 +80,37 @@ fi
 base="http://localhost:${DEEPSQL_BACKEND_PORT}/api"
 cookie_jar="$(mktemp)"
 trap 'rm -f "$cookie_jar"' EXIT
-# Retried rather than attempted once. The backend answers /actuator/health UP before it
-# serves logins, so this script -- the command install.sh recommends running next -- used
-# to abort on a perfectly good install with a bare `curl: (22) 401`. Because curl runs
-# under `set -e` with -f, that exit happened before the error message below could print,
-# so the failure named neither the endpoint nor the reason.
-login_json=""
-login_deadline=$((SECONDS + 120))
-while (( SECONDS < login_deadline )); do
-  # Login through the frontend proxy so the cookie jar matches the Host the
-  # browser (and /agent-api auth_request) will use. A jar filled against
-  # :8080 alone has made nginx's auth_request return 401 even when /auth/me
-  # on the backend would succeed with the same cookie.
-  if login_json="$(curl -fsS -c "$cookie_jar" -H 'Content-Type: application/json' \
-       -X POST "http://localhost:${DEEPSQL_FRONTEND_PORT}/api/auth/login" \
-       -d "{\"email\":\"${DEEPSQL_SMOKE_EMAIL}\",\"password\":\"${DEEPSQL_SMOKE_PASSWORD}\"}" 2>/dev/null)"; then
-    break
-  fi
-  # Fall back to hitting the backend directly (older installs / no frontend).
-  if login_json="$(curl -fsS -c "$cookie_jar" -H 'Content-Type: application/json' \
-       -X POST "$base/auth/login" \
-       -d "{\"email\":\"${DEEPSQL_SMOKE_EMAIL}\",\"password\":\"${DEEPSQL_SMOKE_PASSWORD}\"}" 2>/dev/null)"; then
-    break
-  fi
-  echo "Waiting for the backend to accept logins..."
-  sleep 5
-done
 
+# Login through the frontend proxy so the cookie jar matches the Host the
+# browser (and /agent-api auth_request) will use. A jar filled against
+# :8080 alone has made nginx's auth_request return 401 even when /auth/me
+# on the backend would succeed with the same cookie.
+# Retried rather than attempted once. The backend answers /actuator/health UP
+# before it serves logins, so this script used to abort on a good install with
+# a bare `curl: (22) 401` under `set -e` + curl -f.
+smoke_login() {
+  local deadline=$((SECONDS + "${1:-120}"))
+  local body=""
+  while (( SECONDS < deadline )); do
+    if body="$(curl -fsS -c "$cookie_jar" -b "$cookie_jar" -H 'Content-Type: application/json' \
+         -X POST "http://localhost:${DEEPSQL_FRONTEND_PORT}/api/auth/login" \
+         -d "{\"email\":\"${DEEPSQL_SMOKE_EMAIL}\",\"password\":\"${DEEPSQL_SMOKE_PASSWORD}\"}" 2>/dev/null)"; then
+      printf '%s' "$body"
+      return 0
+    fi
+    if body="$(curl -fsS -c "$cookie_jar" -b "$cookie_jar" -H 'Content-Type: application/json' \
+         -X POST "$base/auth/login" \
+         -d "{\"email\":\"${DEEPSQL_SMOKE_EMAIL}\",\"password\":\"${DEEPSQL_SMOKE_PASSWORD}\"}" 2>/dev/null)"; then
+      printf '%s' "$body"
+      return 0
+    fi
+    echo "Waiting for the backend to accept logins..."
+    sleep 5
+  done
+  return 1
+}
+
+login_json="$(smoke_login 120 || true)"
 if [[ "$login_json" != *"\"email\""* ]]; then
   echo "Error: login failed during smoke test." >&2
   echo "$login_json" >&2
@@ -163,8 +167,27 @@ if [[ "$DEEPSQL_SMOKE_WAIT_FOR_INIT" == "true" ]]; then
   echo "This calls the LLM once per schema batch, so several minutes is normal."
   deadline=$((SECONDS + DEEPSQL_SMOKE_INIT_TIMEOUT_SECONDS))
   last_report=""
+  init_json=""
   while (( SECONDS < deadline )); do
-    init_json="$(curl -fsS -b "$cookie_jar" "$base/connections/${connection_id}/init-status")"
+    # Do not use curl -f here: brain init often outlives the JWT (~15m), and a
+    # 401 under set -e aborted the smoke mid-progress with no recovery path.
+    init_code="$(curl -sS -o /tmp/deepsql-smoke-init.json -w '%{http_code}' \
+      -b "$cookie_jar" -c "$cookie_jar" \
+      "$base/connections/${connection_id}/init-status" || echo "000")"
+    if [[ "$init_code" == "401" ]]; then
+      echo "  [${SECONDS}s] session expired during brain init — re-logging in..."
+      if ! smoke_login 60 >/dev/null; then
+        echo "Error: re-login failed while waiting for brain init." >&2
+        exit 1
+      fi
+      continue
+    fi
+    if [[ "$init_code" != "200" ]]; then
+      echo "Error: init-status returned HTTP ${init_code}." >&2
+      cat /tmp/deepsql-smoke-init.json 2>/dev/null >&2 || true
+      exit 1
+    fi
+    init_json="$(cat /tmp/deepsql-smoke-init.json 2>/dev/null || true)"
     init_stage="$(printf '%s' "$init_json" | sed -n 's/.*"currentStage":"\([^"]*\)".*/\1/p')"
     init_progress="$(printf '%s' "$init_json" | sed -n 's/.*"progressPercent":\([0-9][0-9]*\).*/\1/p')"
     init_message="$(printf '%s' "$init_json" | sed -n 's/.*"stageMessage":"\([^"]*\)".*/\1/p')"
