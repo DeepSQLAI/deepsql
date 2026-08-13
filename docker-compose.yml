@@ -1,12 +1,17 @@
 # ── DeepSQL Self-Hosted Stack ─────────────────────────────────────────────────
 # Quick start:
 #   1. cp .env.example .env
-#   2. fill in required values in .env
-#   3. docker compose up -d --build     (or ./scripts/self-host/install.sh)
+#   2. fill in required values in .env (or run ./scripts/self-host/install.sh)
+#   3. docker compose up -d --build
 #
 # There are no prebuilt DeepSQL images and no container registry: `backend`,
 # `frontend`, and `deepsql-agent` are built from this checkout. The first build
 # compiles the Java backend and takes several minutes.
+#
+# Network posture (OSS security): only the frontend (:3000) is published on all
+# interfaces by default. Postgres, Valkey, backend, and the Agent API bind to
+# loopback on the host (127.0.0.1) so a cloud VM is not WAN-open. Compose-network
+# DNS (postgres/valkey/backend/deepsql-agent) is unchanged for inter-service traffic.
 #
 # Recommended self-host mode — pgvector locally for RAG storage:
 #       VECTOR_STORE_TYPE=pgvector
@@ -22,14 +27,14 @@ services:
     environment:
       POSTGRES_DB:       dba_agent
       POSTGRES_USER:     postgres
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env (install.sh generates one)}
     command: >
       postgres
         -c shared_preload_libraries=pg_stat_statements
         -c pg_stat_statements.track=all
         -c max_connections=200
     ports:
-      - "${DEEPSQL_POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${DEEPSQL_POSTGRES_PORT:-5432}:5432"
     volumes:
       - dba-agent-postgres:/var/lib/postgresql
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -43,12 +48,18 @@ services:
   valkey:
     image: valkey/valkey:9.1.1
     restart: unless-stopped
+    environment:
+      DEEPSQL_VALKEY_PASSWORD: ${DEEPSQL_VALKEY_PASSWORD:?Set DEEPSQL_VALKEY_PASSWORD in .env}
+    command:
+      - valkey-server
+      - --requirepass
+      - ${DEEPSQL_VALKEY_PASSWORD:?Set DEEPSQL_VALKEY_PASSWORD in .env}
     ports:
-      - "${DEEPSQL_VALKEY_PORT:-6379}:6379"
+      - "127.0.0.1:${DEEPSQL_VALKEY_PORT:-6379}:6379"
     volumes:
       - dba-agent-valkey:/data
     healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
+      test: ["CMD-SHELL", "valkey-cli -a \"$$DEEPSQL_VALKEY_PASSWORD\" ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -69,12 +80,12 @@ services:
       # Vault DB — points to the postgres service above
       DB_URL:       jdbc:postgresql://postgres:5432/dba_agent?sslmode=disable
       DB_USERNAME:  postgres
-      DB_PASSWORD:  ${DB_PASSWORD:-postgres}
+      DB_PASSWORD:  ${DB_PASSWORD:?Set DB_PASSWORD in .env}
 
       # Cache — points to the valkey service above
       spring.data.redis.host: valkey
       spring.data.redis.port: "6379"
-      spring.data.redis.password: ${DEEPSQL_VALKEY_PASSWORD:-}
+      spring.data.redis.password: ${DEEPSQL_VALKEY_PASSWORD:?Set DEEPSQL_VALKEY_PASSWORD in .env}
 
       # Encryption key(s) for the credential vault — required, no baked-in default.
       # Set ENCRYPTION_KEYS (and ENCRYPTION_KEY_ID if it holds more than one key) in
@@ -96,7 +107,8 @@ services:
       # Automatically set by install.sh for pgvector self-host mode
       SPRING_AUTOCONFIGURE_EXCLUDE: ${SPRING_AUTOCONFIGURE_EXCLUDE:-}
     ports:
-      - "${DEEPSQL_BACKEND_PORT:-8080}:8080"
+      # Loopback only — public traffic must go through frontend nginx (:3000)
+      - "127.0.0.1:${DEEPSQL_BACKEND_PORT:-8080}:8080"
     volumes:
       - dba-agent-logs:/app/logs
     healthcheck:
@@ -109,6 +121,9 @@ services:
   # ── DeepSQL Agent (Agent tab, AI dashboards, Slack/CLI agent turns) ───────────
   # Fifth container: persona + skills + MCP + profile provisioner. Built from
   # agent/Dockerfile. Required for the Agent tab and AI dashboard generation.
+  # In-container bind remains 0.0.0.0 so backend/frontend can reach it on the
+  # compose bridge; host publish is loopback-only (nginx /agent-api is the
+  # public path and is gated with auth_request).
   deepsql-agent:
     build:
       context: .
@@ -139,8 +154,8 @@ services:
       HERMES_WEBUI_TRUSTED_PROXY_CIDRS: ${DEEPSQL_AGENT_TRUSTED_PROXY_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
       HERMES_WEBUI_TRUSTED_AUTH_HEADER: X-Remote-User
     ports:
-      - "${DEEPSQL_AGENT_PORT:-8787}:8787"
-      - "${DEEPSQL_AGENT_PROVISIONER_PORT:-8788}:8788"
+      - "127.0.0.1:${DEEPSQL_AGENT_PORT:-8787}:8787"
+      - "127.0.0.1:${DEEPSQL_AGENT_PROVISIONER_PORT:-8788}:8788"
     volumes:
       - dba-agent-agent:/var/lib/deepsql-agent
     healthcheck:

@@ -8,6 +8,7 @@ import com.dbaagent.repository.GrowthAnomalyRepository;
 import com.dbaagent.repository.TableStatsHistoryRepository;
 import com.dbaagent.service.GrowthDataCleanupService;
 import com.dbaagent.service.TableGrowthMonitoringService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -33,6 +34,7 @@ public class GrowthMonitoringController {
     private final GrowthAlertConfigurationRepository configRepository;
     private final TableGrowthMonitoringService monitoringService;
     private final GrowthDataCleanupService cleanupService;
+    private final AccessControlService accessControlService;
 
     /**
      * Get growth history for tables
@@ -43,6 +45,7 @@ public class GrowthMonitoringController {
             @PathVariable String connectionId,
             @RequestParam(required = false) String tableName,
             @RequestParam(defaultValue = "7") int days) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         Map<String, Object> response = new HashMap<>();
 
@@ -84,6 +87,8 @@ public class GrowthMonitoringController {
             @RequestParam(required = false) String tableName,
             @RequestParam(defaultValue = "false") boolean unacknowledgedOnly,
             @RequestParam(defaultValue = "30") int days) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
+
 
         Map<String, Object> response = new HashMap<>();
 
@@ -153,6 +158,7 @@ public class GrowthMonitoringController {
             }
 
             GrowthAnomaly anomaly = anomalyOpt.get();
+            accessControlService.assertCanManageConnectionContent(anomaly.getConnectionId());
             String acknowledgedBy = body.getOrDefault("acknowledgedBy", "system");
 
             anomaly.acknowledge(acknowledgedBy);
@@ -181,6 +187,7 @@ public class GrowthMonitoringController {
     public ResponseEntity<Map<String, Object>> getConfiguration(
             @PathVariable String connectionId,
             @RequestParam(required = false) String tableName) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         Map<String, Object> response = new HashMap<>();
 
@@ -223,6 +230,7 @@ public class GrowthMonitoringController {
     @PostMapping("/config")
     public ResponseEntity<Map<String, Object>> saveConfiguration(
             @RequestBody GrowthAlertConfiguration config) {
+        accessControlService.assertCanManageConnectionContent(config.getConnectionId());
 
         Map<String, Object> response = new HashMap<>();
 
@@ -278,6 +286,7 @@ public class GrowthMonitoringController {
             @PathVariable String connectionId,
             @RequestParam(required = false) String tableName,
             @RequestParam(defaultValue = "30") int days) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         Map<String, Object> response = new HashMap<>();
 
@@ -348,6 +357,7 @@ public class GrowthMonitoringController {
      */
     @PostMapping("/capture/{connectionId}")
     public ResponseEntity<Map<String, Object>> manualCapture(@PathVariable String connectionId) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
         Map<String, Object> response = new HashMap<>();
 
         try {

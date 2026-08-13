@@ -331,13 +331,17 @@ public class PlaybookExecutionService {
      */
     @Transactional
     public void cancelRun(String runId) {
-        PlaybookRun run = playbookRunRepository.findById(runId)
-            .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
+        PlaybookRun run = requireRunById(runId);
 
         if (run.getStatus() == PlaybookRun.RunStatus.RUNNING) {
             run.setStatus(PlaybookRun.RunStatus.CANCELLED);
             run.setCompletedAt(LocalDateTime.now());
             playbookRunRepository.save(run);
         }
+    }
+
+    public PlaybookRun requireRunById(String runId) {
+        return playbookRunRepository.findById(runId)
+            .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
     }
 }

@@ -2,6 +2,7 @@ package com.dbaagent.controller;
 
 import com.dbaagent.model.ConfigurationRecommendation;
 import com.dbaagent.service.DatabaseConfigurationService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +22,7 @@ import java.util.Map;
 public class ConfigurationController {
 
     private final DatabaseConfigurationService configurationService;
+    private final AccessControlService accessControlService;
 
     /**
      * Analyze database configuration and generate tuning recommendations
@@ -28,6 +30,7 @@ public class ConfigurationController {
     @PostMapping("/analyze/{connectionId}")
     public ResponseEntity<AnalyzeResponse> analyzeConfiguration(@PathVariable String connectionId) {
         log.info("Analyzing configuration for connection: {}", connectionId);
+        accessControlService.assertCanManageConnectionContent(connectionId);
 
         try {
             List<ConfigurationRecommendation> recommendations = configurationService.analyzeConfiguration(connectionId);
@@ -59,6 +62,7 @@ public class ConfigurationController {
     @GetMapping("/{connectionId}")
     public ResponseEntity<List<ConfigurationRecommendation>> getRecommendations(@PathVariable String connectionId) {
         log.info("Fetching configuration recommendations for connection: {}", connectionId);
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         List<ConfigurationRecommendation> recommendations = configurationService.getRecommendations(connectionId);
         return ResponseEntity.ok(recommendations);
@@ -70,6 +74,7 @@ public class ConfigurationController {
     @GetMapping("/pending/{connectionId}")
     public ResponseEntity<List<ConfigurationRecommendation>> getPendingRecommendations(@PathVariable String connectionId) {
         log.info("Fetching pending configuration recommendations for connection: {}", connectionId);
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         List<ConfigurationRecommendation> recommendations = configurationService.getPendingRecommendations(connectionId);
         return ResponseEntity.ok(recommendations);
@@ -83,6 +88,8 @@ public class ConfigurationController {
         log.info("Marking configuration recommendation as applied: {}", id);
 
         try {
+            ConfigurationRecommendation existing = configurationService.requireById(id);
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
             ConfigurationRecommendation recommendation = configurationService.markAsApplied(id);
             return ResponseEntity.ok(recommendation);
         } catch (IllegalArgumentException e) {
@@ -104,6 +111,8 @@ public class ConfigurationController {
         log.info("Dismissing configuration recommendation: {}", id);
 
         try {
+            ConfigurationRecommendation existing = configurationService.requireById(id);
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
             ConfigurationRecommendation recommendation = configurationService.dismissRecommendation(id);
             return ResponseEntity.ok(recommendation);
         } catch (IllegalArgumentException e) {
@@ -125,11 +134,15 @@ public class ConfigurationController {
         log.info("Deleting configuration recommendation: {}", id);
 
         try {
+            ConfigurationRecommendation existing = configurationService.requireById(id);
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
             configurationService.deleteRecommendation(id);
             return ResponseEntity.ok(Map.of(
                 "success", "true",
                 "message", "Recommendation deleted successfully"
             ));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
         } catch (Exception e) {

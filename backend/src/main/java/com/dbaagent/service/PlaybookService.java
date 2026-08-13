@@ -149,11 +149,15 @@ public class PlaybookService {
      */
     @Transactional
     public PlaybookAlert acknowledgeAlert(String alertId, String acknowledgedBy) {
-        PlaybookAlert alert = playbookAlertRepository.findById(alertId)
-            .orElseThrow(() -> new IllegalArgumentException("Alert not found: " + alertId));
+        PlaybookAlert alert = requireAlertById(alertId);
 
         alert.acknowledge(acknowledgedBy);
         return playbookAlertRepository.save(alert);
+    }
+
+    public PlaybookAlert requireAlertById(String alertId) {
+        return playbookAlertRepository.findById(alertId)
+            .orElseThrow(() -> new IllegalArgumentException("Alert not found: " + alertId));
     }
 
     /**

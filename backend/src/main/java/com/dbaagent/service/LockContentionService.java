@@ -2,7 +2,9 @@ package com.dbaagent.service;
 
 import com.dbaagent.model.ConnectionRequest;
 import com.dbaagent.model.LockContention;
+import com.dbaagent.provider.DatabaseProviderRegistry;
 import com.dbaagent.repository.LockContentionRepository;
+import com.dbaagent.util.SessionKillSupport;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -22,6 +24,7 @@ public class LockContentionService {
     private final LockContentionRepository lockContentionRepository;
     private final CredentialService credentialService;
     private final ConnectionService connectionService;
+    private final DatabaseProviderRegistry providerRegistry;
 
     /**
      * Detect current lock contentions in the database
@@ -33,12 +36,12 @@ public class LockContentionService {
         try {
             ConnectionRequest connRequest = credentialService.getDecryptedConnection(connectionId);
             try (Connection conn = connectionService.getConnection(connectionId, connRequest)) {
-                String dbType = connRequest.getDbType().toUpperCase();
+                String dbType = providerRegistry.getCanonicalName(connRequest.getDbType());
                 List<LockContention> currentContentions;
 
-                if ("POSTGRESQL".equals(dbType)) {
+                if ("postgres".equals(dbType)) {
                     currentContentions = detectPostgreSQLLocks(connectionId, conn);
-                } else if ("MYSQL".equals(dbType)) {
+                } else if ("mysql".equals(dbType)) {
                     currentContentions = detectMySQLLocks(connectionId, conn);
                 } else {
                     log.warn("Lock detection not supported for database type: {}", dbType);
@@ -289,37 +292,42 @@ public class LockContentionService {
      */
     @Transactional
     public void killBlockingSession(String connectionId, String pid) {
-        log.info("Killing blocking session {} on connection {}", pid, connectionId);
+        long backendPid = SessionKillSupport.requireNumericPid(pid);
+        log.info("Killing blocking session {} on connection {}", backendPid, connectionId);
 
         try {
             ConnectionRequest connRequest = credentialService.getDecryptedConnection(connectionId);
             try (Connection conn = connectionService.getConnection(connectionId, connRequest)) {
-                String dbType = connRequest.getDbType().toUpperCase();
-                String killQuery;
+                String dbType = providerRegistry.getCanonicalName(connRequest.getDbType());
 
-                if ("POSTGRESQL".equals(dbType)) {
-                    killQuery = "SELECT pg_terminate_backend(" + pid + ")";
-                } else if ("MYSQL".equals(dbType)) {
-                    killQuery = "KILL " + pid;
+                if ("postgres".equals(dbType)) {
+                    try (PreparedStatement ps = conn.prepareStatement("SELECT pg_terminate_backend(?)")) {
+                        ps.setLong(1, backendPid);
+                        ps.execute();
+                    }
+                } else if ("mysql".equals(dbType)) {
+                    // MySQL KILL is not reliably parameterizable across drivers; pid is digit-only.
+                    try (Statement stmt = conn.createStatement()) {
+                        stmt.execute("KILL " + backendPid);
+                    }
                 } else {
                     throw new IllegalArgumentException("Kill session not supported for database type: " + dbType);
                 }
 
-                try (Statement stmt = conn.createStatement()) {
-                    stmt.execute(killQuery);
-                    log.info("Successfully killed session {}", pid);
+                log.info("Successfully killed session {}", backendPid);
 
-                    // Mark related contentions as resolved
-                    lockContentionRepository.markResolvedByPid(
-                        connectionId,
-                        pid,
-                        LocalDateTime.now(),
-                        "MANUAL_KILL"
-                    );
-                }
+                // Mark related contentions as resolved (store the original digit string)
+                lockContentionRepository.markResolvedByPid(
+                    connectionId,
+                    Long.toString(backendPid),
+                    LocalDateTime.now(),
+                    "MANUAL_KILL"
+                );
             }
+        } catch (IllegalArgumentException e) {
+            throw e;
         } catch (Exception e) {
-            log.error("Error killing session {}", pid, e);
+            log.error("Error killing session {}", backendPid, e);
             throw new RuntimeException("Failed to kill session: " + e.getMessage(), e);
         }
     }

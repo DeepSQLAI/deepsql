@@ -2,6 +2,7 @@ package com.dbaagent.controller;
 
 import com.dbaagent.model.LockContention;
 import com.dbaagent.service.LockContentionService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -18,6 +19,7 @@ import java.util.Map;
 public class LockContentionController {
 
     private final LockContentionService lockContentionService;
+    private final AccessControlService accessControlService;
 
     /**
      * Detect current lock contentions in the database
@@ -27,6 +29,7 @@ public class LockContentionController {
     public ResponseEntity<List<LockContention>> detectLockContentions(@PathVariable String connectionId) {
         log.info("API: Detecting lock contentions for connection {}", connectionId);
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             List<LockContention> contentions = lockContentionService.detectLockContentions(connectionId);
             return ResponseEntity.ok(contentions);
         } catch (org.springframework.web.server.ResponseStatusException e) {
@@ -45,6 +48,7 @@ public class LockContentionController {
     public ResponseEntity<List<LockContention>> getActiveContentions(@PathVariable String connectionId) {
         log.info("API: Getting active contentions for connection {}", connectionId);
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<LockContention> contentions = lockContentionService.getActiveContentions(connectionId);
             return ResponseEntity.ok(contentions);
         } catch (org.springframework.web.server.ResponseStatusException e) {
@@ -63,6 +67,7 @@ public class LockContentionController {
     public ResponseEntity<List<LockContention>> getAllContentions(@PathVariable String connectionId) {
         log.info("API: Getting all contentions for connection {}", connectionId);
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<LockContention> contentions = lockContentionService.getAllContentions(connectionId);
             return ResponseEntity.ok(contentions);
         } catch (org.springframework.web.server.ResponseStatusException e) {
@@ -81,6 +86,7 @@ public class LockContentionController {
     public ResponseEntity<Map<String, Object>> getStatistics(@PathVariable String connectionId) {
         log.info("API: Getting contention statistics for connection {}", connectionId);
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             Map<String, Object> stats = lockContentionService.getContentionStatistics(connectionId);
             return ResponseEntity.ok(stats);
         } catch (org.springframework.web.server.ResponseStatusException e) {
@@ -101,9 +107,15 @@ public class LockContentionController {
             @PathVariable String pid) {
         log.info("API: Killing blocking session {} on connection {}", pid, connectionId);
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             lockContentionService.killBlockingSession(connectionId, pid);
             return ResponseEntity.ok(Map.of(
                 "message", "Successfully killed session " + pid,
+                "pid", pid
+            ));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", e.getMessage(),
                 "pid", pid
             ));
         } catch (org.springframework.web.server.ResponseStatusException e) {
@@ -125,6 +137,7 @@ public class LockContentionController {
     public ResponseEntity<Map<String, Object>> cleanupOldContentions(@PathVariable String connectionId) {
         log.info("API: Cleaning up old contentions for connection {}", connectionId);
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             int deleted = lockContentionService.cleanupOldContentions(connectionId);
             return ResponseEntity.ok(Map.of(
                 "message", "Cleanup completed",

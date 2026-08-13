@@ -2,7 +2,9 @@ package com.dbaagent.service;
 
 import com.dbaagent.model.ActiveQuery;
 import com.dbaagent.model.ConnectionRequest;
+import com.dbaagent.provider.DatabaseProviderRegistry;
 import com.dbaagent.repository.ActiveQueryRepository;
+import com.dbaagent.util.SessionKillSupport;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,6 +23,7 @@ public class ActiveQueryService {
     private final ActiveQueryRepository activeQueryRepository;
     private final CredentialService credentialService;
     private final ConnectionService connectionService;
+    private final DatabaseProviderRegistry providerRegistry;
 
     /**
      * Capture current active queries from the database
@@ -32,12 +35,12 @@ public class ActiveQueryService {
         try {
             ConnectionRequest connRequest = credentialService.getDecryptedConnection(connectionId);
             try (Connection conn = connectionService.getConnection(connectionId, connRequest)) {
-                String dbType = connRequest.getDbType().toUpperCase();
+                String dbType = providerRegistry.getCanonicalName(connRequest.getDbType());
                 List<ActiveQuery> queries;
 
-                if ("POSTGRESQL".equals(dbType)) {
+                if ("postgres".equals(dbType)) {
                     queries = capturePostgreSQLQueries(connectionId, conn);
-                } else if ("MYSQL".equals(dbType)) {
+                } else if ("mysql".equals(dbType)) {
                     queries = captureMySQLQueries(connectionId, conn);
                 } else {
                     log.warn("Active query monitoring not supported for database type: {}", dbType);
@@ -191,29 +194,33 @@ public class ActiveQueryService {
      */
     @Transactional
     public void killQuery(String connectionId, String pid) {
-        log.info("Killing query {} on connection {}", pid, connectionId);
+        long backendPid = SessionKillSupport.requireNumericPid(pid);
+        log.info("Killing query {} on connection {}", backendPid, connectionId);
 
         try {
             ConnectionRequest connRequest = credentialService.getDecryptedConnection(connectionId);
             try (Connection conn = connectionService.getConnection(connectionId, connRequest)) {
-                String dbType = connRequest.getDbType().toUpperCase();
-                String killQuery;
+                String dbType = providerRegistry.getCanonicalName(connRequest.getDbType());
 
-                if ("POSTGRESQL".equals(dbType)) {
-                    killQuery = "SELECT pg_terminate_backend(" + pid + ")";
-                } else if ("MYSQL".equals(dbType)) {
-                    killQuery = "KILL QUERY " + pid;
+                if ("postgres".equals(dbType)) {
+                    try (PreparedStatement ps = conn.prepareStatement("SELECT pg_terminate_backend(?)")) {
+                        ps.setLong(1, backendPid);
+                        ps.execute();
+                    }
+                } else if ("mysql".equals(dbType)) {
+                    // MySQL KILL is not reliably parameterizable across drivers; pid is digit-only.
+                    try (Statement stmt = conn.createStatement()) {
+                        stmt.execute("KILL QUERY " + backendPid);
+                    }
                 } else {
                     throw new IllegalArgumentException("Kill query not supported for database type: " + dbType);
                 }
-
-                try (Statement stmt = conn.createStatement()) {
-                    stmt.execute(killQuery);
-                    log.info("Successfully killed query {}", pid);
-                }
+                log.info("Successfully killed query {}", backendPid);
             }
+        } catch (IllegalArgumentException e) {
+            throw e;
         } catch (Exception e) {
-            log.error("Error killing query {}", pid, e);
+            log.error("Error killing query {}", backendPid, e);
             throw new RuntimeException("Failed to kill query: " + e.getMessage(), e);
         }
     }

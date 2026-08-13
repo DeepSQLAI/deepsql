@@ -16,7 +16,9 @@ require_command() {
 
 is_placeholder() {
   local value="${1:-}"
-  [[ -z "$value" || "$value" == change-me-* || "$value" == replace-with-* || "$value" == your-* ]]
+  # "postgres" is the historical compose default — treat as unset so install.sh
+  # replaces it with a generated secret (OSS security C4).
+  [[ -z "$value" || "$value" == change-me-* || "$value" == replace-with-* || "$value" == your-* || "$value" == "postgres" ]]
 }
 
 require_env_value() {
@@ -340,6 +342,7 @@ set +a
 generate_secret SECURITY_JWT_SECRET "openssl rand -base64 64 | tr -d '\n'"
 generate_secret ENCRYPTION_KEY "openssl rand -base64 32 | tr -d '\n'"
 generate_secret DB_PASSWORD "openssl rand -base64 16 | tr -d '\n'"
+generate_secret DEEPSQL_VALKEY_PASSWORD "openssl rand -base64 24 | tr -d '\n'"
 generate_secret ADMIN_BOOTSTRAP_SECRET "openssl rand -base64 32 | tr -d '\n'"
 generate_secret AGENT_PROVISION_SECRET "openssl rand -base64 32 | tr -d '\n'"
 
@@ -386,6 +389,7 @@ require_env_value SECURITY_JWT_SECRET
 require_env_value ENCRYPTION_KEY
 require_env_value ENCRYPTION_KEY_ID
 require_env_value DB_PASSWORD
+require_env_value DEEPSQL_VALKEY_PASSWORD
 # Chat is resolved by LlmConfigResolver from DEEPSQL_CHAT_*. AZURE_OPENAI_KEY /
 # _ENDPOINT / _CHAT_DEPLOYMENT used to be required here; they no longer configure chat.
 # _CHAT_DEPLOYMENT is read by nothing at all, and _KEY/_ENDPOINT now feed only the

@@ -333,5 +333,30 @@ if [[ "$DEEPSQL_SMOKE_AGENT" == "1" ]]; then
   echo "Agent session: $session_id"
 fi
 
+# ── Security posture (OSS Criticals C3/C4) ───────────────────────────────────
+# Actuator metrics must not be anonymous; health may stay 200.
+actuator_prom="$(curl -sS -o /dev/null -w '%{http_code}' \
+  "http://127.0.0.1:${DEEPSQL_BACKEND_PORT:-8080}/api/actuator/prometheus" || echo "000")"
+if [[ "$actuator_prom" == "200" ]]; then
+  echo "Error: /api/actuator/prometheus returned 200 without auth (expected 401)." >&2
+  exit 1
+fi
+auth_me="$(curl -sS -o /dev/null -w '%{http_code}' \
+  "http://127.0.0.1:${DEEPSQL_BACKEND_PORT:-8080}/api/auth/me" || echo "000")"
+if [[ "$auth_me" == "200" ]]; then
+  echo "Error: /api/auth/me returned 200 without cookies (expected 401)." >&2
+  exit 1
+fi
+# Host publishes for DB/cache/backend/agent must be loopback-only (not 0.0.0.0).
+if command -v ss >/dev/null 2>&1; then
+  open_binds="$(ss -ltn 2>/dev/null | awk '/0\.0\.0\.0:(5432|6379|8080|8787|8788)\s/ {print}' || true)"
+  if [[ -n "$open_binds" ]]; then
+    echo "Error: sensitive ports published on 0.0.0.0 (expected 127.0.0.1 only):" >&2
+    echo "$open_binds" >&2
+    exit 1
+  fi
+fi
+echo "Security smoke checks passed (actuator locked, auth required, no WAN binds on 5432/6379/8080/8787)."
+
 echo "Smoke test passed."
 echo "Connection ID: ${connection_id}"

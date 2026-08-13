@@ -435,12 +435,19 @@ public class DatabaseConfigurationService {
     }
 
     /**
+     * Load recommendation by id or throw.
+     */
+    public ConfigurationRecommendation requireById(String id) {
+        return recommendationRepository.findById(id)
+            .orElseThrow(() -> new IllegalArgumentException("Recommendation not found: " + id));
+    }
+
+    /**
      * Mark recommendation as applied
      */
     @Transactional
     public ConfigurationRecommendation markAsApplied(String id) {
-        ConfigurationRecommendation recommendation = recommendationRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Recommendation not found: " + id));
+        ConfigurationRecommendation recommendation = requireById(id);
 
         recommendation.markAsApplied();
         return recommendationRepository.save(recommendation);

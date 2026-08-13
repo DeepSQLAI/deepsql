@@ -15,6 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -30,6 +31,12 @@ public class JwtUtil {
     @Value("${security.jwt.secret:}")
     private String jwtSecret;
 
+    @Value("${security.auth.enabled:true}")
+    private boolean authEnabled;
+
+    @Value("${spring.profiles.active:}")
+    private String activeProfiles;
+
     @Value("${security.session.access-minutes:15}")
     private long accessTokenMinutes;
 
@@ -37,12 +44,30 @@ public class JwtUtil {
 
     @PostConstruct
     public void initialize() {
-        if (jwtSecret == null || jwtSecret.isBlank()) {
+        byte[] secretBytes = jwtSecret == null || jwtSecret.isBlank()
+            ? new byte[0]
+            : jwtSecret.getBytes(StandardCharsets.UTF_8);
+
+        boolean prodProfile = Arrays.stream(activeProfiles.split(","))
+            .map(String::trim)
+            .filter(p -> !p.isEmpty())
+            .anyMatch(p -> p.equalsIgnoreCase("prod"));
+
+        // Fail closed whenever auth is on or under prod — never ship an ephemeral signing key.
+        if (secretBytes.length < 32) {
+            if (authEnabled || prodProfile) {
+                throw new IllegalStateException(
+                    "SECURITY_JWT_SECRET must be set to at least 32 bytes when auth is enabled "
+                        + "or SPRING_PROFILES_ACTIVE includes prod (got "
+                        + secretBytes.length + " bytes)"
+                );
+            }
             secretKey = Keys.secretKeyFor(SignatureAlgorithm.HS256);
             log.warn("JWT secret not configured; generated ephemeral key (tokens will reset on restart).");
-        } else {
-            secretKey = Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
+            return;
         }
+
+        secretKey = Keys.hmacShaKeyFor(secretBytes);
     }
 
     public String extractUsername(String token) {

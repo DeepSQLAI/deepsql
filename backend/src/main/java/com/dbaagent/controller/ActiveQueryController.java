@@ -2,6 +2,7 @@ package com.dbaagent.controller;
 
 import com.dbaagent.model.ActiveQuery;
 import com.dbaagent.service.ActiveQueryService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -18,6 +19,7 @@ import java.util.Map;
 public class ActiveQueryController {
 
     private final ActiveQueryService activeQueryService;
+    private final AccessControlService accessControlService;
 
     /**
      * Capture current active queries from the database
@@ -27,6 +29,7 @@ public class ActiveQueryController {
     public ResponseEntity<List<ActiveQuery>> captureActiveQueries(@PathVariable String connectionId) {
         log.info("API: Capturing active queries for connection {}", connectionId);
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             List<ActiveQuery> queries = activeQueryService.captureActiveQueries(connectionId);
             return ResponseEntity.ok(queries);
         } catch (org.springframework.web.server.ResponseStatusException e) {
@@ -45,6 +48,7 @@ public class ActiveQueryController {
     public ResponseEntity<List<ActiveQuery>> getLatestQueries(@PathVariable String connectionId) {
         log.info("API: Getting latest queries for connection {}", connectionId);
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<ActiveQuery> queries = activeQueryService.getLatestQueries(connectionId);
             return ResponseEntity.ok(queries);
         } catch (org.springframework.web.server.ResponseStatusException e) {
@@ -66,6 +70,7 @@ public class ActiveQueryController {
             @RequestParam String value) {
         log.info("API: Getting queries for connection {} filtered by {}={}", connectionId, type, value);
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<ActiveQuery> queries = activeQueryService.getQueriesByFilter(connectionId, type, value);
             return ResponseEntity.ok(queries);
         } catch (org.springframework.web.server.ResponseStatusException e) {
@@ -84,6 +89,7 @@ public class ActiveQueryController {
     public ResponseEntity<Map<String, Object>> getStatistics(@PathVariable String connectionId) {
         log.info("API: Getting query statistics for connection {}", connectionId);
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             Map<String, Object> stats = activeQueryService.getStatistics(connectionId);
             return ResponseEntity.ok(stats);
         } catch (org.springframework.web.server.ResponseStatusException e) {
@@ -102,6 +108,7 @@ public class ActiveQueryController {
     public ResponseEntity<Map<String, List<String>>> getFilterOptions(@PathVariable String connectionId) {
         log.info("API: Getting filter options for connection {}", connectionId);
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             Map<String, List<String>> options = activeQueryService.getFilterOptions(connectionId);
             return ResponseEntity.ok(options);
         } catch (org.springframework.web.server.ResponseStatusException e) {
@@ -122,9 +129,15 @@ public class ActiveQueryController {
             @PathVariable String pid) {
         log.info("API: Killing query {} on connection {}", pid, connectionId);
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             activeQueryService.killQuery(connectionId, pid);
             return ResponseEntity.ok(Map.of(
                 "message", "Successfully killed query " + pid,
+                "pid", pid
+            ));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", e.getMessage(),
                 "pid", pid
             ));
         } catch (org.springframework.web.server.ResponseStatusException e) {
@@ -146,6 +159,7 @@ public class ActiveQueryController {
     public ResponseEntity<Map<String, Object>> cleanupOldSnapshots(@PathVariable String connectionId) {
         log.info("API: Cleaning up old snapshots for connection {}", connectionId);
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             int deleted = activeQueryService.cleanupOldSnapshots(connectionId);
             return ResponseEntity.ok(Map.of(
                 "message", "Cleanup completed",

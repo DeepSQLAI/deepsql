@@ -7,6 +7,7 @@ import com.dbaagent.dto.SlowLogSourceConfigRequest;
 import com.dbaagent.dto.SlowLogSourceConfigResponse;
 import com.dbaagent.service.SlowLogIngestionService;
 import com.dbaagent.service.SlowLogSourceConfigService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -25,9 +26,11 @@ public class SlowLogSourceController {
     private final SlowLogSourceConfigService configService;
     private final SlowLogIngestionService ingestionService;
     private final BatchIngestionService batchIngestionService;
+    private final AccessControlService accessControlService;
 
     @GetMapping("/{connectionId}")
     public ResponseEntity<SlowLogSourceConfigResponse> getConfig(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             SlowLogSourceConfigResponse response = configService.getResponse(connectionId);
             if (response == null) {
@@ -46,6 +49,7 @@ public class SlowLogSourceController {
     public ResponseEntity<SlowLogSourceConfigResponse> upsertConfig(
         @RequestBody SlowLogSourceConfigRequest request
     ) {
+        accessControlService.assertCanManageConnectionContent(request.getConnectionId());
         return ResponseEntity.ok(configService.upsertConfig(request));
     }
 
@@ -65,6 +69,8 @@ public class SlowLogSourceController {
         @PathVariable String targetConnectionId,
         @PathVariable String sourceConnectionId
     ) {
+        accessControlService.assertCanReadConnectionContent(sourceConnectionId);
+        accessControlService.assertCanManageConnectionContent(targetConnectionId);
         try {
             SlowLogSourceConfigResponse cloned = configService.cloneFrom(sourceConnectionId, targetConnectionId);
             if (cloned == null) {
@@ -86,6 +92,7 @@ public class SlowLogSourceController {
     public ResponseEntity<Map<String, Object>> ingestNow(
         @RequestBody SlowLogIngestRequest request
     ) {
+        accessControlService.assertCanManageConnectionContent(request.getConnectionId());
         SlowLogIngestionService.IngestResult result = ingestionService.ingestNowWithDetails(request);
         if (!result.success()) {
             return ResponseEntity.ok(Map.of(
@@ -109,6 +116,7 @@ public class SlowLogSourceController {
     public ResponseEntity<Map<String, Object>> startAsyncIngestion(
         @RequestBody SlowLogIngestRequest request
     ) {
+        accessControlService.assertCanManageConnectionContent(request.getConnectionId());
         try {
             // Check if there's already an active job for this connection
             Optional<BatchIngestionStatus> activeJob = batchIngestionService.getActiveJobForConnection(request.getConnectionId());
@@ -163,6 +171,7 @@ public class SlowLogSourceController {
             if (status.isEmpty()) {
                 return ResponseEntity.notFound().build();
             }
+            accessControlService.assertCanReadConnectionContent(status.get().connectionId());
             return ResponseEntity.ok(status.get());
         } catch (NumberFormatException e) {
             log.warn("Invalid job ID format: {}", jobId);
@@ -175,6 +184,7 @@ public class SlowLogSourceController {
      */
     @GetMapping("/ingest/active/{connectionId}")
     public ResponseEntity<BatchIngestionStatus> getActiveJob(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         Optional<BatchIngestionStatus> job = batchIngestionService.getActiveJobForConnection(connectionId);
         if (job.isEmpty()) {
             return ResponseEntity.noContent().build();
@@ -189,6 +199,10 @@ public class SlowLogSourceController {
     public ResponseEntity<Map<String, Object>> cancelJob(@PathVariable String jobId) {
         try {
             Long executionId = Long.parseLong(jobId);
+            Optional<BatchIngestionStatus> status = batchIngestionService.getJobStatus(executionId);
+            if (status.isPresent()) {
+                accessControlService.assertCanManageConnectionContent(status.get().connectionId());
+            }
             boolean stopped = batchIngestionService.stopJob(executionId);
             if (!stopped) {
                 return ResponseEntity.ok(Map.of(
@@ -217,6 +231,10 @@ public class SlowLogSourceController {
     public ResponseEntity<Map<String, Object>> resumeJob(@PathVariable String jobId) {
         try {
             Long executionId = Long.parseLong(jobId);
+            Optional<BatchIngestionStatus> status = batchIngestionService.getJobStatus(executionId);
+            if (status.isPresent()) {
+                accessControlService.assertCanManageConnectionContent(status.get().connectionId());
+            }
             BatchIngestionStatus job = batchIngestionService.restartJob(executionId);
             return ResponseEntity.ok(Map.of(
                 "success", true,
@@ -247,6 +265,7 @@ public class SlowLogSourceController {
         @PathVariable String connectionId,
         @RequestParam(defaultValue = "10") int limit
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         List<BatchIngestionStatus> jobs = batchIngestionService.getJobHistory(connectionId, limit);
         return ResponseEntity.ok(jobs);
     }

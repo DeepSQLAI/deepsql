@@ -4,6 +4,7 @@ import com.dbaagent.model.IndexRecommendationEntity;
 import com.dbaagent.model.IndexRecommendationEvidence;
 import com.dbaagent.service.IndexRecommendationApplyService;
 import com.dbaagent.service.IndexRecommendationService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -24,6 +25,7 @@ public class IndexRecommendationController {
 
     private final IndexRecommendationService recommendationService;
     private final IndexRecommendationApplyService applyService;
+    private final AccessControlService accessControlService;
 
     /**
      * Generate new index recommendations based on query history
@@ -31,6 +33,7 @@ public class IndexRecommendationController {
     @PostMapping("/generate/{connectionId}")
     public ResponseEntity<GenerateResponse> generateRecommendations(@PathVariable String connectionId) {
         log.info("Generating index recommendations for connection: {}", connectionId);
+        accessControlService.assertCanManageConnectionContent(connectionId);
 
         try {
             List<IndexRecommendationEntity> recommendations = recommendationService.generateRecommendations(connectionId);
@@ -62,6 +65,7 @@ public class IndexRecommendationController {
     @GetMapping("/{connectionId}")
     public ResponseEntity<List<IndexRecommendationEntity>> getRecommendations(@PathVariable String connectionId) {
         log.info("Fetching all recommendations for connection: {}", connectionId);
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         List<IndexRecommendationEntity> recommendations = recommendationService.getRecommendations(connectionId);
         return ResponseEntity.ok(recommendations);
@@ -73,6 +77,7 @@ public class IndexRecommendationController {
     @GetMapping("/pending/{connectionId}")
     public ResponseEntity<List<IndexRecommendationEntity>> getPendingRecommendations(@PathVariable String connectionId) {
         log.info("Fetching pending recommendations for connection: {}", connectionId);
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         List<IndexRecommendationEntity> recommendations = recommendationService.getPendingRecommendations(connectionId);
         return ResponseEntity.ok(recommendations);
@@ -94,6 +99,7 @@ public class IndexRecommendationController {
         @RequestParam(value = "limit", required = false, defaultValue = "5") int limit
     ) {
         log.info("Fetching top {} recommendations for connection: {}", limit, connectionId);
+        accessControlService.assertCanReadConnectionContent(connectionId);
         List<TopRecommendationResponse> body = recommendationService
             .getTopRecommendationsWithEvidence(connectionId, limit)
             .stream()
@@ -110,6 +116,8 @@ public class IndexRecommendationController {
         log.info("Marking recommendation as applied: {}", id);
 
         try {
+            IndexRecommendationEntity existing = recommendationService.requireById(id);
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
             IndexRecommendationEntity recommendation = recommendationService.markAsApplied(id);
             return ResponseEntity.ok(recommendation);
         } catch (IllegalArgumentException e) {
@@ -131,6 +139,8 @@ public class IndexRecommendationController {
         log.info("Dismissing recommendation: {}", id);
 
         try {
+            IndexRecommendationEntity existing = recommendationService.requireById(id);
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
             IndexRecommendationEntity recommendation = recommendationService.dismissRecommendation(id);
             return ResponseEntity.ok(recommendation);
         } catch (IllegalArgumentException e) {
@@ -172,6 +182,13 @@ public class IndexRecommendationController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
         }
+        IndexRecommendationEntity existing;
+        try {
+            existing = recommendationService.requireById(id);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+        accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
         IndexRecommendationApplyService.ApplyOptions opts = new IndexRecommendationApplyService.ApplyOptions(concurrent);
         IndexRecommendationApplyService.ApplyResult result = applyService.apply(id, m, confirm, opts);
         return ResponseEntity.ok(result);
@@ -185,11 +202,15 @@ public class IndexRecommendationController {
         log.info("Deleting recommendation: {}", id);
 
         try {
+            IndexRecommendationEntity existing = recommendationService.requireById(id);
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
             recommendationService.deleteRecommendation(id);
             return ResponseEntity.ok(Map.of(
                 "success", "true",
                 "message", "Recommendation deleted successfully"
             ));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
         } catch (Exception e) {

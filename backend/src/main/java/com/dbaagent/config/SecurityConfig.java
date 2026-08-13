@@ -89,7 +89,10 @@ public class SecurityConfig {
                                     "/auth/cli/exchange",
                                     "/auth/cli/device/code",
                                     "/auth/cli/device/token",
-                                    "/actuator/**",
+                                    // Actuator: only liveness/readiness without auth. metrics/prometheus
+                                    // require an authenticated session (see application-prod.properties).
+                                    "/actuator/health",
+                                    "/actuator/health/**",
                                     "/error",
                                     "/admin/bootstrap/link",
                                     "/users/admin/bootstrap",

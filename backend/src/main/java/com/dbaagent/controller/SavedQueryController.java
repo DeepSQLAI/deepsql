@@ -2,6 +2,7 @@ package com.dbaagent.controller;
 
 import com.dbaagent.model.SavedQuery;
 import com.dbaagent.service.SavedQueryService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -21,6 +22,9 @@ public class SavedQueryController {
     @Autowired
     private SavedQueryService savedQueryService;
 
+    @Autowired
+    private AccessControlService accessControlService;
+
     /**
      * Create a new saved query
      */
@@ -28,6 +32,7 @@ public class SavedQueryController {
     public ResponseEntity<Map<String, Object>> createQuery(@RequestBody SavedQuery savedQuery) {
         try {
             log.info("Creating saved query: {} for connection: {}", savedQuery.getName(), savedQuery.getConnectionId());
+            accessControlService.assertCanManageConnectionContent(savedQuery.getConnectionId());
 
             SavedQuery created = savedQueryService.saveQuery(savedQuery);
 
@@ -55,6 +60,7 @@ public class SavedQueryController {
     public ResponseEntity<Map<String, Object>> getQueriesByConnection(@PathVariable String connectionId) {
         try {
             log.info("Fetching saved queries for connection: {}", connectionId);
+            accessControlService.assertCanReadConnectionContent(connectionId);
 
             List<SavedQuery> queries = savedQueryService.getQueriesByConnection(connectionId);
 
@@ -85,6 +91,7 @@ public class SavedQueryController {
 
             return savedQueryService.getQueryById(id)
                     .map(query -> {
+                        accessControlService.assertCanReadConnectionContent(query.getConnectionId());
                         Map<String, Object> response = new HashMap<>();
                         response.put("success", true);
                         response.put("savedQuery", query);
@@ -114,6 +121,9 @@ public class SavedQueryController {
     public ResponseEntity<Map<String, Object>> updateQuery(@PathVariable UUID id, @RequestBody SavedQuery updates) {
         try {
             log.info("Updating saved query: {}", id);
+            SavedQuery existing = savedQueryService.getQueryById(id)
+                    .orElseThrow(() -> new IllegalArgumentException("Query not found: " + id));
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
 
             SavedQuery updated = savedQueryService.updateQuery(id, updates);
 
@@ -147,6 +157,9 @@ public class SavedQueryController {
     public ResponseEntity<Map<String, Object>> deleteQuery(@PathVariable UUID id) {
         try {
             log.info("Deleting saved query: {}", id);
+            SavedQuery existing = savedQueryService.getQueryById(id)
+                    .orElseThrow(() -> new IllegalArgumentException("Query not found: " + id));
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
 
             savedQueryService.deleteQuery(id);
 
@@ -173,6 +186,9 @@ public class SavedQueryController {
     public ResponseEntity<Map<String, Object>> toggleFavorite(@PathVariable UUID id) {
         try {
             log.info("Toggling favorite for query: {}", id);
+            SavedQuery existing = savedQueryService.getQueryById(id)
+                    .orElseThrow(() -> new IllegalArgumentException("Query not found: " + id));
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
 
             SavedQuery updated = savedQueryService.toggleFavorite(id);
 
@@ -206,6 +222,7 @@ public class SavedQueryController {
     public ResponseEntity<Map<String, Object>> getFavoriteQueries(@PathVariable String connectionId) {
         try {
             log.info("Fetching favorite queries for connection: {}", connectionId);
+            accessControlService.assertCanReadConnectionContent(connectionId);
 
             List<SavedQuery> queries = savedQueryService.getFavoriteQueries(connectionId);
 
@@ -235,6 +252,7 @@ public class SavedQueryController {
             @PathVariable String folder) {
         try {
             log.info("Fetching queries in folder: {} for connection: {}", folder, connectionId);
+            accessControlService.assertCanReadConnectionContent(connectionId);
 
             List<SavedQuery> queries = savedQueryService.getQueriesByFolder(connectionId, folder);
 
@@ -264,6 +282,7 @@ public class SavedQueryController {
             @RequestParam String q) {
         try {
             log.info("Searching queries for connection: {} with term: {}", connectionId, q);
+            accessControlService.assertCanReadConnectionContent(connectionId);
 
             List<SavedQuery> queries = savedQueryService.searchQueries(connectionId, q);
 
@@ -291,6 +310,7 @@ public class SavedQueryController {
     public ResponseEntity<Map<String, Object>> getFolders(@PathVariable String connectionId) {
         try {
             log.info("Fetching folders for connection: {}", connectionId);
+            accessControlService.assertCanReadConnectionContent(connectionId);
 
             List<String> folders = savedQueryService.getFolders(connectionId);
 

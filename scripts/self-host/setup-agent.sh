@@ -9,7 +9,7 @@
 # product home, wires DeepSQL MCP, and starts the Agent API on :8787 with:
 #   - Python MCP SDK installed in the runtime interpreter
 #   - DeepSQL MCP wired to localhost:8080 with a per-user MCP token
-#   - Binding 0.0.0.0 (so Docker nginx/backend can reach it, if used)
+#   - Binding 127.0.0.1 by default (set HERMES_WEBUI_HOST=0.0.0.0 only if needed)
 #   - No agent-side password (DeepSQL's /agent-api proxy has its own session gate)
 #
 # Idempotent. Safe to re-run after `git pull` or credential rotation.
@@ -29,7 +29,10 @@ WEBUI_DIR="${HERMES_WEBUI_DIR:-$HERMES_HOME/hermes-webui}"
 AGENT_REPO="${HERMES_AGENT_REPO:-https://github.com/NousResearch/hermes-agent.git}"
 WEBUI_REPO="${HERMES_WEBUI_REPO:-https://github.com/nesquena/hermes-webui.git}"
 WEBUI_PORT="${HERMES_WEBUI_PORT:-8787}"
-WEBUI_HOST="${HERMES_WEBUI_HOST:-0.0.0.0}"
+# Default to loopback so a bare self-host install does not expose the Agent API
+# on the WAN (nginx /agent-api already gates via auth_request). Override to
+# 0.0.0.0 only when something outside this host must reach Hermes directly.
+WEBUI_HOST="${HERMES_WEBUI_HOST:-127.0.0.1}"
 PID_FILE="${HERMES_HOME}/webui.pid"
 LOG_FILE="${HERMES_HOME}/logs/webui.log"
 BACKEND_PORT="${DEEPSQL_BACKEND_PORT:-8080}"

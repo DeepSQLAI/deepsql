@@ -5,6 +5,7 @@ import com.dbaagent.model.PlaybookAlert;
 import com.dbaagent.model.PlaybookRun;
 import com.dbaagent.service.PlaybookExecutionService;
 import com.dbaagent.service.PlaybookService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -23,6 +24,7 @@ public class PlaybookController {
 
     private final PlaybookService playbookService;
     private final PlaybookExecutionService playbookExecutionService;
+    private final AccessControlService accessControlService;
 
     // ========== PLAYBOOK MANAGEMENT ==========
 
@@ -176,6 +178,7 @@ public class PlaybookController {
         Map<String, Object> response = new HashMap<>();
 
         try {
+            accessControlService.assertCanManageConnectionContent(request.getConnectionId());
             PlaybookRun run = playbookExecutionService.executePlaybook(
                 playbookId,
                 request.getConnectionId()
@@ -207,6 +210,7 @@ public class PlaybookController {
         Map<String, Object> response = new HashMap<>();
 
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<PlaybookRun> runs = playbookExecutionService.getRunHistory(connectionId, limit);
             Map<String, Object> stats = playbookExecutionService.getRunStatistics(connectionId);
 
@@ -229,6 +233,8 @@ public class PlaybookController {
         Map<String, Object> response = new HashMap<>();
 
         try {
+            PlaybookRun run = playbookExecutionService.requireRunById(runId);
+            accessControlService.assertCanManageConnectionContent(run.getConnectionId());
             playbookExecutionService.cancelRun(runId);
             response.put("success", true);
             response.put("message", "Run cancelled successfully");
@@ -252,6 +258,7 @@ public class PlaybookController {
         Map<String, Object> response = new HashMap<>();
 
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<PlaybookAlert> alerts = unacknowledgedOnly ?
                 playbookService.getUnacknowledgedAlerts(connectionId) :
                 playbookService.getAlertsForConnection(connectionId);
@@ -280,6 +287,8 @@ public class PlaybookController {
         Map<String, Object> response = new HashMap<>();
 
         try {
+            PlaybookAlert existing = playbookService.requireAlertById(alertId);
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
             String acknowledgedBy = request != null ? request.getAcknowledgedBy() : "user";
             PlaybookAlert alert = playbookService.acknowledgeAlert(alertId, acknowledgedBy);
 

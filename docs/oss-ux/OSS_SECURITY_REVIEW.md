@@ -23,6 +23,8 @@ Auth-on-by-default, signup closed, bootstrap localhost+secret, encrypted vault, 
 
 Usability agents can keep shipping product fixes; **security Criticals should land before Sunday** (or the launch messaging must be “single-admin, localhost / private network only”).
 
+> **Status (2026-08-13):** S1–S5 implementation landed — kill-session pid validation + prepared SQL; ACL on apply/kill/slow-log/growth/saved-query/playbook/configuration; Hermes default `127.0.0.1`; compose loopback binds + Valkey `requirepass` + Actuator lockdown; JWT fail-closed under prod/auth. See [`SECURITY.md`](../../SECURITY.md). Remaining High/Medium (H4–H9, M*) are still open.
+
 ---
 
 ## Severity legend

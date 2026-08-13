@@ -1007,12 +1007,19 @@ public class IndexRecommendationService {
     }
 
     /**
+     * Load recommendation by id or throw.
+     */
+    public IndexRecommendationEntity requireById(String id) {
+        return recommendationRepository.findById(id)
+            .orElseThrow(() -> new IllegalArgumentException("Recommendation not found: " + id));
+    }
+
+    /**
      * Mark recommendation as applied
      */
     @Transactional
     public IndexRecommendationEntity markAsApplied(String id) {
-        IndexRecommendationEntity recommendation = recommendationRepository.findById(id)
-            .orElseThrow(() -> new IllegalArgumentException("Recommendation not found: " + id));
+        IndexRecommendationEntity recommendation = requireById(id);
 
         recommendation.markAsApplied();
         return recommendationRepository.save(recommendation);
