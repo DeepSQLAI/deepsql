@@ -77,6 +77,23 @@ public class SavedDashboard {
     @Column(length = 255)
     private String folder;
 
+    // Server-owned "is a generation turn in flight for this dashboard" marker.
+    // Set to RUNNING the instant a chat submit is accepted (before the slow
+    // agent work starts) and back to IDLE when it finishes — from the backend
+    // code path itself, regardless of whether the SSE client that started it
+    // is still connected. Lets a reload mid-generation distinguish "still
+    // working" from "answer's ready" without needing to have stayed connected.
+    // See SavedDashboardService.beginGenerationTurn/appendAgentReply/
+    // completeBuildTurn/appendErrorReply.
+    @Column(nullable = false, length = 16)
+    private String generationStatus = "IDLE";
+
+    // When the current RUNNING turn started, so a client can tell a live
+    // generation from one abandoned by a backend crash (see
+    // SavedDashboardService.STALE_RUNNING_THRESHOLD).
+    @Column
+    private LocalDateTime generationStartedAt;
+
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -84,6 +101,16 @@ public class SavedDashboard {
     @UpdateTimestamp
     @Column(nullable = false)
     private LocalDateTime updatedAt;
+
+    // Optimistic lock: beginGenerationTurn/appendAgentReply/completeBuildTurn/
+    // appendErrorReply all do load-then-save on this same row, and two overlapping
+    // turns (e.g. a slow build finishing after the user already sent a follow-up
+    // chat) would otherwise silently lose whichever save landed first. Hibernate
+    // bumps this on every UPDATE and rejects a save whose version is stale with
+    // OptimisticLockException instead of overwriting.
+    @Version
+    @Column(nullable = false)
+    private Long version = 0L;
 
     // Jackson deserializes create/update bodies via Lombok's all-args constructor
     // (Spring's parameter-names module), which bypasses the field defaults and
@@ -94,5 +121,6 @@ public class SavedDashboard {
     void applyBooleanDefaults() {
         if (isPublic == null) isPublic = false;
         if (isFavorite == null) isFavorite = false;
+        if (generationStatus == null) generationStatus = "IDLE";
     }
 }

@@ -74,7 +74,6 @@ public class DashboardAgentService {
         List<Map<String, Object>> trace = new ArrayList<>();
         StepListener l = listener == null ? StepListener.NOOP : listener;
 
-        emit(l, trace, "grounding", "Handing off to the DeepSQL agent…");
         String username = accessControlService.requireCurrentUsername();
         String profile = agentBridgeService.ensureProfileForUser(username, connectionId);
         // Fresh session per generation — an isolated coding task, not the user's chat thread.
@@ -87,12 +86,12 @@ public class DashboardAgentService {
         // only skip it for something that plainly isn't one (a greeting, a question
         // about the tool itself). Answering "hi" by grounding on the schema, writing
         // SQL, and self-reviewing an HTML document is where the multi-minute replies
-        // to trivial messages came from.
+        // to trivial messages came from. Classify BEFORE emitting any step: a chat-only
+        // turn should show nothing but the generic "Working" spinner, not a "Handing off
+        // to the DeepSQL agent" trace that implies a build is underway.
         if (isChatOnly(prompt)) {
-            emit(l, trace, "planning", "Replying…");
             AgentChatClient.AgentReply chatReply = agentChatClient.sendAndAwait(sessionId, buildChatTask(prompt));
             if (chatReply.ok() && chatReply.text() != null && !chatReply.text().isBlank()) {
-                emit(l, trace, "done", "Replied");
                 Map<String, Object> chat = new LinkedHashMap<>();
                 chat.put("chat", true);
                 chat.put("reply", chatReply.text().trim());
@@ -106,6 +105,7 @@ public class DashboardAgentService {
             // rather than surfacing a failure for what might be a legitimate request.
         }
 
+        emit(l, trace, "grounding", "Handing off to the DeepSQL agent…");
         emit(l, trace, "planning", "Agent is grounding, writing SQL, and coding the dashboard…");
         AgentChatClient.AgentReply reply = agentChatClient.sendAndAwait(
             sessionId, buildTask(connectionId, prompt, currentConfig));

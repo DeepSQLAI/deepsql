@@ -442,7 +442,237 @@
   flex: 1;
   min-width: 0;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.canvasToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+  flex-shrink: 0;
+  padding: 0 16px;
+  border-bottom: 1px solid #ececec;
+  background: #fff;
+}
+
+.canvasToolbarRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.viewToggle {
+  display: inline-flex;
+  background: #f1f0f5;
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.viewToggleBtn,
+.viewToggleBtnActive {
+  border: none;
+  background: transparent;
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #6b6b6b;
+  transition: background 120ms ease-out, color 120ms ease-out;
+}
+.viewToggleBtnActive {
+  background: #fff;
+  color: #111;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.ghostBtn,
+.primaryBtnSm,
+.queriesBtn,
+.queriesBtnActive {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+
+.ghostBtn,
+.queriesBtn {
+  border: 1px solid #e2e2e2;
+  background: #fff;
+  color: #555;
+}
+.ghostBtn:hover:not(:disabled),
+.queriesBtn:hover {
+  background: #f6f6f6;
+}
+.ghostBtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.primaryBtnSm {
+  border: none;
+  background: #534AB7;
+  color: #fff;
+}
+.primaryBtnSm:hover:not(:disabled) { background: #463c9f; }
+.primaryBtnSm:disabled { background: #d8d5f0; cursor: default; }
+
+.queriesBtnActive {
+  border: 1px solid #cfcaf0;
+  background: #f5f3ff;
+  color: #463c9f;
+}
+
+.canvasBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+.canvasMain {
+  flex: 1;
+  min-width: 0;
   overflow-y: auto;
+}
+
+.sourceEditor {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+}
+
+.editorLoading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 13px;
+  color: #999;
+}
+
+.queriesPanel {
+  width: 340px;
+  flex-shrink: 0;
+  border-left: 1px solid #ececec;
+  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.queriesPanelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid #ececec;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #333;
+  flex-shrink: 0;
+}
+.queriesPanelHead button {
+  display: inline-flex;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #999;
+  padding: 2px;
+  border-radius: 5px;
+}
+.queriesPanelHead button:hover { background: #ececec; color: #555; }
+
+.queriesPanelList {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.queriesEmpty {
+  font-size: 12px;
+  color: #999;
+  padding: 20px 6px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.queryCard {
+  border: 1px solid #ececec;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 11px;
+}
+
+.queryCardHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.queryBadgeOk,
+.queryBadgeErr {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.queryBadgeOk { background: #E1F5EE; color: #0F6E56; }
+.queryBadgeErr { background: #fdf2f2; color: #9c2b2b; }
+
+.queryTiming {
+  font-size: 11px;
+  color: #a0a0a0;
+  font-variant-numeric: tabular-nums;
+}
+
+.queryCopyBtn {
+  margin-left: auto;
+  display: inline-flex;
+  border: none;
+  background: transparent;
+  color: #999;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+.queryCopyBtn:hover { background: #f0f0f0; color: #555; }
+
+.querySql {
+  margin: 0;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #333;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.queryErr {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: #9c2b2b;
 }
 
 .newCanvas {
