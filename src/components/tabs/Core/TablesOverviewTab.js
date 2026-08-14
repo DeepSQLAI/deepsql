@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import styles from './TablesOverviewTab.module.css'
 import { queryAPI } from '@/lib/api/client'
+import { canonicalTableReference, objectKey, qualifyForSql } from '@/lib/schemaNames'
 
 export default function TablesOverviewTab({ connectionId }) {
     const [tables, setTables] = useState([])
@@ -24,9 +25,16 @@ export default function TablesOverviewTab({ connectionId }) {
 
     useEffect(() => {
         if (searchTerm) {
-            const filtered = tables.filter(table =>
-                table.name.toLowerCase().includes(searchTerm.toLowerCase())
-            )
+            const q = searchTerm.toLowerCase()
+            const filtered = tables.filter(table => {
+                const ref = canonicalTableReference(table).toLowerCase()
+                const schema = (table.schema || table.schemaName || '').toLowerCase()
+                return (
+                    table.name.toLowerCase().includes(q) ||
+                    ref.includes(q) ||
+                    schema.includes(q)
+                )
+            })
             setFilteredTables(filtered)
         } else {
             setFilteredTables(tables)
@@ -57,13 +65,13 @@ export default function TablesOverviewTab({ connectionId }) {
                 const tablesWithStats = await Promise.all(
                     tableObjects.map(async (table) => {
                         try {
-                            const statsResponse = await queryAPI.getTableStats(connectionId, table.name)
+                            const statsResponse = await queryAPI.getTableStats(connectionId, objectKey(table))
                             return {
                                 ...table,
                                 stats: statsResponse.success ? statsResponse.stats : null
                             }
                         } catch (err) {
-                            console.error(`Failed to fetch stats for ${table.name}:`, err)
+                            console.error(`Failed to fetch stats for ${canonicalTableReference(table)}:`, err)
                             return { ...table, stats: null }
                         }
                     })
@@ -98,7 +106,7 @@ export default function TablesOverviewTab({ connectionId }) {
 
     const handleCopyName = () => {
         if (contextMenu.table) {
-            copyToClipboard(contextMenu.table.name)
+            copyToClipboard(canonicalTableReference(contextMenu.table))
         }
     }
 
@@ -112,7 +120,7 @@ export default function TablesOverviewTab({ connectionId }) {
     const handlePreviewTableData = async () => {
         if (contextMenu.table) {
             // TODO: Open in SQL Runner tab with SELECT query
-            const query = `SELECT *\nFROM ${contextMenu.table.name}\nLIMIT 100;`
+            const query = `SELECT *\nFROM ${qualifyForSql(contextMenu.table)}\nLIMIT 100;`
             copyToClipboard(query)
             setContextMenu({ visible: false, x: 0, y: 0, table: null })
         }
@@ -121,7 +129,7 @@ export default function TablesOverviewTab({ connectionId }) {
     const handleGenerateSQL = (type) => {
         if (!contextMenu.table) return
 
-        const tableName = contextMenu.table.name
+        const tableName = qualifyForSql(contextMenu.table)
         const columns = contextMenu.table.columns || []
         const columnNames = columns.map(col => col.name).join(', ')
         const columnList = columns.map(col => col.name).join(',\n    ')
@@ -178,7 +186,7 @@ export default function TablesOverviewTab({ connectionId }) {
 
     const handleCopyURL = () => {
         if (contextMenu.table) {
-            const url = `${window.location.origin}/tables/${contextMenu.table.name}`
+            const url = `${window.location.origin}/tables/${objectKey(contextMenu.table)}`
             copyToClipboard(url)
         }
     }
@@ -250,13 +258,13 @@ export default function TablesOverviewTab({ connectionId }) {
                         <tbody>
                             {filteredTables.map((table) => (
                                 <tr
-                                    key={table.name}
+                                    key={objectKey(table)}
                                     onContextMenu={(e) => handleContextMenu(e, table)}
                                     className={styles.tableRow}
                                 >
                                     <td className={styles.tableName}>
                                         <Table size={14} />
-                                        <span>{table.name}</span>
+                                        <span>{canonicalTableReference(table)}</span>
                                     </td>
                                     <td>{table.stats?.engine || 'InnoDB'}</td>
                                     <td>{table.stats?.collation || 'utf8mb3_general_ci'}</td>

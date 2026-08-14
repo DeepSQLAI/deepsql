@@ -260,7 +260,8 @@ public class SchemaController {
         }
     }
 
-    @GetMapping("/tables/{tableName}/indexes")
+    // `{tableName:.+}` keeps schema-qualified ids (`crm.orders`) as one segment.
+    @GetMapping("/tables/{tableName:.+}/indexes")
     public ResponseEntity<Map<String, Object>> getTableIndexes(
             @PathVariable String connectionId,
             @PathVariable String tableName) {
@@ -292,7 +293,7 @@ public class SchemaController {
         }
     }
 
-    @GetMapping("/tables/{tableName}/stats")
+    @GetMapping("/tables/{tableName:.+}/stats")
     public ResponseEntity<Map<String, Object>> getTableStats(
             @PathVariable String connectionId,
             @PathVariable String tableName) {
