@@ -199,9 +199,11 @@ only covers cloud-specific, non-obvious caveats.
   hardcodes `ENCRYPTION_KEYS=${ENCRYPTION_KEYS:}`; with the OS env var unset this is a
   circular placeholder reference that fails `EncryptionService` bean creation at boot. The
   local `.env` sets `ENCRYPTION_KEYS=<id>:<base64key>` matching `ENCRYPTION_KEY_ID`.
-- **`SECURITY_AUTH_ENABLED=false`** (set in `.env`) enables the dev auto-admin bypass, so the
-  web UI needs no login. Auth defaults to ON in every profile otherwise (there is no
-  `admin/admin`); a real login needs the localhost admin-bootstrap flow (see README).
+- **`SECURITY_AUTH_ENABLED`** defaults to ON. This Cloud VM’s `.env` sets it
+  `true` and uses a real admin user (`admin@localhost` — create via localhost
+  bootstrap if missing; see `CLAUDE.md`). `SECURITY_AUTH_ENABLED=false` only
+  bypasses JWT/MCP token *validation*; it does not skip the login form or mint
+  an admin. Dev credentials are never `admin/admin`.
 - **The `scheduled_tasks` table and the `vector`/`pg_stat_statements` extensions** come from
   `docker/postgres/init/*.sql`. In the native (non-Docker) setup those were applied by hand;
   they persist in the snapshot. If you ever recreate the vault DB, re-apply
