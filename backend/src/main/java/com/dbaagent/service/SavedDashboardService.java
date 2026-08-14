@@ -2,14 +2,21 @@ package com.dbaagent.service;
 
 import com.dbaagent.model.SavedDashboard;
 import com.dbaagent.repository.SavedDashboardRepository;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -19,8 +26,15 @@ public class SavedDashboardService {
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
+    // A RUNNING status left behind by a crashed/killed backend must not block
+    // a legitimate retry forever — only respected while still fresh.
+    private static final Duration STALE_RUNNING_THRESHOLD = Duration.ofMinutes(20);
+
     @Autowired
     private SavedDashboardRepository savedDashboardRepository;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     /** Publish a dashboard to the web: mint a token if needed, mark it public. */
     @Transactional
@@ -218,5 +232,143 @@ public class SavedDashboardService {
         log.info("Deleting all dashboards for connection: {}", connectionId);
         List<SavedDashboard> dashboards = savedDashboardRepository.findByConnectionIdOrderByCreatedAtDesc(connectionId);
         savedDashboardRepository.deleteAll(dashboards);
+    }
+
+    // ── Server-owned chat-turn persistence ──────────────────────────────────
+    //
+    // A dashboard generation turn used to be persisted only by the FRONTEND, in
+    // response to receiving the SSE `done`/`chat` event — so closing or
+    // reloading the tab before that event arrived silently discarded a turn the
+    // backend had already finished computing. These four methods move
+    // persistence into the backend code path itself (DashboardGenerationController),
+    // which runs on a detached virtual thread that keeps going regardless of
+    // whether the originating SSE client is still connected. Call order per
+    // turn: beginGenerationTurn (before the slow agent work starts) → exactly
+    // one of appendAgentReply / completeBuildTurn / appendErrorReply (when it
+    // finishes).
+
+    /**
+     * Starts a chat turn: resolves (or creates) the target dashboard and
+     * appends the user's message, synchronously and fast (before the caller
+     * kicks off the slow agent work). Marking generationStatus=RUNNING here —
+     * not after the agent finishes — is what lets a reload mid-generation see
+     * "still working" instead of nothing at all.
+     */
+    @Transactional
+    public SavedDashboard beginGenerationTurn(UUID dashboardId, String connectionId, String prompt) {
+        SavedDashboard dashboard;
+        if (dashboardId != null) {
+            dashboard = requireDashboard(dashboardId);
+            if (!connectionId.equals(dashboard.getConnectionId())) {
+                throw new IllegalArgumentException("Dashboard does not belong to connection: " + connectionId);
+            }
+            if (isFreshlyRunning(dashboard)) {
+                throw new IllegalStateException("A generation is already running for this dashboard.");
+            }
+        } else {
+            dashboard = new SavedDashboard();
+            dashboard.setConnectionId(connectionId);
+            dashboard.setName(deriveName(prompt));
+            dashboard.setDescription("");
+            dashboard.setDashboardConfig("{}");
+            dashboard.setChatMessages("[]");
+            dashboard.setIsFavorite(false);
+        }
+        List<Map<String, Object>> messages = parseMessages(dashboard.getChatMessages());
+        messages.add(chatMessage("user", prompt));
+        dashboard.setChatMessages(writeMessages(messages));
+        dashboard.setGenerationStatus("RUNNING");
+        dashboard.setGenerationStartedAt(LocalDateTime.now());
+        return savedDashboardRepository.save(dashboard);
+    }
+
+    /** Turn finished as a plain chat reply (e.g. "hi") — no dashboard change. */
+    @Transactional
+    public SavedDashboard appendAgentReply(UUID dashboardId, String replyText) {
+        SavedDashboard dashboard = requireDashboard(dashboardId);
+        List<Map<String, Object>> messages = parseMessages(dashboard.getChatMessages());
+        messages.add(chatMessage("agent", replyText));
+        dashboard.setChatMessages(writeMessages(messages));
+        return finishRunning(dashboard);
+    }
+
+    /** Turn finished as a real build — persists the artifact + its derived title. */
+    @Transactional
+    public SavedDashboard completeBuildTurn(UUID dashboardId, Map<String, Object> config) {
+        SavedDashboard dashboard = requireDashboard(dashboardId);
+        try {
+            dashboard.setDashboardConfig(objectMapper.writeValueAsString(config));
+        } catch (Exception e) {
+            log.error("Failed to serialize dashboard config for {}", dashboardId, e);
+        }
+        Object title = config.get("title");
+        if (title != null && !String.valueOf(title).isBlank()) {
+            dashboard.setName(String.valueOf(title));
+        }
+        List<Map<String, Object>> messages = parseMessages(dashboard.getChatMessages());
+        messages.add(chatMessage("agent", "Done — built and verified against your data. Saved as a draft — tell me what to change."));
+        dashboard.setChatMessages(writeMessages(messages));
+        return finishRunning(dashboard);
+    }
+
+    /** Turn finished as a real generation failure (not a client disconnect — see controller). */
+    @Transactional
+    public SavedDashboard appendErrorReply(UUID dashboardId, String errorText) {
+        SavedDashboard dashboard = requireDashboard(dashboardId);
+        List<Map<String, Object>> messages = parseMessages(dashboard.getChatMessages());
+        Map<String, Object> msg = chatMessage("agent", "⚠ " + errorText);
+        msg.put("error", true);
+        messages.add(msg);
+        dashboard.setChatMessages(writeMessages(messages));
+        return finishRunning(dashboard);
+    }
+
+    private SavedDashboard finishRunning(SavedDashboard dashboard) {
+        dashboard.setGenerationStatus("IDLE");
+        dashboard.setGenerationStartedAt(null);
+        return savedDashboardRepository.save(dashboard);
+    }
+
+    private boolean isFreshlyRunning(SavedDashboard dashboard) {
+        return "RUNNING".equals(dashboard.getGenerationStatus())
+            && dashboard.getGenerationStartedAt() != null
+            && dashboard.getGenerationStartedAt().isAfter(LocalDateTime.now().minus(STALE_RUNNING_THRESHOLD));
+    }
+
+    private SavedDashboard requireDashboard(UUID id) {
+        return savedDashboardRepository.findById(id)
+            .orElseThrow(() -> new IllegalArgumentException("Dashboard not found with id: " + id));
+    }
+
+    private static Map<String, Object> chatMessage(String role, String text) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("role", role);
+        m.put("text", text);
+        return m;
+    }
+
+    private static String deriveName(String prompt) {
+        if (prompt == null || prompt.isBlank()) return "New dashboard";
+        String trimmed = prompt.trim();
+        return trimmed.length() > 80 ? trimmed.substring(0, 80) : trimmed;
+    }
+
+    private List<Map<String, Object>> parseMessages(String json) {
+        if (json == null || json.isBlank()) return new ArrayList<>();
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<Map<String, Object>>>() { });
+        } catch (Exception e) {
+            log.warn("Failed to parse chatMessages, starting fresh: {}", e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    private String writeMessages(List<Map<String, Object>> messages) {
+        try {
+            return objectMapper.writeValueAsString(messages);
+        } catch (Exception e) {
+            log.error("Failed to serialize chatMessages", e);
+            return "[]";
+        }
     }
 }

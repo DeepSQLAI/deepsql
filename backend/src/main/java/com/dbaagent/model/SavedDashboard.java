@@ -77,6 +77,23 @@ public class SavedDashboard {
     @Column(length = 255)
     private String folder;
 
+    // Server-owned "is a generation turn in flight for this dashboard" marker.
+    // Set to RUNNING the instant a chat submit is accepted (before the slow
+    // agent work starts) and back to IDLE when it finishes — from the backend
+    // code path itself, regardless of whether the SSE client that started it
+    // is still connected. Lets a reload mid-generation distinguish "still
+    // working" from "answer's ready" without needing to have stayed connected.
+    // See SavedDashboardService.beginGenerationTurn/appendAgentReply/
+    // completeBuildTurn/appendErrorReply.
+    @Column(nullable = false, length = 16)
+    private String generationStatus = "IDLE";
+
+    // When the current RUNNING turn started, so a client can tell a live
+    // generation from one abandoned by a backend crash (see
+    // SavedDashboardService.STALE_RUNNING_THRESHOLD).
+    @Column
+    private LocalDateTime generationStartedAt;
+
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -94,5 +111,6 @@ public class SavedDashboard {
     void applyBooleanDefaults() {
         if (isPublic == null) isPublic = false;
         if (isFavorite == null) isFavorite = false;
+        if (generationStatus == null) generationStatus = "IDLE";
     }
 }
