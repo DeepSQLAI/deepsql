@@ -102,6 +102,16 @@ public class SavedDashboard {
     @Column(nullable = false)
     private LocalDateTime updatedAt;
 
+    // Optimistic lock: beginGenerationTurn/appendAgentReply/completeBuildTurn/
+    // appendErrorReply all do load-then-save on this same row, and two overlapping
+    // turns (e.g. a slow build finishing after the user already sent a follow-up
+    // chat) would otherwise silently lose whichever save landed first. Hibernate
+    // bumps this on every UPDATE and rejects a save whose version is stale with
+    // OptimisticLockException instead of overwriting.
+    @Version
+    @Column(nullable = false)
+    private Long version = 0L;
+
     // Jackson deserializes create/update bodies via Lombok's all-args constructor
     // (Spring's parameter-names module), which bypasses the field defaults and
     // leaves these NOT-NULL booleans null when the client omits them. Coerce here

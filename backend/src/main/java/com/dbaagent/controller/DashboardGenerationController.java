@@ -6,6 +6,7 @@ import com.dbaagent.service.SavedDashboardService;
 import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -72,7 +73,10 @@ public class DashboardGenerationController {
     @PostMapping(value = "/generate/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter generateStream(@RequestBody GenerateRequest request) {
         requireValid(request);
-        accessControlService.assertCanReadConnectionContent(request.connectionId());
+        // This path creates/updates a SavedDashboard row (beginGenerationTurn etc.)
+        // on every call, not just reads — a VIEWER (read-only) must not be able to
+        // mint or mutate drafts via chat.
+        accessControlService.assertCanManageConnectionContent(request.connectionId());
         SseEmitter emitter = new SseEmitter(600_000L);
 
         // Resolve (or create) the target dashboard and record the user's message
@@ -86,6 +90,11 @@ public class DashboardGenerationController {
                 request.dashboardId(), request.connectionId(), request.prompt());
         } catch (IllegalArgumentException | IllegalStateException e) {
             sendErrorAndComplete(emitter, e.getMessage());
+            return emitter;
+        } catch (OptimisticLockingFailureException e) {
+            // Lost the race to another concurrent submit on the same dashboard —
+            // same user-facing shape as the "already running" case above.
+            sendErrorAndComplete(emitter, "A generation is already running for this dashboard.");
             return emitter;
         }
         // The frontend needs this id right away (not just at the end) so a

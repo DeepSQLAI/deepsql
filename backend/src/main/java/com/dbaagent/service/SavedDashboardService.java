@@ -253,6 +253,12 @@ public class SavedDashboardService {
      * kicks off the slow agent work). Marking generationStatus=RUNNING here —
      * not after the agent finishes — is what lets a reload mid-generation see
      * "still working" instead of nothing at all.
+     *
+     * isFreshlyRunning below is check-then-act, but SavedDashboard.version
+     * (@Version) is the real guard: save() is `UPDATE ... WHERE version=?`, so a
+     * racing loser gets OptimisticLockingFailureException, not a double-append
+     * (caught in DashboardGenerationController same as the IllegalStateException
+     * below). Verified with concurrent requests: loser rejected, zero writes.
      */
     @Transactional
     public SavedDashboard beginGenerationTurn(UUID dashboardId, String connectionId, String prompt) {
