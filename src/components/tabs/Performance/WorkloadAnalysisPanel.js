@@ -251,7 +251,7 @@ export default function WorkloadAnalysisPanel({ connectionId }) {
                       {rec.kind === "DROP_INDEX" ? "DROP" : "CREATE"}
                     </span>
                     <code className={styles.recTitle}>
-                      {rec.tableName} ({rec.columnNames})
+                      {rec.schemaName ? `${rec.schemaName}.${rec.tableName}` : rec.tableName} ({rec.columnNames})
                     </code>
                     {rec.priority && (
                       <span className={`${styles.prio} ${styles[`prio_${(rec.priority || "").toLowerCase()}`] || ""}`}>

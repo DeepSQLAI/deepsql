@@ -19,19 +19,23 @@ export function PrivilegesAccordion({ dbType }) {
 -- Replace 'your_user' with your database username
 -- Replace 'your_database' with your database name
 
--- Basic read access to all tables
+-- Basic read access (repeat GRANT block per schema you want DeepSQL to see)
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO your_user;
 GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO your_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT ON TABLES TO your_user;
+
+-- Multi-schema example (crm / sales / …)
+-- GRANT USAGE ON SCHEMA crm TO your_user;
+-- GRANT SELECT ON ALL TABLES IN SCHEMA crm TO your_user;
+-- GRANT SELECT ON ALL SEQUENCES IN SCHEMA crm TO your_user;
+-- ALTER DEFAULT PRIVILEGES IN SCHEMA crm GRANT SELECT ON TABLES TO your_user;
 
 -- Access to system views for monitoring
 GRANT pg_read_all_stats TO your_user;
 
 -- Enable pg_stat_statements extension (if not already enabled)
-CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
-
--- For future tables
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT SELECT ON TABLES TO your_user;`
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;`
     }
 
     if (dbType === 'mysql') {
