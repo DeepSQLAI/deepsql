@@ -17,7 +17,7 @@ const STEP_ICON = { grounding: Brain, planning: PencilRuler, validating: Clipboa
 // listed and breadcrumbed under its old name, which reads as "my edit didn't
 // save" even though it did.
 function titleFromHtml(html, fallback) {
-  const strip = (s) => s.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+  const strip = (s) => s.replace(/[<>]/g, '').replace(/\s+/g, ' ').trim()
   const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)
   if (title && strip(title[1])) return strip(title[1]).slice(0, 120)
   const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)
