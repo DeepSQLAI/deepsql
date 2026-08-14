@@ -679,10 +679,202 @@ INSERT INTO performance_action (
     NOW()
 ) ON CONFLICT DO NOTHING;
 
+-- --------------------------------------------------------------------------
+-- Query Trends / Workload Analysis analytics (unlocks the Performance tab)
+-- The legacy slow_query_history JSON alone does NOT populate Query Trends —
+-- that path needs slow_log_source_config + query_fingerprints + slow_query_run.
+-- --------------------------------------------------------------------------
+
+INSERT INTO slow_log_source_config (
+    id, connection_id, provider_type, enabled, auto_schedule_enabled,
+    bucket_name, object_prefix, s3_region, refresh_frequency_minutes,
+    consecutive_dry_runs, created_at, updated_at, last_processed_at
+) VALUES (
+    'seed-log-source-' || '${connection_id}',
+    '${connection_id}',
+    'S3',
+    true,
+    false,
+    'deepsql-demo-slow-logs',
+    'postgres/demo-shop/',
+    'us-east-1',
+    60,
+    0,
+    NOW() - INTERVAL '7 days',
+    NOW(),
+    NOW() - INTERVAL '1 hour'
+) ON CONFLICT (id) DO UPDATE SET
+    enabled = EXCLUDED.enabled,
+    auto_schedule_enabled = false,
+    updated_at = NOW();
+
+INSERT INTO connection_analytics_config (
+    connection_id, daily_analysis_enabled, tenant_column,
+    customer_lookup_table, customer_lookup_id_col, customer_lookup_name_col,
+    created_at, updated_at
+) VALUES (
+    '${connection_id}', true, 'customer_id',
+    'customers', 'id', 'email',
+    NOW() - INTERVAL '7 days', NOW()
+) ON CONFLICT (connection_id) DO UPDATE SET
+    daily_analysis_enabled = true,
+    tenant_column = 'customer_id',
+    customer_lookup_table = 'customers',
+    customer_lookup_id_col = 'id',
+    customer_lookup_name_col = 'email',
+    updated_at = NOW();
+
+DELETE FROM slow_query_customer_day WHERE connection_id = '${connection_id}' AND id LIKE 'seed-%';
+DELETE FROM slow_query_customer WHERE connection_id = '${connection_id}' AND id LIKE 'seed-%';
+DELETE FROM slow_query_sample WHERE connection_id = '${connection_id}' AND id LIKE 'seed-%';
+DELETE FROM slow_query_run WHERE connection_id = '${connection_id}' AND id LIKE 'seed-%';
+DELETE FROM query_fingerprints WHERE connection_id = '${connection_id}' AND id LIKE 'seed-%';
+
+INSERT INTO query_fingerprints (
+    id, connection_id, fingerprint, normalized_query, sample_query, query_type,
+    normalization_version, affected_tables,
+    current_avg_time_ms, current_max_time_ms, current_call_count,
+    current_rows_examined, current_rows_sent,
+    baseline_avg_time_ms, baseline_max_time_ms, baseline_call_count, baseline_date,
+    first_seen_at, last_seen_at, observation_count,
+    is_regressing, trend_direction, trend_percentage,
+    performance_history, created_at, updated_at
+) VALUES
+(
+    'seed-fp-orders-lower', '${connection_id}', 'a1b2c3d4e5f60718',
+    'SELECT * FROM orders WHERE LOWER(status) = ? AND total_amount > ?',
+    'SELECT * FROM orders WHERE LOWER(status) = ''delivered'' AND total_amount > 100',
+    'SELECT', 1, '["orders"]'::json,
+    1.87, 45.2, 1250, 15000, 420,
+    1.10, 28.0, 800, NOW() - INTERVAL '14 days',
+    NOW() - INTERVAL '21 days', NOW() - INTERVAL '1 hour', 12,
+    true, 'DEGRADING', 70.0,
+    '[{"timestamp":"2026-08-07T10:00:00","avgTimeMs":1.1,"callCount":800},{"timestamp":"2026-08-14T09:00:00","avgTimeMs":1.87,"callCount":1250}]'::json,
+    NOW() - INTERVAL '21 days', NOW()
+),
+(
+    'seed-fp-orders-join', '${connection_id}', 'b2c3d4e5f6071829',
+    'SELECT o.*, c.* FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.status = ? AND o.payment_status = ?',
+    'SELECT o.*, c.* FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.status = ''pending'' AND o.payment_status = ''paid''',
+    'SELECT', 1, '["orders","customers"]'::json,
+    2.08, 38.7, 890, 5200, 310,
+    1.85, 30.0, 700, NOW() - INTERVAL '14 days',
+    NOW() - INTERVAL '18 days', NOW() - INTERVAL '2 hours', 10,
+    false, 'STABLE', 12.0,
+    '[{"timestamp":"2026-08-07T10:00:00","avgTimeMs":1.85,"callCount":700},{"timestamp":"2026-08-14T08:00:00","avgTimeMs":2.08,"callCount":890}]'::json,
+    NOW() - INTERVAL '18 days', NOW()
+),
+(
+    'seed-fp-product-avg', '${connection_id}', 'c3d4e5f60718293a',
+    'SELECT p.*, AVG(r.rating) FROM products p LEFT JOIN product_reviews r ON p.id = r.product_id GROUP BY p.id',
+    'SELECT p.*, AVG(r.rating) FROM products p LEFT JOIN product_reviews r ON p.id = r.product_id GROUP BY p.id',
+    'SELECT', 1, '["products","product_reviews"]'::json,
+    0.59, 12.3, 2100, 100, 100,
+    0.55, 10.0, 1800, NOW() - INTERVAL '14 days',
+    NOW() - INTERVAL '30 days', NOW() - INTERVAL '30 minutes', 15,
+    false, 'IMPROVING', -7.0,
+    '[{"timestamp":"2026-08-07T10:00:00","avgTimeMs":0.55,"callCount":1800},{"timestamp":"2026-08-14T10:00:00","avgTimeMs":0.59,"callCount":2100}]'::json,
+    NOW() - INTERVAL '30 days', NOW()
+),
+(
+    'seed-fp-audit-scan', '${connection_id}', 'd4e5f60718293a4b',
+    'SELECT * FROM audit_log WHERE table_name = ? ORDER BY changed_at DESC LIMIT ?',
+    'SELECT * FROM audit_log WHERE table_name = ''orders'' ORDER BY changed_at DESC LIMIT 1000',
+    'SELECT', 1, '["audit_log"]'::json,
+    7.68, 89.4, 450, 50000, 1000,
+    3.20, 40.0, 200, NOW() - INTERVAL '14 days',
+    NOW() - INTERVAL '12 days', NOW() - INTERVAL '45 minutes', 8,
+    true, 'CRITICAL', 140.0,
+    '[{"timestamp":"2026-08-07T10:00:00","avgTimeMs":3.2,"callCount":200},{"timestamp":"2026-08-14T09:30:00","avgTimeMs":7.68,"callCount":450}]'::json,
+    NOW() - INTERVAL '12 days', NOW()
+);
+
+INSERT INTO slow_query_run (
+    id, connection_id, analysis_run_id, fingerprint, analyzed_on, captured_at,
+    calls_cumulative, calls_delta, total_exec_ms_cumulative, total_exec_ms_delta,
+    mean_exec_ms, max_exec_ms, p95_exec_ms,
+    rows_examined_delta, rows_sent_delta,
+    regression_factor, counter_reset, prev_run_id, created_at
+) VALUES
+('seed-run-o1-d6', '${connection_id}', 'seed-analysis-d6', 'a1b2c3d4e5f60718', CURRENT_DATE - 6, NOW() - INTERVAL '6 days',
+ 600, 600, 660.0, 660.0, 1.10, 28.0, 2.1, 9000, 250, NULL, false, NULL, NOW() - INTERVAL '6 days'),
+('seed-run-o2-d6', '${connection_id}', 'seed-analysis-d6', 'b2c3d4e5f6071829', CURRENT_DATE - 6, NOW() - INTERVAL '6 days',
+ 500, 500, 925.0, 925.0, 1.85, 30.0, 3.2, 3000, 180, NULL, false, NULL, NOW() - INTERVAL '6 days'),
+('seed-run-p1-d6', '${connection_id}', 'seed-analysis-d6', 'c3d4e5f60718293a', CURRENT_DATE - 6, NOW() - INTERVAL '6 days',
+ 1500, 1500, 825.0, 825.0, 0.55, 10.0, 0.9, 100, 100, NULL, false, NULL, NOW() - INTERVAL '6 days'),
+('seed-run-a1-d6', '${connection_id}', 'seed-analysis-d6', 'd4e5f60718293a4b', CURRENT_DATE - 6, NOW() - INTERVAL '6 days',
+ 180, 180, 576.0, 576.0, 3.20, 40.0, 6.5, 20000, 1000, NULL, false, NULL, NOW() - INTERVAL '6 days'),
+('seed-run-o1-d3', '${connection_id}', 'seed-analysis-d3', 'a1b2c3d4e5f60718', CURRENT_DATE - 3, NOW() - INTERVAL '3 days',
+ 950, 350, 1330.0, 670.0, 1.91, 36.0, 3.4, 5500, 140, 1.74, false, 'seed-run-o1-d6', NOW() - INTERVAL '3 days'),
+('seed-run-o2-d3', '${connection_id}', 'seed-analysis-d3', 'b2c3d4e5f6071829', CURRENT_DATE - 3, NOW() - INTERVAL '3 days',
+ 720, 220, 1381.0, 456.0, 2.07, 34.0, 3.8, 1800, 90, 1.12, false, 'seed-run-o2-d6', NOW() - INTERVAL '3 days'),
+('seed-run-p1-d3', '${connection_id}', 'seed-analysis-d3', 'c3d4e5f60718293a', CURRENT_DATE - 3, NOW() - INTERVAL '3 days',
+ 1850, 350, 1036.0, 211.0, 0.60, 11.0, 1.0, 100, 100, 1.09, false, 'seed-run-p1-d6', NOW() - INTERVAL '3 days'),
+('seed-run-a1-d3', '${connection_id}', 'seed-analysis-d3', 'd4e5f60718293a4b', CURRENT_DATE - 3, NOW() - INTERVAL '3 days',
+ 310, 130, 1488.0, 912.0, 7.02, 72.0, 14.0, 28000, 1000, 2.19, false, 'seed-run-a1-d6', NOW() - INTERVAL '3 days'),
+('seed-run-o1-d0', '${connection_id}', 'seed-analysis-d0', 'a1b2c3d4e5f60718', CURRENT_DATE, NOW() - INTERVAL '1 hour',
+ 1250, 300, 2337.5, 1007.5, 3.36, 45.2, 5.8, 6000, 120, 1.76, false, 'seed-run-o1-d3', NOW()),
+('seed-run-o2-d0', '${connection_id}', 'seed-analysis-d0', 'b2c3d4e5f6071829', CURRENT_DATE, NOW() - INTERVAL '1 hour',
+ 890, 170, 1850.2, 469.2, 2.76, 38.7, 4.9, 2200, 80, 1.33, false, 'seed-run-o2-d3', NOW()),
+('seed-run-p1-d0', '${connection_id}', 'seed-analysis-d0', 'c3d4e5f60718293a', CURRENT_DATE, NOW() - INTERVAL '1 hour',
+ 2100, 250, 1239.0, 203.0, 0.81, 12.3, 1.3, 100, 100, 1.35, false, 'seed-run-p1-d3', NOW()),
+('seed-run-a1-d0', '${connection_id}', 'seed-analysis-d0', 'd4e5f60718293a4b', CURRENT_DATE, NOW() - INTERVAL '1 hour',
+ 450, 140, 3456.0, 1968.0, 14.06, 89.4, 28.0, 25000, 1000, 2.00, false, 'seed-run-a1-d3', NOW());
+
+INSERT INTO slow_query_sample (
+    id, connection_id, fingerprint, customer_id, captured_at, ingested_at,
+    exec_ms, rows_examined, rows_sent, source, raw_sql
+) VALUES
+('seed-sample-1', '${connection_id}', 'a1b2c3d4e5f60718', '1001', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '1 hour',
+ 42.5, 18000, 120, 'SLOW_LOG', 'SELECT * FROM orders WHERE LOWER(status) = ''delivered'' AND total_amount > 100 /* cust=1001 */'),
+('seed-sample-2', '${connection_id}', 'a1b2c3d4e5f60718', '1002', NOW() - INTERVAL '90 minutes', NOW() - INTERVAL '1 hour',
+ 38.1, 16000, 95, 'SLOW_LOG', 'SELECT * FROM orders WHERE LOWER(status) = ''delivered'' AND total_amount > 250 /* cust=1002 */'),
+('seed-sample-3', '${connection_id}', 'd4e5f60718293a4b', '1001', NOW() - INTERVAL '80 minutes', NOW() - INTERVAL '1 hour',
+ 88.2, 52000, 1000, 'SLOW_LOG', 'SELECT * FROM audit_log WHERE table_name = ''orders'' ORDER BY changed_at DESC LIMIT 1000 /* cust=1001 */'),
+('seed-sample-4', '${connection_id}', 'b2c3d4e5f6071829', '1003', NOW() - INTERVAL '70 minutes', NOW() - INTERVAL '1 hour',
+ 29.4, 4800, 40, 'SLOW_LOG', 'SELECT o.*, c.* FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.status = ''pending'' AND o.payment_status = ''paid'' /* cust=1003 */'),
+('seed-sample-5', '${connection_id}', 'c3d4e5f60718293a', NULL, NOW() - INTERVAL '60 minutes', NOW() - INTERVAL '1 hour',
+ 11.2, 100, 100, 'SLOW_LOG', 'SELECT p.*, AVG(r.rating) FROM products p LEFT JOIN product_reviews r ON p.id = r.product_id GROUP BY p.id');
+
+INSERT INTO slow_query_customer (
+    id, connection_id, customer_id, customer_name, tenant_column,
+    first_seen_at, last_seen_at, name_resolved_at, created_at
+) VALUES
+('seed-cust-1001', '${connection_id}', '1001', 'acme@demo.local', 'customer_id', NOW() - INTERVAL '10 days', NOW() - INTERVAL '70 minutes', NOW() - INTERVAL '1 day', NOW()),
+('seed-cust-1002', '${connection_id}', '1002', 'globex@demo.local', 'customer_id', NOW() - INTERVAL '8 days', NOW() - INTERVAL '90 minutes', NOW() - INTERVAL '1 day', NOW()),
+('seed-cust-1003', '${connection_id}', '1003', 'initech@demo.local', 'customer_id', NOW() - INTERVAL '5 days', NOW() - INTERVAL '70 minutes', NOW() - INTERVAL '1 day', NOW());
+
+INSERT INTO slow_query_customer_day (
+    id, connection_id, fingerprint, customer_id, day,
+    sample_count, mean_exec_ms, max_exec_ms, total_exec_ms,
+    prev_day_mean_ms, regression_factor, created_at
+) VALUES
+('seed-cday-1', '${connection_id}', 'a1b2c3d4e5f60718', '1001', CURRENT_DATE, 18, 4.2, 42.5, 75.6, 2.1, 2.0, NOW()),
+('seed-cday-2', '${connection_id}', 'a1b2c3d4e5f60718', '1002', CURRENT_DATE, 12, 3.8, 38.1, 45.6, 2.4, 1.58, NOW()),
+('seed-cday-3', '${connection_id}', 'd4e5f60718293a4b', '1001', CURRENT_DATE, 9, 15.1, 88.2, 135.9, 7.0, 2.16, NOW()),
+('seed-cday-4', '${connection_id}', 'b2c3d4e5f6071829', '1003', CURRENT_DATE, 14, 2.9, 29.4, 40.6, 2.2, 1.32, NOW());
+
 SELECT 'Performance seed data inserted successfully' AS status;
 EOSQL
 
-    echo "  Performance data seeded."
+    echo "  Performance data seeded (history + Query Trends analytics + log source)."
+
+    # Optional: exercise demo_shop so pg_stat_statements has matching patterns
+    echo "  Simulating demo_shop workload (slow-query patterns)..."
+    compose exec -T postgres psql -U postgres -d demo_shop -v ON_ERROR_STOP=1 <<'EOWORK' >/dev/null || echo "  Note: demo_shop workload simulation skipped (DB missing?)"
+DO $$
+DECLARE i int;
+BEGIN
+  FOR i IN 1..25 LOOP
+    PERFORM count(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
+    PERFORM count(*) FROM orders o JOIN customers c ON o.customer_id = c.id
+      WHERE o.status = 'pending' AND o.payment_status = 'paid';
+    PERFORM p.id FROM products p
+      LEFT JOIN product_reviews r ON p.id = r.product_id GROUP BY p.id;
+    PERFORM 1 FROM audit_log WHERE table_name = 'orders' ORDER BY changed_at DESC LIMIT 1000;
+  END LOOP;
+END $$;
+EOWORK
 else
     echo "  Skipping performance data (no connection ID available)"
 fi
@@ -795,7 +987,9 @@ if [[ -n "${connection_id:-}" ]]; then
 echo "  - Connection ID: ${connection_id}"
 fi
 echo "  - Saved queries in SQL Editor"
-echo "  - Sample slow query analysis"
+echo "  - Sample slow query analysis (legacy history JSON)"
+echo "  - Slow-log source + Query Trends analytics (fingerprints / runs / samples)"
+echo "  - Per-customer rollups for the By Customer view"
 echo "  - Index recommendations"
 echo "  - Performance actions"
 echo "  - Sample agent conversation"
@@ -808,7 +1002,8 @@ echo ""
 echo "Next steps:"
 echo "  1. Open http://localhost:${DEEPSQL_FRONTEND_PORT:-3000}"
 echo "  2. Select '${DEEPSQL_SEED_CONNECTION_NAME}' connection"
-echo "  3. Explore the Schema, Slow Queries, and Actions tabs"
-echo "  4. Try the SQL Editor with pre-saved queries"
-echo "  5. Ask the Agent about the database"
+echo "  3. Open Performance — Query Trends, By Customer, and Workload tabs"
+echo "  4. On Workload, click Run analysis for a fresh holistic report"
+echo "  5. Try the SQL Editor with pre-saved queries"
+echo "  6. Ask the Agent about the database"
 echo ""
