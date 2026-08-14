@@ -1964,18 +1964,33 @@ export default function SqlRunnerTab({ connectionId }) {
                                     handleTableContextMenu(e, table)
                                   }
                                 >
-                                  <div
-                                    className={styles.objectName}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      toggleNode(`table-${objectKey(table)}`);
-                                    }}
-                                  >
-                                    {expandedNodes[`table-${objectKey(table)}`] ? (
-                                      <ChevronDown size={14} />
-                                    ) : (
-                                      <ChevronRight size={14} />
-                                    )}
+                                  <div className={styles.objectName}>
+                                    <button
+                                      type="button"
+                                      className={styles.expandToggle || undefined}
+                                      style={{
+                                        background: "transparent",
+                                        border: "none",
+                                        padding: 0,
+                                        display: "inline-flex",
+                                        cursor: "pointer",
+                                      }}
+                                      aria-label={
+                                        expandedNodes[`table-${objectKey(table)}`]
+                                          ? "Collapse columns"
+                                          : "Expand columns"
+                                      }
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleNode(`table-${objectKey(table)}`);
+                                      }}
+                                    >
+                                      {expandedNodes[`table-${objectKey(table)}`] ? (
+                                        <ChevronDown size={14} />
+                                      ) : (
+                                        <ChevronRight size={14} />
+                                      )}
+                                    </button>
                                     <span title={canonicalTableReference(table)}>
                                       {multiSchema && table.schema && table.schema !== 'public'
                                         ? <><span style={{opacity:0.55}}>{table.schema}.</span>{table.name}</>
