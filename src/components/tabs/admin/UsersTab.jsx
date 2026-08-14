@@ -41,8 +41,7 @@ const ACCESS_MATRIX = [
   { area: 'Brain', developer: 'Own + Full Access', admin: 'Full' },
   { area: 'Schema Docs', developer: 'Own + Full Access', admin: 'Full' },
   { area: 'Company Knowledge', developer: 'Own + Full Access', admin: 'Full' },
-  { area: 'Slow Queries', developer: '—', admin: 'Full' },
-  { area: 'Workload Analysis', developer: '—', admin: 'Full' },
+  { area: 'Performance', developer: '—', admin: 'Full' },
 ]
 
 const FALLBACK_ROLES = [

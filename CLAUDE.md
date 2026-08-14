@@ -93,6 +93,8 @@ backend/
 src/                # Frontend (React)
   components/       # UI components
     tabs/           # 40+ specialized tabs
+    sections/       # Top-level sidebar destinations (Agent, Dashboards, Brain,
+                    # Performance = Slow Queries + Workload, Editor, Docs)
   lib/
     api/client.js   # Centralized API layer (axios, 25+ modules)
     stores/         # Zustand stores (dashboard, connection, chat, UI)

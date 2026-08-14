@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { BookOpen, Brain, Code2, Database, Settings, PanelLeftClose, PanelLeftOpen, LogOut, User, ChevronDown, Check, Newspaper, Gauge, Activity, MessageSquare, LayoutDashboard } from 'lucide-react'
+import { BookOpen, Brain, Code2, Database, Settings, PanelLeftClose, PanelLeftOpen, LogOut, User, ChevronDown, Check, Newspaper, Gauge, MessageSquare, LayoutDashboard } from 'lucide-react'
 import { useActiveSection, useSetActiveSection } from '@/lib/stores/useNavStore'
 import { useConnectionManager } from '@/lib/hooks/useConnectionManager'
 import { AGENTS_ENABLED, canAccessHomeSection, getConnectionAccessBadge, getConnectionAccessLabel } from '@/lib/features'
@@ -14,8 +14,7 @@ const NAV_ITEMS = [
   { id: 'digest',  label: 'Digest',  icon: Newspaper },
   ...(AGENTS_ENABLED ? [{ id: 'brain', label: 'Agents', icon: Brain }] : []),
   { id: 'company-knowledge', label: 'Brain', icon: Brain },
-  { id: 'slow-queries', label: 'Slow Queries', icon: Gauge },
-  { id: 'workload-analysis', label: 'Workload Analysis', icon: Activity },
+  { id: 'performance', label: 'Performance', icon: Gauge },
   { id: 'editor',  label: 'Editor',  icon: Code2 },
   { id: 'docs',    label: 'Docs',    icon: BookOpen },
 ]
