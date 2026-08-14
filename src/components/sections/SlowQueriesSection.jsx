@@ -61,19 +61,22 @@ export default function SlowQueriesSection() {
       ) : !hasLogSource ? (
         <div className={styles.setupCard}>
           <FileText size={32} className={styles.setupIcon} />
-          <h2 className={styles.setupTitle}>
-            <HelpTooltip content={LOG_SOURCE_HELP}>
-              <span>Configure slow queries</span>
-            </HelpTooltip>
-          </h2>
+          <h2 className={styles.setupTitle}>Configure slow queries</h2>
           <p className={styles.setupCopy}>
-            Attach a slow-query log source to unlock query trends, per-customer
-            breakdown, and workload analysis. DeepSQL pulls from CloudWatch, S3,
-            Azure Blob, GCP, Datadog, Elasticsearch, or a file you upload.
+            <HelpTooltip content={LOG_SOURCE_HELP}>
+              <span>
+                Attach a slow-query log source to unlock query trends, per-customer
+                breakdown, and workload analysis.
+              </span>
+            </HelpTooltip>
+            {' '}
+            DeepSQL pulls from CloudWatch, S3, Azure Blob, GCP, Datadog,
+            Elasticsearch, or a file you upload.
           </p>
           <button
             type="button"
             className={styles.setupCta}
+            data-testid="configure-slow-queries"
             onClick={() => setLogSourceModalOpen(true)}
           >
             <FileText size={14} />
