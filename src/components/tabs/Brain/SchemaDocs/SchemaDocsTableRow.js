@@ -34,6 +34,8 @@ export function SchemaDocsTableRow({
     const roleClass = ROLE_STYLES[table.role] || styles.roleDefault
 
     const descriptionText = table.note?.noteText || ''
+    const displayName = table.tableReference || table.tableName
+    const persistTableName = table.tableReference || table.tableName
 
     return (
         <div className={styles.tableRow}>
@@ -42,7 +44,7 @@ export function SchemaDocsTableRow({
                     size={14}
                     className={`${styles.chevron} ${expanded ? styles.chevronExpanded : ''}`}
                 />
-                <span className={styles.tableName}>{table.tableName}</span>
+                <span className={styles.tableName} title={displayName}>{displayName}</span>
                 <div className={styles.tableMeta}>
                     {table.rowCount != null && (
                         <span className={styles.rowCount}>
@@ -98,7 +100,7 @@ export function SchemaDocsTableRow({
                             source={table.note?.source}
                             noteId={table.note?.id}
                             sourceFiles={table.note?.sourceFiles}
-                            onSave={(text, noteId) => onSaveTableNote(table.tableName, text, noteId)}
+                            onSave={(text, noteId) => onSaveTableNote(persistTableName, text, noteId)}
                             saving={savingNoteId === table.note?.id}
                             placeholder="Click to add table description"
                         />
@@ -107,10 +109,10 @@ export function SchemaDocsTableRow({
                         <div className={styles.columnList}>
                             {table.columns.map(col => (
                                 <SchemaDocsColumnRow
-                                    key={`${table.tableName}.${col.columnName}`}
+                                    key={`${persistTableName}.${col.columnName}`}
                                     column={col}
                                     onSave={(text, noteId) =>
-                                        onSaveColumnNote(table.tableName, col.columnName, text, noteId)
+                                        onSaveColumnNote(persistTableName, col.columnName, text, noteId)
                                     }
                                     saving={savingNoteId === col.note?.id}
                                     onOpenCompanyKnowledge={onOpenCompanyKnowledge}

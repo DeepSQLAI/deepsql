@@ -122,7 +122,7 @@ export function NoteModal({
               list="brain-table-options"
               value={noteForm.tableName}
               onChange={(e) => onUpdateForm({ tableName: e.target.value })}
-              placeholder="Table name"
+              placeholder="schema.table (e.g. crm.orders)"
               readOnly={noteData?.locked}
               required
             />

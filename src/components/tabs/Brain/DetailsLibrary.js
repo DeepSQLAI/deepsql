@@ -176,7 +176,8 @@ export function DetailsLibrary({
   const downloadTemplate = () => {
     const template = [
       "table_name,column_name,details",
-      "orders,,Contains order-level details used in analytics dashboards.",
+      "crm.orders,,Contains order-level details used in analytics dashboards.",
+      "sales.orders,,Order headers for the sales schema (use schema.table when names collide).",
       "orders,order_total,Total order value in USD after discounts.",
     ].join("\n");
     const blob = new Blob([template], { type: "text/csv;charset=utf-8;" });
@@ -444,7 +445,7 @@ export function DetailsLibrary({
         <div className={styles.bulkUploadInfo}>
           <div className={styles.bulkUploadTitle}>Bulk upload details</div>
           <p className={styles.bulkUploadHelp}>
-            Upload a CSV or Excel file with columns: table_name, column_name
+            Upload a CSV or Excel file with columns: table_name, column_name (use schema.table for non-public schemas)
             (optional), details. The first sheet is used for Excel.
           </p>
           <div className={styles.bulkUploadMeta}>

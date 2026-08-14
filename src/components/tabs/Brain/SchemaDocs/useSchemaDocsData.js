@@ -4,12 +4,14 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { schemaAPI, brainAPI, companyKnowledgeAPI } from "@/lib/api/client";
 import { queryKeys } from "@/lib/queryKeys";
+import {
+  canonicalTableReference,
+  isDefaultSchema,
+  stripIdentQuotes,
+} from "@/lib/schemaNames";
 
 function normalizeIdentifier(value) {
-  return (value || "")
-    .trim()
-    .replace(/[`"\[\]]/g, "")
-    .toLowerCase();
+  return stripIdentQuotes(value).toLowerCase();
 }
 
 function identifierTail(value, segments = 1) {
@@ -24,16 +26,6 @@ function referenceAliases(value) {
   const normalized = normalizeIdentifier(value)
   if (!normalized) return new Set()
   return new Set([normalized, identifierTail(normalized, 1), identifierTail(normalized, 2)].filter(Boolean))
-}
-
-function canonicalTableReference(table) {
-  const tableName = (table?.tableName || table?.name || "").trim().replace(/[`"\[\]]/g, "")
-  const schemaName = (table?.schema || table?.schemaName || "").trim().replace(/[`"\[\]]/g, "")
-  if (!tableName) return ""
-  if (!schemaName || schemaName === "public" || schemaName === "dbo") {
-    return tableName
-  }
-  return `${schemaName}.${tableName}`
 }
 
 function tableAliases(table) {
@@ -140,7 +132,10 @@ export function useSchemaDocsData(connectionId) {
       const bareName = rawName.includes(".")
         ? rawName.split(".").pop()
         : rawName;
-      const keys = rawName === bareName ? [rawName] : [rawName, bareName];
+      // Index qualified notes only under their full key so crm.orders and
+      // sales.orders never share a slot. Bare notes stay under the bare key
+      // for default-schema / legacy rows.
+      const keys = rawName.includes(".") ? [rawName] : [bareName];
       if (note.scopeType === "TABLE" || (!note.scopeType && !note.columnName)) {
         for (const k of keys) {
           tableNotes[k] = considerWinner(tableNotes[k], note);
@@ -154,10 +149,16 @@ export function useSchemaDocsData(connectionId) {
       }
     }
 
-    // Build classification lookup (case-insensitive)
+    // Build classification lookup (case-insensitive). Prefer schema.table keys.
     const roleMap = {};
     for (const c of classifications) {
-      roleMap[(c.tableName || "").toLowerCase()] = c.role || c.tableRole;
+      const bare = (c.tableName || "").toLowerCase();
+      const schema = (c.schemaName || c.schema || "").toLowerCase();
+      const qualified =
+        schema && !isDefaultSchema(schema) ? `${schema}.${bare}` : bare;
+      if (qualified) roleMap[qualified] = c.role || c.tableRole;
+      // Bare fallback only when classification itself is unqualified.
+      if (bare && !schema) roleMap[bare] = c.role || c.tableRole;
     }
 
     let totalTablesDocumented = 0;
@@ -168,10 +169,17 @@ export function useSchemaDocsData(connectionId) {
       // Normalize: API uses `name`, plan assumed `tableName`
       const tableName = table.tableName || table.name || "";
       const tableReference = canonicalTableReference(table)
-      const tKey = tableName.toLowerCase();
-      const tableNote = tableNotes[tKey] || null;
-      const colNotes = columnNotes[tKey] || {};
-      const role = roleMap[tKey] || null;
+      const refKey = normalizeIdentifier(tableReference);
+      const bareKey = normalizeIdentifier(tableName);
+      // Prefer exact reference match; only fall back to bare for default-schema tables.
+      const tableNote =
+        tableNotes[refKey] ||
+        (refKey === bareKey ? tableNotes[bareKey] : null);
+      const colNotes =
+        columnNotes[refKey] ||
+        (refKey === bareKey ? columnNotes[bareKey] : {}) ||
+        {};
+      const role = roleMap[refKey] || (refKey === bareKey ? roleMap[bareKey] : null) || null;
       const tableAliasSet = tableAliases(table)
       const linkedKnowledge = knowledgeEntries.filter((entry) => {
         const linkedTables = Array.isArray(entry?.linkedTables) ? entry.linkedTables : []
@@ -220,6 +228,7 @@ export function useSchemaDocsData(connectionId) {
       return {
         tableName,
         tableReference,
+        schemaName: table.schema || table.schemaName || "",
         rowCount: table.rowCount,
         note: tableNote,
         role,
@@ -230,8 +239,10 @@ export function useSchemaDocsData(connectionId) {
       };
     });
 
-    // Sort tables alphabetically
-    tables.sort((a, b) => a.tableName.localeCompare(b.tableName));
+    // Sort by qualified reference so schemas cluster together
+    tables.sort((a, b) =>
+      (a.tableReference || a.tableName).localeCompare(b.tableReference || b.tableName)
+    );
 
     return {
       tables,
