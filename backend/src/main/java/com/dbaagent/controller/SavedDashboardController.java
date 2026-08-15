@@ -113,6 +113,7 @@ public class SavedDashboardController {
     public ResponseEntity<Map<String, Object>> createDashboard(@RequestBody SavedDashboard savedDashboard) {
         try {
             log.info("Creating saved dashboard: {} for connection: {}", savedDashboard.getName(), savedDashboard.getConnectionId());
+            accessControlService.assertCanManageConnectionContent(savedDashboard.getConnectionId());
 
             SavedDashboard created = savedDashboardService.saveDashboard(savedDashboard);
 
@@ -140,6 +141,7 @@ public class SavedDashboardController {
     public ResponseEntity<Map<String, Object>> getDashboardsByConnection(@PathVariable String connectionId) {
         try {
             log.info("Fetching saved dashboards for connection: {}", connectionId);
+            accessControlService.assertCanReadConnectionContent(connectionId);
 
             List<SavedDashboard> dashboards = savedDashboardService.getDashboardsByConnection(connectionId);
 
@@ -170,6 +172,7 @@ public class SavedDashboardController {
 
             return savedDashboardService.getDashboardById(id)
                     .map(dashboard -> {
+                        accessControlService.assertCanReadConnectionContent(dashboard.getConnectionId());
                         Map<String, Object> response = new HashMap<>();
                         response.put("success", true);
                         response.put("savedDashboard", dashboard);
@@ -199,6 +202,11 @@ public class SavedDashboardController {
     public ResponseEntity<Map<String, Object>> updateDashboard(@PathVariable UUID id, @RequestBody SavedDashboard updates) {
         try {
             log.info("Updating saved dashboard: {}", id);
+            SavedDashboard existing = savedDashboardService.getDashboardById(id)
+                    .orElseThrow(() -> new IllegalArgumentException("Dashboard not found: " + id));
+            // Authorize against the persisted connection — never trust a body
+            // connectionId that could re-attach the row to a different connection.
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
 
             SavedDashboard updated = savedDashboardService.updateDashboard(id, updates);
 
@@ -234,6 +242,9 @@ public class SavedDashboardController {
     public ResponseEntity<Map<String, Object>> deleteDashboard(@PathVariable UUID id) {
         try {
             log.info("Deleting saved dashboard: {}", id);
+            SavedDashboard existing = savedDashboardService.getDashboardById(id)
+                    .orElseThrow(() -> new IllegalArgumentException("Dashboard not found: " + id));
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
 
             savedDashboardService.deleteDashboard(id);
 
@@ -242,6 +253,12 @@ public class SavedDashboardController {
             response.put("message", "Dashboard deleted successfully");
 
             return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException e) {
+            log.error("Dashboard not found: {}", id);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(errorResponse);
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
@@ -260,6 +277,9 @@ public class SavedDashboardController {
     public ResponseEntity<Map<String, Object>> toggleFavorite(@PathVariable UUID id) {
         try {
             log.info("Toggling favorite for dashboard: {}", id);
+            SavedDashboard existing = savedDashboardService.getDashboardById(id)
+                    .orElseThrow(() -> new IllegalArgumentException("Dashboard not found: " + id));
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
 
             SavedDashboard updated = savedDashboardService.toggleFavorite(id);
 
@@ -295,6 +315,7 @@ public class SavedDashboardController {
     public ResponseEntity<Map<String, Object>> getFavoriteDashboards(@PathVariable String connectionId) {
         try {
             log.info("Fetching favorite dashboards for connection: {}", connectionId);
+            accessControlService.assertCanReadConnectionContent(connectionId);
 
             List<SavedDashboard> dashboards = savedDashboardService.getFavoriteDashboards(connectionId);
 
@@ -324,6 +345,7 @@ public class SavedDashboardController {
             @PathVariable String folder) {
         try {
             log.info("Fetching dashboards in folder: {} for connection: {}", folder, connectionId);
+            accessControlService.assertCanReadConnectionContent(connectionId);
 
             List<SavedDashboard> dashboards = savedDashboardService.getDashboardsByFolder(connectionId, folder);
 
@@ -353,6 +375,7 @@ public class SavedDashboardController {
             @RequestParam String q) {
         try {
             log.info("Searching dashboards for connection: {} with term: {}", connectionId, q);
+            accessControlService.assertCanReadConnectionContent(connectionId);
 
             List<SavedDashboard> dashboards = savedDashboardService.searchDashboards(connectionId, q);
 
@@ -380,6 +403,7 @@ public class SavedDashboardController {
     public ResponseEntity<Map<String, Object>> getFolders(@PathVariable String connectionId) {
         try {
             log.info("Fetching folders for connection: {}", connectionId);
+            accessControlService.assertCanReadConnectionContent(connectionId);
 
             List<String> folders = savedDashboardService.getFolders(connectionId);
 
