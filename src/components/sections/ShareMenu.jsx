@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Share2, Copy, Check, Loader2, Globe, Users, Lock } from 'lucide-react'
+import { Share2, Copy, Check, Loader2, Globe, Users, Lock, Tv } from 'lucide-react'
 import { savedDashboardsAPI } from '@/lib/api/client'
 import styles from './ShareMenu.module.css'
 
@@ -32,6 +32,7 @@ export default function ShareMenu({ savedId, initialPublic, initialToken, initia
   const origin = window.location.origin
   const internalUrl = `${origin}/dashboard-view/${savedId}`
   const publicUrl = token ? `${origin}/share/dashboard/${token}` : ''
+  const kioskUrl = token ? `${origin}/share/dashboard/${token}?kiosk=1&refresh=60` : ''
 
   const copy = async (url, key) => {
     try { await navigator.clipboard.writeText(url); setCopied(key); setTimeout(() => setCopied(''), 1500) } catch { /* clipboard blocked */ }
@@ -139,6 +140,19 @@ export default function ShareMenu({ savedId, initialPublic, initialToken, initia
                     </>
                   ) : null}
                 </div>
+
+                {!hasPassword && (
+                  <div className={styles.kioskRow}>
+                    <div className={styles.rowHead}><Tv size={13} /> TV / kiosk link</div>
+                    <div className={styles.hint}>Chrome-less, auto-refreshing every 60s — for a wall display.</div>
+                    <div className={styles.linkRow}>
+                      <input readOnly value={kioskUrl} className={styles.input} onFocus={(e) => e.target.select()} />
+                      <button className={styles.copy} onClick={() => copy(kioskUrl, 'kiosk')} title="Copy link">
+                        {copied === 'kiosk' ? <Check size={14} /> : <Copy size={14} />}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </>
             ) : (
               <div className={styles.hint}>Publish to the web to get a link anyone can open without logging in.</div>

@@ -132,6 +132,43 @@ public class WebhookService {
     }
 
     /**
+     * Send a fired dashboard alert to a webhook (including Slack incoming-webhook URLs).
+     */
+    public void sendDashboardAlert(String webhookUrl, String dashboardName, String condition, String reason) {
+        Map<String, Object> payload = buildDashboardAlertPayload(dashboardName, condition, reason);
+
+        try {
+            webClient.post()
+                    .uri(webhookUrl)
+                    .bodyValue(payload)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .timeout(Duration.ofSeconds(10))
+                    .doOnSuccess(response -> log.info("Webhook dashboard alert sent successfully for: {}", dashboardName))
+                    .doOnError(error -> log.error("Webhook dashboard alert failed for: {}", dashboardName, error))
+                    .subscribe(); // Fire and forget
+        } catch (Exception e) {
+            log.error("Failed to send webhook dashboard alert for: {}", dashboardName, e);
+            throw new RuntimeException("Webhook dashboard alert failed", e);
+        }
+    }
+
+    private Map<String, Object> buildDashboardAlertPayload(String dashboardName, String condition, String reason) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("event_type", "dashboard_alert");
+        payload.put("dashboard_name", dashboardName);
+        payload.put("condition", condition);
+        payload.put("reason", reason);
+        payload.put("text", String.format("🔔 Dashboard alert: %s\nCondition: %s\n%s", dashboardName, condition, reason));
+        payload.put("blocks", java.util.List.of(
+            Map.of("type", "header", "text", Map.of("type", "plain_text", "text", "🔔 " + dashboardName, "emoji", true)),
+            Map.of("type", "section", "text", Map.of("type", "mrkdwn",
+                "text", "*Condition:* " + condition + "\n*Why it fired:* " + reason))
+        ));
+        return payload;
+    }
+
+    /**
      * Send slow query alert to webhook (including Slack)
      */
     public void sendSlowQueryAlert(PlaybookAlert alert, String webhookUrl) {

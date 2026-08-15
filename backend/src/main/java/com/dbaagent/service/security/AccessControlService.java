@@ -69,7 +69,11 @@ public class AccessControlService {
 
     public ConnectionAccessService.ResolvedConnectionAccess resolveCurrentUserAccess(String connectionId) {
         if (!authEnabled) {
-            return connectionAccessService.resolveAccess(connectionId, null, true);
+            try {
+                return connectionAccessService.resolveAccess(connectionId, null, true);
+            } catch (RuntimeException e) {
+                throw new ResponseStatusException(NOT_FOUND, "Connection not found");
+            }
         }
         Authentication authentication = currentAuthentication();
         if (authentication == null || !authentication.isAuthenticated()) {

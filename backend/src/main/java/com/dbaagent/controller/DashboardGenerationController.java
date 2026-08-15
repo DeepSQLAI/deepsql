@@ -140,6 +140,17 @@ public class DashboardGenerationController {
                         } catch (IOException io) {
                             throw new ClientGoneException(io);
                         }
+                    },
+                    (kind, id, html) -> {
+                        try {
+                            Map<String, Object> data = new java.util.HashMap<>();
+                            data.put("kind", kind);
+                            data.put("id", id);
+                            data.put("html", html);
+                            emitter.send(SseEmitter.event().name("chunk").data(data));
+                        } catch (IOException io) {
+                            throw new ClientGoneException(io);
+                        }
                     });
                 // Chat-only replies (greetings / tool questions) must not share the
                 // `done` event with a real artifact — the FE's done handler always

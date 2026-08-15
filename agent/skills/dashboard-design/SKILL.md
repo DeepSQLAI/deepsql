@@ -1,7 +1,7 @@
 ---
 name: dashboard-design
-description: Design and code a self-contained HTML dashboard for DeepSQL — ground on the schema, verify SQL, then write a beautiful single-file dashboard that loads data via the deepsql.query bridge.
-version: 2.1.0
+description: Design and code a self-contained HTML dashboard for DeepSQL — ground on the schema, verify SQL, then emit it as a shell plus one verified widget block at a time so the canvas builds progressively.
+version: 3.0.0
 platforms: [linux, macos, windows]
 metadata:
   hermes:
@@ -15,7 +15,12 @@ Use when asked to build or edit a dashboard (the task says "build a self-contain
 
 ## The runtime you build against
 
-Your output is ONE self-contained HTML document. It runs inside a sandboxed iframe with a bridge already injected:
+Your output is a **shell block, then one widget block per KPI/chart** — not a single HTML
+document. The parent assembles them (each widget's markup+script drops into its own
+`[data-widget=id]` slot in the shell) and renders each widget into the live canvas the moment
+its block closes, well before your whole turn finishes — so the user watches the dashboard
+build piece by piece instead of staring at a blank screen for the whole generation. Both kinds
+of block run inside the SAME sandboxed iframe with a bridge already injected:
 
 ```js
 deepsql.connectionId                      // this connection's id (string)
@@ -44,28 +49,34 @@ plain-business-language heading) so the expanded overlay has something to show a
 not add your own zoom/expand/fullscreen button, modal, or lightbox; one already exists per chart.
 
 Hard rules:
-- Inline everything — one `<style>`, one or more `<script>`. **No external URLs, CDNs, fonts, or images** (blocked by CSP) and **no `fetch()`/XHR/WebSocket** — data comes only from `deepsql.query`.
+- Inline everything — one `<style>` in the shell, one `<script>` per widget block. **No external URLs, CDNs, fonts, or images** (blocked by CSP) and **no `fetch()`/XHR/WebSocket** — data comes only from `deepsql.query`.
 - Never hardcode result data. Query live on load, and re-query when a control changes.
 - There is **no placeholder convention**. You write normal SQL strings in JS and pass the finished string to `deepsql.query`. Build date filters yourself (see below).
+- A widget's `<script>` touches ONLY elements inside its own block (namespace ids with the widget id, e.g. `revenue-total-val`) — never reach into another widget's slot or assume load order between widgets.
 
 ## Procedure
 
 1. **Ground.** `get_brain_context`, `get_schema`, `list_business_rules`, `get_relationships`. Obey business rules about which table/column/filter/currency a concept uses — quote them; don't guess a similar-looking table.
-2. **Design.** Decide the KPIs, charts, tables, and controls (date range, dropdowns) the request calls for. Sketch the SQL for each — **schema-qualified** (`crm.orders`, not bare `orders` when the DB has multiple schemas), table-qualified columns, read-only.
+2. **Design.** Decide the KPIs, charts, tables, and controls (date range, dropdowns) the request calls for. Give each one a short, stable, kebab-case widget id (e.g. `revenue-trend`) — you'll use the same id in the shell's slot and that widget's own block. Sketch the SQL for each — **schema-qualified** (`crm.orders`, not bare `orders` when the DB has multiple schemas), table-qualified columns, read-only.
 3. **Handle dates correctly.** Check the column's type in the schema. If it's a real DATE/DATETIME, filter with `BETWEEN '2026-07-01' AND '2026-07-08'`. **If it's a Unix-epoch integer** (seconds), filter on the epoch: `col >= UNIX_TIMESTAMP('2026-07-01 00:00:00') AND col < UNIX_TIMESTAMP('2026-07-09 00:00:00')`. Build these strings in JS from the picker's values.
-4. **Verify.** Run every query with `execute_sql` and READ the rows: date windows bounded and inside range (never the future), KPI value types right (name = text, money = currency), totals plausible vs a `COUNT(*)`. Fix and re-run until correct.
-5. **Intent checklist.** Before emitting, list every explicit ask (each chart, each metric, each control like "a date range picker defaulting to today") and confirm the HTML satisfies ALL of them. An unmet ask is a failed dashboard even if the data is perfect.
-6. **Code the document** (see skeleton), using `deepsql.charts.*` for every chart.
-7. **Self-review before emitting** — reread your finished HTML as if you were the user opening it, and fix anything that fails this checklist:
+4. **Verify each widget's query BEFORE emitting that widget's block.** Run it with `execute_sql` and READ the rows: date windows bounded and inside range (never the future), KPI value types right (name = text, money = currency), totals plausible vs a `COUNT(*)`. Fix and re-run until correct — only then emit that widget.
+5. **Intent checklist.** Before emitting the shell, list every explicit ask (each chart, each metric, each control like "a date range picker defaulting to today") and confirm your planned widgets cover ALL of them.
+6. **Emit progressively** (see "The runtime you build against" for the exact block shapes):
+   - One `dashboard-shell` block first — page chrome plus an empty, named `[data-widget=id]` slot per widget. No query logic here.
+   - Then one `dashboard-widget id="..."` block per widget, each only after step 4 has verified it — its own markup AND the `<script>` that queries and renders into its own slot. Use `deepsql.charts.*` for every chart.
+7. **Self-review before your final message ends** — reread everything you emitted as if you were the user opening it, and fix anything that fails this checklist:
    - Every widget has a real data source and a query you actually verified; no placeholder/lorem values.
    - Every chart uses `deepsql.charts.*` (so it has hover tooltips) and passes the correct label/value columns — no chart left blank because the data shape didn't match.
    - No `undefined` / `null` / `NaN` can reach the screen — every injected value is guarded with a fallback. Pay special attention to KPI sub-labels and any computed % (e.g. a "top source share" caption).
    - Every explicit user ask from the intent checklist is present and wired (controls default correctly and re-query on change).
+   - Every widget id referenced in the shell has a matching `dashboard-widget` block, and vice versa.
    - No table/column/SQL/connection-id text is visible anywhere.
    - No AI-slop pattern from the section below is present (gradient background/hero, emoji-as-icon,
      decorative blobs/glassmorphism, uniform shadows, off-scale spacing/type, more than one accented
      "hero" card, hand-rolled chart colors or expand/zoom controls).
-   A dashboard that renders with a blank chart or an "undefined" label is a failed build — catch it here.
+   If self-review finds a problem in a widget you already emitted, emit a CORRECTED `dashboard-widget`
+   block with the SAME id — it replaces what was shown before. A dashboard that renders with a blank
+   chart or an "undefined" label is a failed build — catch it here, don't leave it for the user to find.
 
 ## NEVER expose internals (security + UX — non-negotiable)
 
@@ -134,17 +145,33 @@ patterns above are present, that's your answer.
 
 ## Interaction
 
-- Wire controls to re-run only the affected queries and re-render — never reload the page. A date range picker defaults to what the user asked for (e.g. today) and drives every time-sensitive query.
-- **Load each widget independently and in parallel** — one `deepsql.query` per widget, each with its own `try/catch`. A slow or failing widget must NEVER block or fail the others.
+- Wire controls to re-run only the affected queries and re-render — never reload the page. A date range picker defaults to what the user asked for (e.g. today) and drives every time-sensitive query. A control that affects multiple widgets lives in the shell as a shared value (e.g. `window.__dateRange`); each widget's own script reads it and re-queries when it changes (e.g. listen for a `CustomEvent` the control dispatches on the shell's `document`) — a widget never assumes another widget's DOM exists.
+- **Every widget loads independently** — its own `deepsql.query` call, its own `try/catch`. A slow or failing widget must NEVER block or fail the others; this is automatic once each widget is its own self-contained block.
 - On a failed or timed-out query (`deepsql.query` rejects — the error text is e.g. "Timed out"), show a **quiet inline placeholder in that widget only** ("Timed out" / "Couldn't load this metric"), keep the rest of the dashboard working, and don't retry in a loop.
 
 ## Skeleton to adapt (design freely; uses the injected theme)
 
-```html
+Shell — chrome and empty slots, no query logic:
+
+```dashboard-shell
 <!doctype html><html><head><meta charset="utf-8"><style>
   body{padding:28px}
-  .head h1{font-size:26px;font-weight:700;margin:0 0 6px}
-  .head p{color:var(--ds-ink-2);margin:0}
+  .headerbar{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;flex-wrap:wrap;
+    background:var(--ds-surface);border:1px solid var(--ds-line);border-radius:var(--ds-radius);
+    padding:20px 24px;box-shadow:var(--ds-shadow);margin-bottom:22px}
+  .eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ds-ink-2);margin:0 0 6px}
+  .headerbar h1{font-size:26px;font-weight:700;margin:0 0 6px}
+  .headerbar p{color:var(--ds-ink-2);margin:0;max-width:520px;font-size:13px;line-height:1.5}
+  .controls{display:flex;align-items:flex-end;gap:20px;flex-wrap:wrap}
+  .control-group label{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--ds-ink-2);margin-bottom:6px}
+  .quick-range{display:flex;gap:6px}
+  .quick-range button{border:1px solid var(--ds-line);background:var(--ds-bg);color:var(--ds-ink);
+    border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer}
+  .quick-range button.active{background:var(--ds-ink);color:var(--ds-bg);border-color:var(--ds-ink)}
+  .control-group input[type=date]{border:1px solid var(--ds-line);border-radius:8px;padding:7px 10px;font-size:13px}
+  .apply-btn{border:1px solid var(--ds-line);background:var(--ds-bg);color:var(--ds-ink);
+    border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;align-self:flex-end}
   .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin:22px 0}
   .card{background:var(--ds-surface);border:1px solid var(--ds-line);border-radius:var(--ds-radius);padding:20px;box-shadow:var(--ds-shadow)}
   .card.hero{background:var(--ds-grad)}                 /* highlight the key KPI only */
@@ -152,20 +179,110 @@ patterns above are present, that's your answer.
   .kpi-lab{color:var(--ds-ink-2);font-size:13px;margin-top:4px}
   .err{color:#b91c1c;font-size:13px}
 </style></head><body>
-  <div class="head"><h1>Booking Momentum</h1><p>Daily new properties and booking volume for the selected dates.</p></div>
-  <div class="controls"><!-- date range, defaulting to today --></div>
-  <div class="kpis" id="kpis"></div>
-  <div id="charts"></div>
+  <div class="headerbar">
+    <div>
+      <p class="eyebrow">Daily performance</p>
+      <h1>Booking Momentum</h1>
+      <p>Daily new properties and booking volume across the selected period.</p>
+    </div>
+    <div class="controls">
+      <div class="control-group">
+        <label>Quick range</label>
+        <div class="quick-range" id="quick-range">
+          <button type="button" data-days="7">Last 7 days</button>
+          <button type="button" data-days="30" class="active">Last 30 days</button>
+          <button type="button" data-days="90">Last 90 days</button>
+        </div>
+      </div>
+      <div class="control-group"><label>Start date</label><input type="date" id="date-from"></div>
+      <div class="control-group"><label>End date</label><input type="date" id="date-to"></div>
+      <button type="button" class="apply-btn" id="apply-range">Apply range</button>
+    </div>
+  </div>
+  <div class="kpis">
+    <div class="card hero" data-widget="new-properties"></div>
+    <div class="card" data-widget="bookings-total"></div>
+  </div>
+  <div data-widget="bookings-trend"></div>
   <script>
-    async function loadKpi(el, sql, fmt){ try{ const {rows}=await deepsql.query(sql);
-      const v = rows?.[0]?.[0]; el.querySelector('.kpi-val').textContent = (v==null?'—':fmt(v)); }
-      catch(e){ el.innerHTML='<div class="err">Couldn\\'t load this metric.</div>'; } }
-    async function loadChart(el, sql){ try{ const res=await deepsql.query(sql);
-      deepsql.charts.bar(el, res); }                 // hover tooltips + formatting built in
-      catch(e){ el.innerHTML='<div class="err">'+(e.message==='Timed out'?'Timed out.':'Couldn\\'t load.')+'</div>'; } }
-    deepsql.ready(async () => { /* set date range to today, then load every widget independently */ });
+    // Shared control: lives in the shell (not any one widget). Quick-range buttons
+    // set both date inputs and apply immediately; typing dates directly only
+    // applies on the explicit button, so a widget never re-queries mid-keystroke.
+    // Every date-sensitive widget listens for 'dsql:daterange' to re-query.
+    (function(){
+      const fromEl = document.getElementById('date-from');
+      const toEl = document.getElementById('date-to');
+      const quickRange = document.getElementById('quick-range');
+      const fmt = (d) => d.toISOString().slice(0,10);
+      function setRange(days){
+        const to = new Date();
+        const from = new Date();
+        from.setDate(from.getDate() - (days - 1));
+        fromEl.value = fmt(from);
+        toEl.value = fmt(to);
+      }
+      function apply(){
+        window.__dateRange = { from: fromEl.value, to: toEl.value };
+        document.dispatchEvent(new CustomEvent('dsql:daterange', { detail: window.__dateRange }));
+      }
+      quickRange.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-days]');
+        if (!btn) return;
+        quickRange.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        setRange(Number(btn.dataset.days));
+        apply();
+      });
+      document.getElementById('apply-range').addEventListener('click', () => {
+        quickRange.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        apply();
+      });
+      setRange(30);
+      window.__dateRange = { from: fromEl.value, to: toEl.value };
+    })();
   </script>
 </body></html>
+```
+
+One block per widget — its own markup AND the script that queries and fills it in. A widget whose data is date-sensitive reads `window.__dateRange` on load and re-queries on the shell's `dsql:daterange` event; a widget that isn't date-sensitive (e.g. a lifetime total) simply ignores the control:
+
+```dashboard-widget id="new-properties"
+<p class="kpi-lab">New properties</p>
+<p class="kpi-val" id="new-properties-val">—</p>
+<script>
+  async function load(){
+    try {
+      const { from, to } = window.__dateRange;
+      const { rows } = await deepsql.query(
+        `SELECT COUNT(*) FROM public.properties p WHERE p.created_at BETWEEN '${from}' AND '${to}'`);
+      document.getElementById('new-properties-val').textContent = deepsql.charts.format(rows?.[0]?.[0] ?? 0);
+    } catch (e) {
+      document.getElementById('new-properties-val').textContent = '—';
+    }
+  }
+  deepsql.ready(load);
+  document.addEventListener('dsql:daterange', load);
+</script>
+```
+
+```dashboard-widget id="bookings-trend"
+<p class="kpi-lab">Bookings over time</p>
+<div id="bookings-trend-chart"></div>
+<script>
+  async function load(){
+    try {
+      const { from, to } = window.__dateRange;
+      const res = await deepsql.query(
+        `SELECT ... FROM public.bookings b WHERE b.created_at BETWEEN '${from}' AND '${to}' ORDER BY 1`);
+      deepsql.charts.line(document.getElementById('bookings-trend-chart'), res, { title: 'Bookings over time' });
+    } catch (e) {
+      document.getElementById('bookings-trend-chart').innerHTML =
+        '<div class="err">' + (e.message === 'Timed out' ? 'Timed out.' : "Couldn't load.") + '</div>';
+    }
+  }
+  deepsql.ready(load);
+  document.addEventListener('dsql:daterange', load);
+</script>
 ```
 
 ## Guardrails
@@ -173,4 +290,4 @@ patterns above are present, that's your answer.
 - Read-only SELECT/WITH only (the bridge rejects anything else anyway).
 - Self-contained: no external network, no imported fonts, no inline data dumps — query live.
 - No internals visible to the user (see the security section above) — user-facing error text stays generic ("Couldn't load this metric.").
-- Return the FULL document every time (including on edits), inside ONE ```html block, with no prose after it.
+- Emit the shell ONCE, then one `dashboard-widget` block per widget (or a corrected re-emit of one, same id, if self-review catches a problem) — never wrap everything back into a single ```html block. On an EDIT, re-emit the full shell (even for widgets you aren't changing, their slots must still exist) and every widget's block, including unchanged ones — the assembled document is built fresh from what you emit this turn, not merged with the prior one.
