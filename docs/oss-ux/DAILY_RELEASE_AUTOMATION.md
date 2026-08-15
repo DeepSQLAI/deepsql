@@ -1,4 +1,6 @@
-# Daily release-manager automation (9 AM)
+# Daily release-manager automation (9 AM) — optional PR triage
+
+Product **releases** are weekly (Saturday 09:00 PT) — see [`WEEKLY_RELEASE_AUTOMATION.md`](./WEEKLY_RELEASE_AUTOMATION.md) and [`RELEASE.md`](./RELEASE.md). This daily automation is optional **PR triage only**; it does not cut tags.
 
 Cursor Automations cannot be created via MCP/API from a Cloud Agent — create this once in the UI.
 

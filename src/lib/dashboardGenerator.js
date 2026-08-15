@@ -7,17 +7,20 @@ import { dashboardGenAPI } from '@/lib/api/client'
 // HTML document — streaming its steps to the UI. The artifact renders in a
 // sandboxed iframe and fetches data via the read-only deepsql.query bridge.
 
-// Streaming generate. Handlers: onCreated({dashboardId}) fired immediately —
+// Streaming generate. Handlers: onChunk({kind,id,html}) for a progressively-built
+// dashboard-shell/dashboard-widget piece, well before the turn finishes.
+// onCreated({dashboardId}) fired immediately —
 // the backend has already resolved/created the dashboard and durably recorded
 // the user's message server-side, before any of the slow agent work runs —
 // onStep({type,message}), onDone(config), onError(Error), onChat(replyText)
 // for a plain conversational reply (no dashboard change — e.g. "hi"). Returns
 // an abort fn. The final config is the artifact spec
 // ({version:3, renderMode:'artifact', title, html}).
-export function generateDashboardStream(connectionId, prompt, currentConfig, dashboardId, { onCreated, onStep, onDone, onError, onChat } = {}) {
+export function generateDashboardStream(connectionId, prompt, currentConfig, dashboardId, { onCreated, onStep, onChunk, onDone, onError, onChat } = {}) {
   return dashboardGenAPI.generateStream(connectionId, prompt, currentConfig, dashboardId, {
     onCreated,
     onStep,
+    onChunk,
     onDone: (data) => {
       // Chat-only can arrive as event:chat (reply at top level) or legacy done
       // with dashboardConfig.chat=true. Treat either as a plain reply — never as

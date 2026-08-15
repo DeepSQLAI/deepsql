@@ -1,6 +1,8 @@
 package com.dbaagent.service;
 
+import com.dbaagent.model.DashboardVersion;
 import com.dbaagent.model.SavedDashboard;
+import com.dbaagent.repository.DashboardVersionRepository;
 import com.dbaagent.repository.SavedDashboardRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,8 +32,15 @@ public class SavedDashboardService {
     // a legitimate retry forever — only respected while still fresh.
     private static final Duration STALE_RUNNING_THRESHOLD = Duration.ofMinutes(20);
 
+    // Bound history growth — a dashboard iterated on for months shouldn't carry an
+    // unbounded snapshot table. Oldest beyond this count are pruned on each write.
+    private static final int MAX_VERSIONS_PER_DASHBOARD = 50;
+
     @Autowired
     private SavedDashboardRepository savedDashboardRepository;
+
+    @Autowired
+    private DashboardVersionRepository dashboardVersionRepository;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -121,7 +130,10 @@ public class SavedDashboardService {
         if (updates.getDescription() != null) {
             existing.setDescription(updates.getDescription());
         }
-        if (updates.getDashboardConfig() != null) {
+        if (updates.getDashboardConfig() != null && !updates.getDashboardConfig().equals(existing.getDashboardConfig())) {
+            if (hasRealBuild(existing)) {
+                snapshotVersion(existing, "MANUAL_EDIT");
+            }
             existing.setDashboardConfig(updates.getDashboardConfig());
         }
         if (updates.getChatMessages() != null) {
@@ -135,8 +147,10 @@ public class SavedDashboardService {
         if (updates.getIsFavorite() != null) {
             existing.setIsFavorite(updates.getIsFavorite());
         }
+        // Blank clears the folder (moves back to "no folder") — distinguished from
+        // null, which means the update omitted this field entirely.
         if (updates.getFolder() != null) {
-            existing.setFolder(updates.getFolder());
+            existing.setFolder(updates.getFolder().isBlank() ? null : updates.getFolder());
         }
 
         return savedDashboardRepository.save(existing);
@@ -224,6 +238,86 @@ public class SavedDashboardService {
         savedDashboardRepository.deleteById(id);
     }
 
+    /** Duplicate a dashboard (fresh id, not shared, not a favorite) as a starting point to iterate on. */
+    @Transactional
+    public SavedDashboard cloneDashboard(UUID id) {
+        SavedDashboard source = requireDashboard(id);
+        SavedDashboard copy = new SavedDashboard();
+        copy.setConnectionId(source.getConnectionId());
+        copy.setUserId(source.getUserId());
+        copy.setName(source.getName() == null ? "Untitled copy" : source.getName() + " (copy)");
+        copy.setDescription(source.getDescription());
+        copy.setDashboardConfig(source.getDashboardConfig());
+        copy.setChatMessages(source.getChatMessages());
+        copy.setTags(source.getTags());
+        copy.setFolder(source.getFolder());
+        copy.setIsFavorite(false);
+        copy.setIsPublic(false);
+        return savedDashboardRepository.save(copy);
+    }
+
+    /** True once a dashboard has an actual rendered artifact, not just the initial placeholder. */
+    private boolean hasRealBuild(SavedDashboard dashboard) {
+        String cfg = dashboard.getDashboardConfig();
+        return cfg != null && !cfg.isBlank() && !cfg.equals("{}") && cfg.contains("\"html\"");
+    }
+
+    private void snapshotVersion(SavedDashboard dashboard, String trigger) {
+        DashboardVersion version = new DashboardVersion();
+        version.setDashboardId(dashboard.getId());
+        version.setDashboardConfig(dashboard.getDashboardConfig());
+        version.setName(dashboard.getName());
+        version.setTrigger(trigger);
+        dashboardVersionRepository.save(version);
+        pruneOldVersions(dashboard.getId());
+    }
+
+    private void pruneOldVersions(UUID dashboardId) {
+        List<DashboardVersion> versions = dashboardVersionRepository.findByDashboardIdOrderByCreatedAtDesc(dashboardId);
+        if (versions.size() > MAX_VERSIONS_PER_DASHBOARD) {
+            dashboardVersionRepository.deleteAll(versions.subList(MAX_VERSIONS_PER_DASHBOARD, versions.size()));
+        }
+    }
+
+    /** History for a dashboard, most recent first. */
+    public List<DashboardVersion> getVersionHistory(UUID dashboardId) {
+        return dashboardVersionRepository.findByDashboardIdOrderByCreatedAtDesc(dashboardId);
+    }
+
+    /**
+     * Restore a prior snapshot as the current config — snapshots what's live now first, so
+     * restoring is itself undoable.
+     *
+     * <p>The restored version's own row (and any other row with byte-identical content —
+     * an earlier restore of the same snapshot) is then deleted: that content is now the
+     * live config, not history, so leaving it in the list would show it twice — once as
+     * "Current" and again as a stale history entry a user could re-restore into a no-op.
+     * A flip-flop restore-edit-restore-edit session otherwise piles up an alternating
+     * chain of identical snapshots, one pair per cycle.
+     */
+    @Transactional
+    public SavedDashboard restoreVersion(UUID dashboardId, UUID versionId) {
+        SavedDashboard dashboard = requireDashboard(dashboardId);
+        DashboardVersion version = dashboardVersionRepository.findById(versionId)
+            .orElseThrow(() -> new IllegalArgumentException("Version not found with id: " + versionId));
+        if (!version.getDashboardId().equals(dashboardId)) {
+            throw new IllegalArgumentException("Version does not belong to dashboard: " + dashboardId);
+        }
+        if (hasRealBuild(dashboard)) {
+            snapshotVersion(dashboard, "RESTORE");
+        }
+        String restoredConfig = version.getDashboardConfig();
+        dashboard.setDashboardConfig(restoredConfig);
+        SavedDashboard saved = savedDashboardRepository.save(dashboard);
+        List<DashboardVersion> duplicates = dashboardVersionRepository.findByDashboardIdOrderByCreatedAtDesc(dashboardId).stream()
+            .filter(v -> v.getDashboardConfig().equals(restoredConfig))
+            .toList();
+        if (!duplicates.isEmpty()) {
+            dashboardVersionRepository.deleteAll(duplicates);
+        }
+        return saved;
+    }
+
     /**
      * Delete all dashboards for a connection
      */
@@ -302,6 +396,9 @@ public class SavedDashboardService {
     @Transactional
     public SavedDashboard completeBuildTurn(UUID dashboardId, Map<String, Object> config) {
         SavedDashboard dashboard = requireDashboard(dashboardId);
+        if (hasRealBuild(dashboard)) {
+            snapshotVersion(dashboard, "AGENT_BUILD");
+        }
         try {
             dashboard.setDashboardConfig(objectMapper.writeValueAsString(config));
         } catch (Exception e) {

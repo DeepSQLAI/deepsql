@@ -25,18 +25,27 @@ import java.util.regex.Pattern;
  * Dashboard generator — the embedded DeepSQL Agent as a coding agent
  * (customized Hermes runtime; see agent/README.md).
  *
- * <p>The agent doesn't fill in a rigid spec anymore. It <b>writes the whole
- * dashboard as a single self-contained HTML document</b> — any layout, filters,
- * date pickers, chart types, styling it wants, coded directly — after grounding
- * on the brain/schema and verifying every query with {@code execute_sql}. The
- * artifact fetches data at runtime through the injected {@code deepsql.query(sql)}
- * bridge (see DashboardQueryController), so it never holds DB creds and every
- * query stays read-only + access-scoped.
+ * <p>The agent doesn't fill in a rigid spec. It designs a dashboard freely —
+ * any layout, filters, date pickers, chart types, styling it wants — after
+ * grounding on the brain/schema and verifying every widget's query with
+ * {@code execute_sql}. The artifact fetches data at runtime through the
+ * injected {@code deepsql.query(sql)} bridge (see DashboardQueryController), so
+ * it never holds DB creds and every query stays read-only + access-scoped.
+ *
+ * <p>The agent emits progressively: one {@code dashboard-shell} fenced block
+ * (page chrome + named, empty widget slots), then one {@code dashboard-widget}
+ * block per KPI/chart, each only after ITS OWN query is verified. A
+ * {@link ChunkListener} fires per block as it closes — well before the whole
+ * turn ends — so DashboardGenerationController can stream each piece to the
+ * UI as it's ready instead of the canvas staying blank for the whole build.
+ * {@link #assembleFromChunks} substitutes each widget into its shell slot to
+ * produce the final document once the turn completes; {@link #extractHtml}
+ * falls back to the older single-block contract if no shell/widget fences are
+ * present at all, so a reply that predates this contract still works.
  *
  * <p>The old JSON-spec contract (metrics/charts/tables + a {{placeholder}}
  * substitution engine + a fixed renderer) is gone: it couldn't express real SQL
- * (e.g. a Unix-epoch date filter) and boxed the agent in. This broker just runs
- * one agent turn with the artifact contract, extracts the HTML, and returns it.
+ * (e.g. a Unix-epoch date filter) and boxed the agent in.
  */
 @Service
 public class DashboardAgentService {
@@ -46,6 +55,17 @@ public class DashboardAgentService {
     public interface StepListener {
         StepListener NOOP = (type, message) -> { };
         void step(String type, String message);
+    }
+
+    /**
+     * Progressive-render sink: fired the instant the agent finishes a
+     * dashboard-shell or dashboard-widget block (before the whole turn ends),
+     * so the canvas can fill in piece by piece. NOOP for callers that only want
+     * the final assembled artifact (the blocking /generate endpoint).
+     */
+    public interface ChunkListener {
+        ChunkListener NOOP = (kind, id, html) -> { };
+        void chunk(String kind, String id, String html);
     }
 
     /** Artifact spec version stored in saved_dashboards.dashboardConfig. */
@@ -71,8 +91,14 @@ public class DashboardAgentService {
     }
 
     public Map<String, Object> generate(String connectionId, String prompt, Object currentConfig, StepListener listener) {
+        return generate(connectionId, prompt, currentConfig, listener, null);
+    }
+
+    public Map<String, Object> generate(String connectionId, String prompt, Object currentConfig,
+                                         StepListener listener, ChunkListener chunkListener) {
         List<Map<String, Object>> trace = new ArrayList<>();
         StepListener l = listener == null ? StepListener.NOOP : listener;
+        ChunkListener c = chunkListener == null ? ChunkListener.NOOP : chunkListener;
 
         String username = accessControlService.requireCurrentUsername();
         String profile = agentBridgeService.ensureProfileForUser(username, connectionId);
@@ -107,8 +133,14 @@ public class DashboardAgentService {
 
         emit(l, trace, "grounding", "Handing off to the DeepSQL agent…");
         emit(l, trace, "planning", "Agent is grounding, writing SQL, and coding the dashboard…");
+        // Without this, the UI showed nothing but the "planning" line above for the
+        // whole 3-4 minute build. Each tool call (schema lookup, a verified SQL
+        // query, a skill invocation) now becomes its own step, so the trace keeps
+        // moving instead of looking stuck.
         AgentChatClient.AgentReply reply = agentChatClient.sendAndAwait(
-            sessionId, buildTask(connectionId, prompt, currentConfig));
+            sessionId, buildTask(connectionId, prompt, currentConfig),
+            toolLabel -> emit(l, trace, "sql", truncateStepLabel(toolLabel)),
+            chunk -> c.chunk(chunk.kind(), chunk.id(), chunk.html()));
         if (!reply.ok()) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                 "The agent couldn't build the dashboard: " + (reply.error() == null ? "it ended early" : reply.error()));
@@ -186,9 +218,10 @@ public class DashboardAgentService {
 
     private String buildTask(String connectionId, String prompt, Object currentConfig) {
         StringBuilder sb = new StringBuilder();
-        sb.append("Build a beautiful, self-contained, read-only BI dashboard as a SINGLE HTML document for ")
-          .append("DeepSQL connection ").append(connectionId)
-          .append(". Load your `dashboard-design` skill and follow it.\n\n");
+        sb.append("Build a beautiful, self-contained, read-only BI dashboard for DeepSQL connection ")
+          .append(connectionId)
+          .append(", emitted progressively as a shell block plus one widget block per KPI/chart. ")
+          .append("Load your `dashboard-design` skill and follow it.\n\n");
         sb.append("User request:\n").append(prompt == null ? "" : prompt.trim()).append("\n\n");
 
         String currentHtml = currentHtml(currentConfig);
@@ -210,24 +243,74 @@ public class DashboardAgentService {
             1. Ground: get_brain_context, get_schema, list_business_rules, get_relationships. Obey business rules
                about which table/column/filter/currency a concept uses — quote them, don't guess a similar table.
             2. Design the dashboard from the request: KPIs, charts, tables, and any filters/date pickers asked for.
-               Write ONE real, correct, read-only SELECT per widget (table-qualified). There is NO placeholder
-               convention — you write normal SQL. For a Unix-epoch date column, filter on the epoch directly
-               (e.g. col BETWEEN UNIX_TIMESTAMP('2026-07-01') AND UNIX_TIMESTAMP('2026-07-08')); build such SQL
-               in JS from the picker's values and pass the finished string to deepsql.query().
-            3. VERIFY every query with execute_sql and READ the rows: date windows bounded and inside range (never
-               future), KPI value types right (a name is text, money is currency), totals plausible vs a COUNT.
-               Fix and re-run until correct.
-            4. INTENT CHECKLIST — before emitting, confirm EVERY explicit ask is satisfied (each chart, each metric,
-               and each UI control like a date range picker with the requested default, e.g. today).
-            5. Write the single HTML document: inline <style> + <script>, load data via deepsql.query() on load,
-               wire your own controls to re-query on change, and show a small inline error near any widget whose
-               query fails (don't blank the page). Use deepsql.charts.bar/line/donut for EVERY chart — they give
-               hover tooltips, number formatting, and empty-state handling; do not hand-write chart SVG. Guard every
-               value against undefined/null/NaN (fall back to a dash) so no "undefined" ever renders.
-            6. SELF-REVIEW before emitting: reread the finished HTML as the end user — every chart is a
-               deepsql.charts.* call with the right label/value columns (none left blank), no undefined/NaN can reach
-               the screen (esp. KPI sub-labels and % captions), every asked-for control is wired, and no internals
-               are visible. A blank chart or an "undefined" label is a failed build — fix it before emitting.
+               A dashboard driven by a time period (daily/recent activity, trends, "momentum") gets a real
+               date-range control in the shell's header — quick-range buttons (e.g. Last 7/30/90 days) PLUS
+               explicit start/end date inputs and an Apply action, not just one of those. See the skeleton's
+               header bar for the exact shape to build on. Write ONE real, correct, read-only SELECT per widget
+               (table-qualified). There is NO placeholder convention — you write normal SQL. For a Unix-epoch
+               date column, filter on the epoch directly (e.g. col BETWEEN UNIX_TIMESTAMP('2026-07-01') AND
+               UNIX_TIMESTAMP('2026-07-08')); build such SQL in JS from the picker's values and pass the
+               finished string to deepsql.query().
+            3. VERIFY each widget's query with execute_sql and READ the rows — date windows bounded and inside
+               range (never future), KPI value types right (a name is text, money is currency), totals plausible
+               vs a COUNT — BEFORE emitting that widget's block (step 5 below). Fix and re-run until correct.
+            4. INTENT CHECKLIST — before emitting the shell, list every explicit ask (each chart, each metric, each
+               UI control like a date range picker with the requested default, e.g. today) and confirm your planned
+               widgets cover ALL of them.
+            5. Emit progressively, as TWO KINDS of fenced blocks, each ONLY after its own SQL is verified (step 3):
+
+               a. FIRST, exactly one shell block — the page chrome and an empty, named slot per widget:
+                  ```dashboard-shell
+                  <!doctype html>...<head><style>...</style></head><body>
+                    <div class="wrap">
+                      <header>...</header>
+                      <section class="kpis">
+                        <div data-widget="revenue-total"></div>
+                        <div data-widget="orders-count"></div>
+                      </section>
+                      <section class="charts">
+                        <div data-widget="revenue-trend"></div>
+                      </section>
+                    </div>
+                  </body></html>
+                  ```
+                  Pick a short, stable, kebab-case id per widget (e.g. "revenue-total") — you will reuse this
+                  EXACT id in that widget's own block below. The shell itself has no <script> that queries
+                  data; each widget brings its own.
+
+               b. THEN, one block per widget, in any order, each independently self-contained (its own markup
+                  AND the <script> that queries and renders into ITS OWN slot only):
+                  ```dashboard-widget id="revenue-total"
+                  <article class="card hero">
+                    <p class="eyebrow">Revenue</p>
+                    <p class="value" id="revenue-total-val">—</p>
+                  </article>
+                  <script>
+                    deepsql.ready(async () => {
+                      try {
+                        const { rows } = await deepsql.query("SELECT SUM(o.total_amount) FROM public.orders o ...");
+                        document.getElementById('revenue-total-val').textContent = deepsql.charts.format(rows?.[0]?.[0] ?? 0);
+                      } catch (e) {
+                        document.getElementById('revenue-total-val').textContent = '—';
+                      }
+                    });
+                  </script>
+                  ```
+                  A widget's <script> must reference ONLY elements inside its own block (by an id namespaced
+                  with the widget id, as above) — never reach into another widget's slot. Use
+                  deepsql.charts.bar/line/donut for every chart — they give hover tooltips, number formatting,
+                  and empty-state handling; do not hand-write chart SVG. Guard every value against
+                  undefined/null/NaN (fall back to a dash) so no "undefined" ever renders. Wire any control
+                  (date range, dropdown) inside the relevant widget's own script, re-querying on change.
+
+            6. SELF-REVIEW before your final message ends: reread everything you emitted as the end user — every
+               chart is a deepsql.charts.* call with the right label/value columns (none left blank), no
+               undefined/NaN can reach the screen (esp. KPI sub-labels and % captions), every asked-for control
+               is wired, every widget id you referenced in the shell has a matching dashboard-widget block, and
+               no internals are visible. If self-review finds a problem in a widget you already emitted, emit a
+               CORRECTED dashboard-widget block with the SAME id as your last action — the same id re-emitted
+               replaces what was shown before. A blank chart or an "undefined" label is a failed build — fix it
+               before your message ends, don't leave it for the user to find.
 
             TWO HARD RULES (from the skill):
             - NEVER show internals to the user. No table/column names, no SQL, no connection id/UUID, no schema or
@@ -238,16 +321,34 @@ public class DashboardAgentService {
               --ds-shadow). Do NOT import fonts or set font-family. Stay monochrome; use a subtle soft color/gradient
               ONLY to highlight the 1–2 most important KPIs. Clean, minimal, lots of whitespace — not dark or neon.
 
-            Output your FINAL message as ONLY the complete HTML document in one ```html code block — no prose, no
-            tool calls after it.""");
+            Output your FINAL message as ONLY the fenced blocks described in step 5 above (one ```dashboard-shell```
+            first, then one ```dashboard-widget id="..."``` per widget) — no prose, no tool calls after the last one.
+            Do NOT wrap the whole thing in a single ```html block — the shell and each widget are SEPARATE fences.""");
         return sb.toString();
     }
 
     // ── artifact extraction ────────────────────────────────────────────────
 
-    /** Pull the HTML document out of the agent's final message (fenced or bare). */
+    // Matches the same dashboard-shell/dashboard-widget fences AgentChatClient's
+    // live chunk scanner does — kept as a SEPARATE pattern (not shared) because
+    // this one runs once, after the fact, over the complete final message, with
+    // no incremental-scan-position bookkeeping needed.
+    private static final Pattern SHELL_OR_WIDGET_FENCE = Pattern.compile(
+        "```dashboard-(shell|widget)(?:\\s+id=\"([^\"]+)\")?\\s*\\n(.*?)\\n```",
+        Pattern.DOTALL);
+
+    /**
+     * Assembles the final document from the agent's shell + widget chunks (the
+     * progressive-render contract), substituting each widget's HTML+script into
+     * its {@code [data-widget=id]} slot in the shell. Falls back to the older
+     * single ```html block contract if no shell/widget fences are present at
+     * all, so an agent turn that (for whatever reason) still emits one block
+     * — or any reply predating this contract — keeps working unchanged.
+     */
     private String extractHtml(String text) {
         if (text == null || text.isBlank()) return null;
+        String assembled = assembleFromChunks(text);
+        if (assembled != null) return assembled;
         // Prefer the last ```html (or bare ```) fenced block that looks like markup.
         Matcher fence = Pattern.compile("```(?:html)?\\s*(.*?)```", Pattern.DOTALL).matcher(text);
         String candidate = null;
@@ -265,6 +366,58 @@ public class DashboardAgentService {
             if (looksLikeHtml(body)) return body;
         }
         return null;
+    }
+
+    private String assembleFromChunks(String text) {
+        Matcher m = SHELL_OR_WIDGET_FENCE.matcher(text);
+        String shell = null;
+        // LinkedHashMap: a widget id emitted twice (a self-review correction re-
+        // emitting the same id) keeps only the LAST occurrence, but a first-seen
+        // id's position in the shell's substitution order is irrelevant — each
+        // is substituted into its own named slot, not appended in sequence.
+        Map<String, String> widgets = new LinkedHashMap<>();
+        while (m.find()) {
+            String kind = m.group(1);
+            String id = m.group(2);
+            String body = m.group(3);
+            if ("shell".equals(kind)) {
+                shell = body;
+            } else if (id != null) {
+                widgets.put(id, body);
+            }
+        }
+        if (shell == null) return null;
+        String html = shell;
+        for (Map.Entry<String, String> e : widgets.entrySet()) {
+            html = substituteWidgetSlot(html, e.getKey(), e.getValue());
+        }
+        return html;
+    }
+
+    // Replaces <div data-widget="id"></div> (or any content already inside it,
+    // e.g. a loading placeholder the shell shipped with) with the widget's
+    // verified markup+script. Matches the OPENING tag separately from its
+    // contents so a self-closing or non-empty placeholder slot both work.
+    private String substituteWidgetSlot(String shellHtml, String widgetId, String widgetHtml) {
+        Pattern slot = Pattern.compile(
+            "(<[a-zA-Z0-9]+[^>]*data-widget=\"" + Pattern.quote(widgetId) + "\"[^>]*>)(.*?)(</[a-zA-Z0-9]+>)",
+            Pattern.DOTALL);
+        Matcher sm = slot.matcher(shellHtml);
+        if (sm.find()) {
+            return sm.replaceFirst(Matcher.quoteReplacement(sm.group(1)) + Matcher.quoteReplacement(widgetHtml) + Matcher.quoteReplacement(sm.group(3)));
+        }
+        // Self-closing slot (<div data-widget="id" />) — replace the whole tag.
+        Pattern selfClosing = Pattern.compile(
+            "<[a-zA-Z0-9]+[^>]*data-widget=\"" + Pattern.quote(widgetId) + "\"[^>]*/>");
+        Matcher scm = selfClosing.matcher(shellHtml);
+        if (scm.find()) {
+            return scm.replaceFirst(Matcher.quoteReplacement("<div data-widget=\"" + widgetId + "\">" + widgetHtml + "</div>"));
+        }
+        // No matching slot in the shell (shouldn't happen if the agent followed
+        // the contract) — leave the shell as-is rather than silently dropping
+        // a verified widget's content.
+        log.warn("No [data-widget=\"{}\"] slot found in dashboard shell; widget content was not inserted", widgetId);
+        return shellHtml;
     }
 
     private boolean looksLikeHtml(String s) {
@@ -297,11 +450,23 @@ public class DashboardAgentService {
 
     // ── small helpers ──────────────────────────────────────────────────────
 
+    private static final int MAX_PERSISTED_TRACE_STEPS = 50;
+    private static final int MAX_STEP_LABEL_CHARS = 140;
+
+    private static String truncateStepLabel(String label) {
+        if (label == null) return null;
+        return label.length() > MAX_STEP_LABEL_CHARS ? label.substring(0, MAX_STEP_LABEL_CHARS) + "…" : label;
+    }
+
     private void emit(StepListener l, List<Map<String, Object>> trace, String type, String message) {
         Map<String, Object> e = new LinkedHashMap<>();
         e.put("type", type);
         e.put("message", message);
         trace.add(e);
+        // Only the live SSE step feed matters once the build finishes — nothing
+        // reads the persisted trace afterward — so cap it rather than let a long
+        // build's dozens of SQL steps bloat dashboardConfig.
+        if (trace.size() > MAX_PERSISTED_TRACE_STEPS) trace.remove(0);
         try { l.step(type, message); } catch (Exception ignored) { }
     }
 

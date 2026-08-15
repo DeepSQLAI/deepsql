@@ -104,6 +104,16 @@
 .spin { animation: sharespin 0.9s linear infinite; }
 @keyframes sharespin { to { transform: rotate(360deg); } }
 
+.kioskRow {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #eef0f3;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.kioskRow .rowHead svg { flex-shrink: 0; }
+
 /* password row */
 .pwRow { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .pwIcon { color: #8b909b; flex-shrink: 0; }
