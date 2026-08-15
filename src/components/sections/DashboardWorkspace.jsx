@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
-import { LineChart, ArrowUp, ChevronLeft, Sparkles, Check, Loader2, Brain, PencilRuler, ClipboardCheck, TrendingUp, Users, PieChart, Layers, Code2, X, Copy, Undo2, Play, Database } from 'lucide-react'
+import { LineChart, ArrowUp, ChevronLeft, Sparkles, Check, Loader2, Brain, PencilRuler, ClipboardCheck, TrendingUp, Users, PieChart, Layers, Code2, X, Copy, Undo2, Play, Database, History, RotateCcw, Eye } from 'lucide-react'
 import DashboardArtifact from '@/components/DashboardArtifact'
 import ShareMenu from './ShareMenu'
+import { savedDashboardsAPI } from '@/lib/api/client'
 import { useDashboardChatStore, useDashboardSession, useDashboardChatActions } from '@/lib/stores/useDashboardChatStore'
 import styles from './DashboardWorkspace.module.css'
 
@@ -9,6 +10,20 @@ const Editor = lazy(() => import('@monaco-editor/react'))
 
 // Icon per agent step phase, so the live trace reads at a glance.
 const STEP_ICON = { grounding: Brain, planning: PencilRuler, sql: Database, validating: ClipboardCheck, done: Check }
+
+// Mirrors SavedDashboardService's snapshotVersion triggers, in plain language.
+const VERSION_TRIGGER_LABEL = { AGENT_BUILD: 'Agent build', MANUAL_EDIT: 'Manual edit', RESTORE: 'Restore' }
+
+function versionRelTime(iso) {
+  if (!iso) return ''
+  const diff = Date.now() - new Date(iso).getTime()
+  const m = Math.round(diff / 60000)
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m}m ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.round(h / 24)}d ago`
+}
 
 // Mirror of DashboardAgentService.extractTitle — a dashboard's name comes from
 // the artifact's <title> (then its <h1>). The backend only derives it while
@@ -23,6 +38,51 @@ function titleFromHtml(html, fallback) {
   const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)
   if (h1 && strip(h1[1])) return strip(h1[1]).slice(0, 120)
   return fallback
+}
+
+// A real line-diff between two agent-regenerated HTML docs is mostly noise — the agent
+// rewrites large chunks even for small logical changes. Instead, summarize the shape of
+// the change: title, widget count (via [data-widget] slots — see DashboardArtifact.jsx),
+// and overall size, comparing this version against the one right after it (its "before").
+function widgetIds(html) {
+  const ids = new Set()
+  const re = /data-widget=["']([^"']+)["']/g
+  let m
+  while ((m = re.exec(html))) ids.add(m[1])
+  return ids
+}
+
+// A version's dashboardConfig is the same JSON shape as SavedDashboard.dashboardConfig
+// (see DashboardVersion.dashboardConfig) — parse it the same way DashboardWorkspace
+// already parses the live one, rather than trusting it's pre-parsed.
+function versionHtml(version) {
+  if (!version?.dashboardConfig) return null
+  try {
+    const cfg = JSON.parse(version.dashboardConfig)
+    return cfg?.html || null
+  } catch {
+    return null
+  }
+}
+
+function summarizeChange(fromHtml, toHtml) {
+  if (!fromHtml || !toHtml) return null
+  const fromTitle = titleFromHtml(fromHtml, '')
+  const toTitle = titleFromHtml(toHtml, '')
+  const fromWidgets = widgetIds(fromHtml)
+  const toWidgets = widgetIds(toHtml)
+  const added = [...toWidgets].filter((id) => !fromWidgets.has(id)).length
+  const removed = [...fromWidgets].filter((id) => !toWidgets.has(id)).length
+
+  const parts = []
+  if (fromTitle && toTitle && fromTitle !== toTitle) parts.push(`title changed to “${toTitle}”`)
+  if (added) parts.push(`+${added} widget${added === 1 ? '' : 's'}`)
+  if (removed) parts.push(`-${removed} widget${removed === 1 ? '' : 's'}`)
+  if (parts.length) return parts.join(', ')
+
+  const sizeDelta = toHtml.length - fromHtml.length
+  if (Math.abs(sizeDelta) < 20) return 'no visible change'
+  return sizeDelta > 0 ? `content grew (+${sizeDelta.toLocaleString()} chars)` : `content shrank (${sizeDelta.toLocaleString()} chars)`
 }
 
 // Starting points shown on a brand-new, empty dashboard — concrete enough to click
@@ -62,6 +122,11 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
   const sourceBaseRef = useRef(null) // html the editor was last seeded with
   const [showQueries, setShowQueries] = useState(false)
   const [queries, setQueries] = useState([])
+  const [showHistory, setShowHistory] = useState(false)
+  const [versions, setVersions] = useState([])
+  const [versionsLoading, setVersionsLoading] = useState(false)
+  const [restoringId, setRestoringId] = useState(null)
+  const [previewVersion, setPreviewVersion] = useState(null) // the version being previewed, or null
   const scrollRef = useRef(null)
   const inputRef = useRef(null)
   const artifactRef = useRef(null)
@@ -214,6 +279,7 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
       html: sourceDraft,
       updatedAt: new Date().toISOString(),
     }
+    setQueries([]) // the iframe is about to reload with the edited HTML — old widgets' queries no longer apply
     patchSession(key, (cur) => ({
       config: next,
       messages: [...cur.messages, { role: 'agent', text: 'Source edited manually. Saved as a draft — tell me what to change next, or keep editing the source.' }],
@@ -228,6 +294,47 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
     sourceBaseRef.current = html
     setSourceDraft(html)
     setSourceEpoch((e) => e + 1) // remount so the editor actually shows the restored text
+  }
+
+  async function loadVersions() {
+    if (!savedId) return
+    setVersionsLoading(true)
+    try {
+      const res = await savedDashboardsAPI.getVersionHistory(savedId)
+      setVersions(res?.versions || [])
+    } catch {
+      setVersions([])
+    } finally {
+      setVersionsLoading(false)
+    }
+  }
+
+  function toggleHistory() {
+    const next = !showHistory
+    setShowHistory(next)
+    if (next) loadVersions()
+  }
+
+  async function restoreVersion(version) {
+    if (!savedId || restoringId || thinking) return
+    setRestoringId(version.id)
+    try {
+      const res = await savedDashboardsAPI.restoreVersion(savedId, version.id)
+      const restored = res?.savedDashboard
+      if (!restored) return
+      let cfg = {}
+      try { cfg = typeof restored.dashboardConfig === 'string' ? JSON.parse(restored.dashboardConfig || '{}') : (restored.dashboardConfig || {}) } catch { cfg = {} }
+      if (cfg.html) setQueries([]) // the iframe is about to reload with the restored HTML — old widgets' queries no longer apply
+      patchSession(key, (cur) => ({
+        config: cfg.html ? { ...cfg, updatedAt: restored.updatedAt || new Date().toISOString() } : cur.config,
+        messages: [...cur.messages, { role: 'agent', text: `Restored “${version.name || 'a previous version'}”. The version it replaced was saved to history too.` }],
+      }))
+      await loadVersions()
+    } catch (e) {
+      patchSession(key, (cur) => ({ messages: [...cur.messages, { role: 'agent', text: `⚠ Couldn’t restore: ${e?.response?.data?.message || e?.message || 'error'}`, error: true }] }))
+    } finally {
+      setRestoringId(null)
+    }
   }
 
   const logQuery = useCallback((entry) => { setQueries((prev) => [...prev, entry]) }, [])
@@ -341,8 +448,16 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
                     </>
                   )}
                   <button
+                    className={showHistory ? styles.queriesBtnActive : styles.queriesBtn}
+                    onClick={() => { setShowQueries(false); toggleHistory() }}
+                    disabled={!savedId}
+                    title={!savedId ? 'Save the dashboard first' : undefined}
+                  >
+                    <History size={13} /> History
+                  </button>
+                  <button
                     className={showQueries ? styles.queriesBtnActive : styles.queriesBtn}
-                    onClick={() => setShowQueries((v) => !v)}
+                    onClick={() => { setShowHistory(false); setShowQueries((v) => !v) }}
                   >
                     <Code2 size={13} /> Queries{queries.length > 0 ? ` ${queries.length}` : ''}
                   </button>
@@ -412,6 +527,89 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
                       )}
                     </div>
                   </aside>
+                )}
+
+                {showHistory && (
+                  <aside className={styles.queriesPanel}>
+                    <div className={styles.queriesPanelHead}>
+                      <span>Version history</span>
+                      <button onClick={() => setShowHistory(false)} aria-label="Close"><X size={14} /></button>
+                    </div>
+                    <div className={styles.queriesPanelList}>
+                      {versionsLoading ? (
+                        <div className={styles.queriesEmpty}><Loader2 size={14} className={styles.spin} /></div>
+                      ) : versions.length === 0 ? (
+                        <div className={styles.queriesEmpty}>No earlier versions yet — one is saved automatically each time you (or the agent) change this dashboard.</div>
+                      ) : (
+                        <>
+                          <div className={styles.versionCard}>
+                            <div className={styles.versionMeta}>
+                              <span className={styles.versionName}>{name}</span>
+                              <span className={styles.versionSub}>Current</span>
+                              {versionHtml(versions[0]) && (
+                                <span className={styles.versionDiff}>{summarizeChange(versionHtml(versions[0]), config?.html) || 'no visible change'}</span>
+                              )}
+                            </div>
+                            <span className={styles.versionCurrentBadge}>Live</span>
+                          </div>
+                          {versions.map((v, i) => {
+                            const olderHtml = versionHtml(versions[i + 1]) // one snapshot further back — this version's "before"
+                            const diff = olderHtml ? summarizeChange(olderHtml, versionHtml(v)) : null
+                            return (
+                              <div key={v.id} className={styles.versionCard}>
+                                <div className={styles.versionMeta}>
+                                  <span className={styles.versionName}>{v.name || 'Untitled'}</span>
+                                  <span className={styles.versionSub}>{VERSION_TRIGGER_LABEL[v.trigger] || v.trigger} · {versionRelTime(v.createdAt)}</span>
+                                  {diff && <span className={styles.versionDiff}>{diff}</span>}
+                                </div>
+                                <div className={styles.versionActions}>
+                                  <button
+                                    className={styles.versionPreviewBtn}
+                                    onClick={() => setPreviewVersion(v)}
+                                    disabled={!versionHtml(v)}
+                                    title="Preview this version"
+                                  >
+                                    <Eye size={12} />
+                                  </button>
+                                  <button
+                                    className={styles.versionRestoreBtn}
+                                    onClick={() => restoreVersion(v)}
+                                    disabled={restoringId === v.id || thinking}
+                                    title={thinking ? 'Wait for the current build to finish first' : 'Restore this version'}
+                                  >
+                                    {restoringId === v.id ? <Loader2 size={12} className={styles.spin} /> : <RotateCcw size={12} />} Restore
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </>
+                      )}
+                    </div>
+                  </aside>
+                )}
+
+                {previewVersion && (
+                  <div className={styles.previewOverlay} onClick={() => setPreviewVersion(null)}>
+                    <div className={styles.previewModal} onClick={(e) => e.stopPropagation()}>
+                      <div className={styles.previewModalHead}>
+                        <span>{previewVersion.name || 'Untitled'} · {VERSION_TRIGGER_LABEL[previewVersion.trigger] || previewVersion.trigger} · {versionRelTime(previewVersion.createdAt)}</span>
+                        <button onClick={() => setPreviewVersion(null)} aria-label="Close preview"><X size={14} /></button>
+                      </div>
+                      <div className={styles.previewModalBody}>
+                        <DashboardArtifact connectionId={connectionId} html={versionHtml(previewVersion)} onError={() => {}} />
+                      </div>
+                      <div className={styles.previewModalFoot}>
+                        <button
+                          className={styles.versionRestoreBtn}
+                          onClick={() => { const v = previewVersion; setPreviewVersion(null); restoreVersion(v) }}
+                          disabled={thinking}
+                        >
+                          <RotateCcw size={12} /> Restore this version
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             </>

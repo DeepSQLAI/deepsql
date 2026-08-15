@@ -2900,6 +2900,26 @@ export const savedDashboardsAPI = {
     );
     return response.data;
   },
+
+  // Duplicate a dashboard as a new, independent draft
+  cloneDashboard: async (id) => {
+    const response = await apiClient.post(`/api/saved-dashboards/${id}/clone`);
+    return response.data;
+  },
+
+  // Version history, most recent first
+  getVersionHistory: async (id) => {
+    const response = await apiClient.get(`/api/saved-dashboards/${id}/versions`);
+    return response.data;
+  },
+
+  // Restore a prior version as the current config
+  restoreVersion: async (id, versionId) => {
+    const response = await apiClient.post(
+      `/api/saved-dashboards/${id}/versions/${versionId}/restore`,
+    );
+    return response.data;
+  },
 };
 
 // Playbook API

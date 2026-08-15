@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { Plus, Sparkles, Clock, RefreshCw, Trash2, Loader2, LayoutDashboard, AlertTriangle } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { Plus, Sparkles, Clock, RefreshCw, Trash2, Loader2, LayoutDashboard, AlertTriangle, Search, Star, Copy, Folder, X } from 'lucide-react'
 import { savedDashboardsAPI } from '@/lib/api/client'
 import styles from './DashboardsHome.module.css'
 
@@ -54,13 +54,30 @@ export default function DashboardsHome({ connectionId, onOpen }) {
   const [dashboards, setDashboards] = useState([])
   const [loading, setLoading] = useState(false)
   const [filter, setFilter] = useState('all')
+  const [folder, setFolder] = useState(null) // null = all folders
+  const [search, setSearch] = useState('')
   const [deletingId, setDeletingId] = useState(null)
+  const [cloningId, setCloningId] = useState(null)
+  const [favoritingId, setFavoritingId] = useState(null)
   // Id of the card showing its inline "delete this?" popover (native window.confirm
   // reads as out-of-place browser chrome next to the rest of this redesigned UI, and
   // some embedded/webview hosts suppress it outright, silently no-opping the delete).
   const [confirmId, setConfirmId] = useState(null)
   const [deleteError, setDeleteError] = useState(null)
+  const [folderMenuId, setFolderMenuId] = useState(null)
+  const [folderInput, setFolderInput] = useState('')
+  const [movingFolderId, setMovingFolderId] = useState(null)
   const confirmRef = useRef(null)
+  const folderMenuRef = useRef(null)
+
+  useEffect(() => {
+    if (!folderMenuId) return
+    const onDocClick = (e) => { if (folderMenuRef.current && !folderMenuRef.current.contains(e.target)) setFolderMenuId(null) }
+    const onKey = (e) => { if (e.key === 'Escape') setFolderMenuId(null) }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey) }
+  }, [folderMenuId])
 
   useEffect(() => {
     if (!confirmId) return
@@ -87,6 +104,54 @@ export default function DashboardsHome({ connectionId, onOpen }) {
     }
   }, [deletingId])
 
+  const toggleFavorite = useCallback(async (d, e) => {
+    e?.stopPropagation()
+    if (favoritingId) return
+    setFavoritingId(d.id)
+    // Optimistic — this is a one-field toggle a user expects to feel instant.
+    setDashboards((list) => list.map((x) => (x.id === d.id ? { ...x, isFavorite: !x.isFavorite } : x)))
+    try {
+      await savedDashboardsAPI.toggleFavorite(d.id)
+    } catch {
+      setDashboards((list) => list.map((x) => (x.id === d.id ? { ...x, isFavorite: d.isFavorite } : x)))
+      setDeleteError('Couldn’t update favorite — try again.')
+    } finally {
+      setFavoritingId(null)
+    }
+  }, [favoritingId])
+
+  const clone = useCallback(async (d, e) => {
+    e?.stopPropagation()
+    if (cloningId) return
+    setCloningId(d.id)
+    setDeleteError(null)
+    try {
+      const res = await savedDashboardsAPI.cloneDashboard(d.id)
+      if (res?.savedDashboard) setDashboards((list) => [res.savedDashboard, ...list])
+    } catch (err) {
+      setDeleteError(err?.response?.data?.message || err?.message || 'Couldn’t duplicate this dashboard.')
+    } finally {
+      setCloningId(null)
+    }
+  }, [cloningId])
+
+  const moveToFolder = useCallback(async (d, folderName) => {
+    if (movingFolderId) return
+    const trimmed = (folderName || '').trim()
+    setMovingFolderId(d.id)
+    try {
+      // "" clears the folder — updateDashboard treats null as "field omitted".
+      const res = await savedDashboardsAPI.updateDashboard(d.id, { folder: trimmed })
+      setDashboards((list) => list.map((x) => (x.id === d.id ? (res?.savedDashboard || { ...x, folder: trimmed || null }) : x)))
+      setFolderMenuId(null)
+      setFolderInput('')
+    } catch (err) {
+      setDeleteError(err?.response?.data?.message || err?.message || 'Couldn’t move this dashboard.')
+    } finally {
+      setMovingFolderId(null)
+    }
+  }, [movingFolderId])
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -101,7 +166,20 @@ export default function DashboardsHome({ connectionId, onOpen }) {
 
   useEffect(() => { load() }, [load])
 
-  const shown = dashboards.filter((d) => filter === 'all' || statusOf(d) === filter)
+  const folders = useMemo(() => {
+    const set = new Set(dashboards.map((d) => d.folder).filter(Boolean))
+    return Array.from(set).sort()
+  }, [dashboards])
+
+  const shown = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return dashboards.filter((d) => {
+      if (filter !== 'all' && statusOf(d) !== filter) return false
+      if (folder && d.folder !== folder) return false
+      if (q && !(d.name || '').toLowerCase().includes(q) && !(d.description || '').toLowerCase().includes(q)) return false
+      return true
+    })
+  }, [dashboards, filter, folder, search])
 
   return (
     <div className={styles.root}>
@@ -122,10 +200,43 @@ export default function DashboardsHome({ connectionId, onOpen }) {
         </div>
       </header>
 
+      <datalist id="dsql-folder-options">
+        {folders.map((f) => <option key={f} value={f} />)}
+      </datalist>
+
+      {dashboards.length > 0 && (
+        <div className={styles.searchRow}>
+          <div className={styles.searchBox}>
+            <Search size={14} className={styles.searchIcon} />
+            <input
+              className={styles.searchInput}
+              placeholder="Search dashboards…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <button className={styles.searchClear} onClick={() => setSearch('')} aria-label="Clear search">
+                <X size={13} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className={styles.filters}>
         {['all', 'live', 'draft'].map((f) => (
           <button key={f} className={`${styles.chip} ${filter === f ? styles.chipActive : ''}`} onClick={() => setFilter(f)}>
             {f[0].toUpperCase() + f.slice(1)}
+          </button>
+        ))}
+        {folders.length > 0 && <span className={styles.filterSep} />}
+        {folders.map((f) => (
+          <button
+            key={f}
+            className={`${styles.chip} ${folder === f ? styles.chipActive : ''}`}
+            onClick={() => setFolder(folder === f ? null : f)}
+          >
+            <Folder size={11} style={{ marginRight: 4, verticalAlign: -1.5 }} />{f}
           </button>
         ))}
       </div>
@@ -150,15 +261,61 @@ export default function DashboardsHome({ connectionId, onOpen }) {
             onClick={() => onOpen(d)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(d) } }}
           >
-            <div className={styles.deleteWrap} ref={confirmId === d.id ? confirmRef : undefined}>
+            <div className={styles.cardActions} ref={confirmId === d.id ? confirmRef : undefined}>
               <button
-                className={styles.cardDelete}
+                className={d.isFavorite ? styles.cardActionBtnFav : styles.cardActionBtn}
+                onClick={(e) => toggleFavorite(d, e)}
+                disabled={favoritingId === d.id}
+                title={d.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                aria-label={d.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+              >
+                <Star size={13} fill={d.isFavorite ? 'currentColor' : 'none'} />
+              </button>
+              <button
+                className={styles.cardActionBtn}
+                onClick={(e) => clone(d, e)}
+                disabled={cloningId === d.id}
+                title="Duplicate dashboard"
+                aria-label={`Duplicate ${d.name || 'dashboard'}`}
+              >
+                {cloningId === d.id ? <Loader2 size={13} className={styles.spin} /> : <Copy size={13} />}
+              </button>
+              <button
+                className={d.folder ? styles.cardActionBtnFav : styles.cardActionBtn}
+                onClick={(e) => { e.stopPropagation(); setFolderInput(d.folder || ''); setFolderMenuId(folderMenuId === d.id ? null : d.id) }}
+                title="Move to folder"
+                aria-label={`Move ${d.name || 'dashboard'} to a folder`}
+              >
+                <Folder size={13} fill={d.folder ? 'currentColor' : 'none'} />
+              </button>
+              {folderMenuId === d.id && (
+                <div className={styles.confirmPopover} ref={folderMenuRef} onClick={(e) => e.stopPropagation()}>
+                  <p className={styles.confirmText}>Move to folder</p>
+                  <input
+                    autoFocus
+                    className={styles.folderMenuInput}
+                    list="dsql-folder-options"
+                    placeholder="Folder name (blank to remove)"
+                    value={folderInput}
+                    onChange={(e) => setFolderInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') moveToFolder(d, folderInput) }}
+                  />
+                  <div className={styles.confirmActions}>
+                    <button className={styles.confirmCancel} onClick={() => setFolderMenuId(null)}>Cancel</button>
+                    <button className={styles.confirmDelete} style={{ background: '#534AB7', borderColor: '#534AB7' }} onClick={() => moveToFolder(d, folderInput)} disabled={movingFolderId === d.id}>
+                      {movingFolderId === d.id ? <Loader2 size={12} className={styles.spin} /> : 'Move'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              <button
+                className={styles.cardActionBtn}
                 onClick={(e) => { e.stopPropagation(); if (!deletingId) setConfirmId(d.id) }}
                 disabled={deletingId === d.id}
                 title="Delete dashboard"
                 aria-label={`Delete ${d.name || 'dashboard'}`}
               >
-                {deletingId === d.id ? <Loader2 size={14} className={styles.spin} /> : <Trash2 size={14} />}
+                {deletingId === d.id ? <Loader2 size={13} className={styles.spin} /> : <Trash2 size={13} />}
               </button>
               {confirmId === d.id && (
                 <div className={styles.confirmPopover} onClick={(e) => e.stopPropagation()}>
@@ -192,7 +349,9 @@ export default function DashboardsHome({ connectionId, onOpen }) {
       )}
 
       {!loading && dashboards.length > 0 && shown.length === 0 && (
-        <div className={styles.emptyNote}>No {filter} dashboards — try a different filter.</div>
+        <div className={styles.emptyNote}>
+          {search ? `No dashboards match “${search}”.` : `No ${folder ? `dashboards in “${folder}”` : filter} dashboards — try a different filter.`}
+        </div>
       )}
 
       {deleteError && (
