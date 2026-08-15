@@ -1403,15 +1403,18 @@ export const queryAPI = {
   },
 
   getTableIndexes: async (connectionId, tableName) => {
+    // Encode so schema-qualified ids (`crm.orders`) survive the path segment.
+    const tableId = encodeURIComponent(String(tableName || ""));
     const response = await apiClient.get(
-      `/api/connections/${connectionId}/tables/${tableName}/indexes`,
+      `/api/connections/${connectionId}/tables/${tableId}/indexes`,
     );
     return response.data;
   },
 
   getTableStats: async (connectionId, tableName) => {
+    const tableId = encodeURIComponent(String(tableName || ""));
     const response = await apiClient.get(
-      `/api/connections/${connectionId}/tables/${tableName}/stats`,
+      `/api/connections/${connectionId}/tables/${tableId}/stats`,
     );
     return response.data;
   },

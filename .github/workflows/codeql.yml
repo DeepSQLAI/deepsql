@@ -18,13 +18,19 @@ jobs:
   analyze:
     name: analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
-    # Code scanning is free on public repositories; on a private one it requires
-    # GitHub Advanced Security, which this organisation's free plan does not
-    # include. Without this guard every run fails with a 403 until the repository
-    # is public, and a permanently red workflow trains people to stop reading CI.
-    # DELETE THIS LINE once the repository is public — from then on a failure
-    # here is a real finding rather than a billing state.
-    if: github.event.repository.visibility == 'public'
+    # No visibility guard here, deliberately. A job-level `if:` is evaluated
+    # before the matrix expands, so a skipped run reports a single check under
+    # the raw template name — `analyze (${{ matrix.language }})` — rather than
+    # the two expanded names. That phantom name reached the `Protect main branch`
+    # ruleset as a required check (GitHub's suggestion list offers whatever was
+    # last reported), and once this repository went public and the job began
+    # reporting the real names instead, nothing was left to satisfy the phantom:
+    # every pull request stalled on "Expected — waiting for status to be
+    # reported", unmergeable, with no failing job to point at.
+    #
+    # Code scanning is free while this repository is public. If it ever goes
+    # private without GitHub Advanced Security, drop these contexts from the
+    # ruleset — do not reintroduce an `if:` here.
     permissions:
       # Required to upload results to the code-scanning API.
       security-events: write

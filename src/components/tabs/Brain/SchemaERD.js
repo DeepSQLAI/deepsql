@@ -3,6 +3,7 @@
 import { useMemo, useCallback } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
 import styles from './SchemaERD.module.css'
+import { canonicalTableReference, objectKey } from '@/lib/schemaNames'
 
 /**
  * Entity Relationship Diagram visualization
@@ -16,9 +17,11 @@ export function SchemaERD({ tables = [], height = 600 }) {
 
         // Create nodes for each table
         tables.forEach(table => {
+            const id = objectKey(table) || table.tableName || table.name
+            const name = canonicalTableReference(table) || id
             nodes.push({
-                id: table.tableName,
-                name: table.tableName,
+                id,
+                name,
                 val: (table.columnCount || 10), // Size based on column count
                 color: getNodeColor(table)
             })
@@ -27,11 +30,15 @@ export function SchemaERD({ tables = [], height = 600 }) {
         // Create links based on foreign keys
         tables.forEach(table => {
             const foreignKeys = table.foreignKeys || []
+            const sourceId = objectKey(table) || table.tableName || table.name
             foreignKeys.forEach(fk => {
                 if (fk.referencedTable) {
+                    const target = fk.referencedSchema
+                      ? canonicalTableReference({ schema: fk.referencedSchema, name: fk.referencedTable })
+                      : fk.referencedTable
                     links.push({
-                        source: table.tableName,
-                        target: fk.referencedTable,
+                        source: sourceId,
+                        target,
                         label: fk.columnName
                     })
                 }

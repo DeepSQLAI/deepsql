@@ -27,7 +27,7 @@ const SOURCES = [
     id:    'other',
     icon:  Zap,
     title: 'Other (Datadog, ELK…)',
-    sub:   'Configure after setup in the Slow Queries tab.',
+    sub:   'Configure after setup in the Performance tab.',
     badge: 'Coming soon',
     disabled: true,
   },

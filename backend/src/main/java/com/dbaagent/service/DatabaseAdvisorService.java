@@ -281,7 +281,7 @@ public class DatabaseAdvisorService {
 
         try (Connection connection = connectionService.getConnection(connectionId, connRequest)) {
 
-            // Query 1: Tables with high sequential scans
+            // Query 1: Tables with high sequential scans (all non-system schemas)
             String query1 = """
                 SELECT
                     schemaname,
@@ -296,7 +296,7 @@ public class DatabaseAdvisorService {
                         ELSE 0
                     END as avg_seq_tup_read
                 FROM pg_stat_user_tables
-                WHERE schemaname = 'public'
+                WHERE schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
                   AND seq_scan > 1000
                   AND n_live_tup > 10000
                   AND (idx_scan IS NULL OR seq_scan > idx_scan * 2)
@@ -308,11 +308,13 @@ public class DatabaseAdvisorService {
                  ResultSet rs = stmt.executeQuery(query1)) {
 
                 while (rs.next()) {
+                    String schemaName = rs.getString("schemaname");
                     String tableName = rs.getString("tablename");
                     long seqScans = rs.getLong("seq_scan");
                     long seqTupRead = rs.getLong("seq_tup_read");
                     long liveRows = rs.getLong("n_live_tup");
                     double avgSeqRead = rs.getDouble("avg_seq_tup_read");
+                    String qualifiedTable = "public".equals(schemaName) ? tableName : schemaName + "." + tableName;
 
                     // Get candidate columns
                     List<String> candidateColumns = getPostgresCandidateColumns(
@@ -325,7 +327,7 @@ public class DatabaseAdvisorService {
                             .id(UUID.randomUUID().toString())
                             .connectionId(connectionId)
                             .tableName(tableName)
-                            .schemaName("public")
+                            .schemaName(schemaName)
                             .columns(candidateColumns)
                             .indexType("BTREE")
                             .priority(seqScans > 10000 ?
@@ -334,13 +336,13 @@ public class DatabaseAdvisorService {
                             .reasoning(String.format(
                                 "Table '%s' has %,d sequential scans reading %,d rows (avg %.0f rows/scan). " +
                                 "Current row count: %,d. An index would significantly improve query performance.",
-                                tableName, seqScans, seqTupRead, avgSeqRead, liveRows
+                                qualifiedTable, seqScans, seqTupRead, avgSeqRead, liveRows
                             ))
                             .suggestedSQL(String.format(
                                 "CREATE INDEX CONCURRENTLY idx_%s_%s ON %s(%s)",
                                 tableName,
                                 String.join("_", candidateColumns),
-                                tableName,
+                                qualifiedTable,
                                 String.join(", ", candidateColumns)
                             ))
                             .metrics(IndexRecommendation.IndexRecommendationMetrics.builder()
@@ -358,9 +360,10 @@ public class DatabaseAdvisorService {
                 }
             }
 
-            // Query 2: Foreign keys without indexes
+            // Query 2: Foreign keys without indexes (all non-system schemas)
             String query2 = """
                 SELECT
+                    tc.table_schema,
                     tc.table_name,
                     kcu.column_name,
                     ccu.table_name AS foreign_table_name
@@ -371,11 +374,11 @@ public class DatabaseAdvisorService {
                 JOIN information_schema.constraint_column_usage AS ccu
                   ON ccu.constraint_name = tc.constraint_name
                 WHERE tc.constraint_type = 'FOREIGN KEY'
-                  AND tc.table_schema = 'public'
+                  AND tc.table_schema NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
                   AND NOT EXISTS (
                       SELECT 1
                       FROM pg_indexes
-                      WHERE schemaname = 'public'
+                      WHERE schemaname = tc.table_schema
                         AND tablename = tc.table_name
                         AND indexdef LIKE '%' || kcu.column_name || '%'
                   )
@@ -385,15 +388,17 @@ public class DatabaseAdvisorService {
                  ResultSet rs = stmt.executeQuery(query2)) {
 
                 while (rs.next()) {
+                    String schemaName = rs.getString("table_schema");
                     String tableName = rs.getString("table_name");
                     String columnName = rs.getString("column_name");
                     String foreignTable = rs.getString("foreign_table_name");
+                    String qualifiedTable = "public".equals(schemaName) ? tableName : schemaName + "." + tableName;
 
                     IndexRecommendation rec = IndexRecommendation.builder()
                         .id(UUID.randomUUID().toString())
                         .connectionId(connectionId)
                         .tableName(tableName)
-                        .schemaName("public")
+                        .schemaName(schemaName)
                         .columns(Collections.singletonList(columnName))
                         .indexType("BTREE")
                         .priority(IndexRecommendation.RecommendationPriority.HIGH)
@@ -404,7 +409,7 @@ public class DatabaseAdvisorService {
                         ))
                         .suggestedSQL(String.format(
                             "CREATE INDEX CONCURRENTLY idx_%s_%s ON %s(%s)",
-                            tableName, columnName, tableName, columnName
+                            tableName, columnName, qualifiedTable, columnName
                         ))
                         .metrics(IndexRecommendation.IndexRecommendationMetrics.builder()
                             .estimatedImprovementPercent(70)

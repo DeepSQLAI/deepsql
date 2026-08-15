@@ -27,6 +27,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { workloadAnalysisAPI } from "@/lib/api/client";
+import { HelpTooltip } from "@/components/tabs/Brain/components/HelpTooltip";
 import styles from "./WorkloadAnalysisPanel.module.css";
 
 const fmtMs = (v) => {
@@ -251,7 +252,7 @@ export default function WorkloadAnalysisPanel({ connectionId }) {
                       {rec.kind === "DROP_INDEX" ? "DROP" : "CREATE"}
                     </span>
                     <code className={styles.recTitle}>
-                      {rec.tableName} ({rec.columnNames})
+                      {rec.schemaName ? `${rec.schemaName}.${rec.tableName}` : rec.tableName} ({rec.columnNames})
                     </code>
                     {rec.priority && (
                       <span className={`${styles.prio} ${styles[`prio_${(rec.priority || "").toLowerCase()}`] || ""}`}>
@@ -341,14 +342,16 @@ export default function WorkloadAnalysisPanel({ connectionId }) {
                       <span className={styles.reasonBadge}>{REASON_LABEL[rec.candidateReason] || rec.candidateReason}</span>
                     )}
                     {rec.fingerprint && (
-                      <span
-                        className={styles.fingerprint}
-                        title="Query fingerprint — look this up in the Slow Queries tab to see its historical performance"
-                      >
-                        <span className={styles.fingerprintLabel}>fingerprint</span>
-                        <code>{rec.fingerprint}</code>
-                        <CopyButton text={rec.fingerprint} />
-                      </span>
+                      <HelpTooltip content={{
+                        title: 'Query fingerprint',
+                        description: 'Look this up under Performance → Query Trends to see historical performance.',
+                      }}>
+                        <span className={styles.fingerprint}>
+                          <span className={styles.fingerprintLabel}>fingerprint</span>
+                          <code>{rec.fingerprint}</code>
+                          <CopyButton text={rec.fingerprint} />
+                        </span>
+                      </HelpTooltip>
                     )}
                     {rec.estimatedImprovementPct != null && (
                       <span className={styles.improve}>~{Math.round(rec.estimatedImprovementPct)}% faster</span>

@@ -18,6 +18,7 @@ import CodeSourcesTab from './CodeSourcesTab'
 import SuggestionsQueueTab from './SuggestionsQueueTab'
 import EntriesTable from './EntriesTable'
 import SchemaContextTab from './SchemaContextTab'
+import { canonicalTableReference } from '@/lib/schemaNames'
 
 const EMPTY_FORM = {
   title: '',
@@ -26,16 +27,6 @@ const EMPTY_FORM = {
 
 const TABLE_ANNOTATION_RE = /(?<!@)@([A-Za-z_][\w$.]*)/g
 const COLUMN_ANNOTATION_RE = /(?<!@)@@([A-Za-z_][\w$.]*)/g
-
-function canonicalTableReference(table) {
-  const tableName = (table?.tableName || table?.name || '').trim().replace(/[`"\[\]]/g, '')
-  const schemaName = (table?.schema || table?.schemaName || '').trim().replace(/[`"\[\]]/g, '')
-  if (!tableName) return ''
-  if (!schemaName || schemaName === 'public' || schemaName === 'dbo') {
-    return tableName
-  }
-  return `${schemaName}.${tableName}`
-}
 
 function normalizeValue(value) {
   return (value || '').trim().toLowerCase()
@@ -68,12 +59,21 @@ function getDiagnosticTone(entry) {
 
 function buildTableLookup(tableOptions) {
   const lookup = new Map()
+  const bareCounts = new Map()
   tableOptions.forEach((table) => {
-    const keys = [
-      table.value,
-      table.label,
-      table.value.split('.').pop(),
-    ]
+    const bare = (table.value || '').split('.').pop()
+    if (!bare) return
+    bareCounts.set(normalizeValue(bare), (bareCounts.get(normalizeValue(bare)) || 0) + 1)
+  })
+  tableOptions.forEach((table) => {
+    const bare = (table.value || '').split('.').pop()
+    const bareKey = normalizeValue(bare)
+    // Always index the canonical value. Index the bare name only when unique
+    // across schemas so @orders stays unambiguous on multi-schema DBs.
+    const keys = [table.value, table.label]
+    if (bare && bareCounts.get(bareKey) === 1) {
+      keys.push(bare)
+    }
     keys
       .filter(Boolean)
       .forEach((key) => lookup.set(normalizeValue(key), table.value))
@@ -83,14 +83,24 @@ function buildTableLookup(tableOptions) {
 
 function buildColumnLookup(columnOptions) {
   const lookup = new Map()
+  const shortCounts = new Map()
+  columnOptions.forEach((column) => {
+    const shortTable = column.tableValue?.split('.').pop()
+    const shortKey = normalizeValue(`${shortTable}.${column.columnLabel}`)
+    if (!shortKey) return
+    shortCounts.set(shortKey, (shortCounts.get(shortKey) || 0) + 1)
+  })
   columnOptions.forEach((column) => {
     const canonical = column.value
     const shortTable = column.tableValue?.split('.').pop()
+    const shortKey = `${shortTable}.${column.columnLabel}`
     const keys = [
       canonical,
       `${column.tableValue}.${column.columnLabel}`,
-      `${shortTable}.${column.columnLabel}`,
     ]
+    if (shortCounts.get(normalizeValue(shortKey)) === 1) {
+      keys.push(shortKey)
+    }
     keys
       .filter(Boolean)
       .forEach((key) => lookup.set(normalizeValue(key), canonical))
@@ -267,16 +277,26 @@ export default function CompanyKnowledgePanel({ connectionId }) {
 
   const tableOptions = useMemo(
     () => (schemaQuery.data?.schema?.tables || schemaQuery.data?.tables || [])
-      .map((table) => ({
-        label: table.tableName || table.name,
-        value: canonicalTableReference(table),
-        columns: (table.columns || []).map((column) => ({
-          label: `${table.tableName || table.name}.${column.columnName || column.name}`,
-          value: `${canonicalTableReference(table)}.${column.columnName || column.name}`,
-          columnLabel: column.columnName || column.name,
-          tableValue: canonicalTableReference(table),
-        })),
-      }))
+      .map((table) => {
+        const value = canonicalTableReference(table)
+        const bare = table.tableName || table.name || ''
+        // When the same bare name exists in multiple schemas, force the
+        // qualified label so @ suggestions never look ambiguous.
+        return {
+          label: value,
+          bareLabel: bare,
+          value,
+          columns: (table.columns || []).map((column) => {
+            const colName = column.columnName || column.name
+            return {
+              label: `${value}.${colName}`,
+              value: `${value}.${colName}`,
+              columnLabel: colName,
+              tableValue: value,
+            }
+          }),
+        }
+      })
       .filter((table) => table.value),
     [schemaQuery.data],
   )

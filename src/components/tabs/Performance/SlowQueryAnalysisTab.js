@@ -1772,7 +1772,7 @@ export default function SlowQueryAnalysisTab({ connectionId }) {
           : "";
         const statement =
           rec.suggestedSQL ||
-          `CREATE INDEX ON ${rec.tableName} ${columns}`.trim();
+          `CREATE INDEX ON ${rec.schemaName ? `${rec.schemaName}.${rec.tableName}` : rec.tableName} ${columns}`.trim();
         items.push({ label: "Index", text: statement });
       });
     }

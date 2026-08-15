@@ -5,6 +5,7 @@ import { AlertCircle, Play, Loader, ChevronDown, ChevronRight, AlertTriangle, In
 import { useKeyColumns } from './hooks/useKeyColumns'
 import { ActionGuard } from '@/components/ActionGuard'
 import styles from '../Core/RagTrainingTab.module.css'
+import { canonicalTableReference, objectKey } from '@/lib/schemaNames'
 
 /**
  * Key Columns Panel component
@@ -94,18 +95,18 @@ export function KeyColumnsPanel({ connectionId, hideCTAs = false }) {
         return true
     })
 
-    // Group columns by table name (case-insensitive), sorted by number of columns descending
+    // Group columns by schema.table (case-insensitive), sorted by number of columns descending
     const groupedByTable = useMemo(() => {
         const groups = {}
         const tableNameMap = {} // Maps lowercase to display name
 
         topColumns.forEach(column => {
-            const rawTableName = column.tableName || 'Unknown'
-            const tableKey = rawTableName.toLowerCase()
+            const displayName = canonicalTableReference(column) || column.tableName || 'Unknown'
+            const tableKey = (objectKey(column) || displayName).toLowerCase()
 
             // Keep track of preferred display name (prefer UPPER_CASE version if available)
-            if (!tableNameMap[tableKey] || rawTableName === rawTableName.toUpperCase()) {
-                tableNameMap[tableKey] = rawTableName
+            if (!tableNameMap[tableKey] || displayName === displayName.toUpperCase()) {
+                tableNameMap[tableKey] = displayName
             }
 
             if (!groups[tableKey]) {
