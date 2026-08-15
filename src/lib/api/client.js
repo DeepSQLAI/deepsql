@@ -2620,13 +2620,27 @@ export const llmAPI = {
 // + access scope) and posts rows back. Never let the iframe hit the DB directly.
 export const dashboardQueryAPI = {
   run: async (connectionId, sql, limit, signal) => {
-    const { data } = await apiClient.post(
-      "/api/dashboards/query",
-      { connectionId, sql, limit },
-      { signal },
-    );
-    if (!data?.success) throw new Error(data?.error || "Query failed");
-    return { columns: data.columns || [], rows: data.rows || [] };
+    try {
+      const { data } = await apiClient.post(
+        "/api/dashboards/query",
+        { connectionId, sql, limit },
+        { signal },
+      );
+      if (!data?.success) throw new Error(data?.error || "Query failed");
+      return { columns: data.columns || [], rows: data.rows || [] };
+    } catch (e) {
+      // A non-2xx (e.g. a 400 for bad SQL) makes axios reject before the
+      // success-check above ever runs. The apiClient response interceptor
+      // already rewrote it into an Error whose .message only looks at
+      // response.data.message — this endpoint's payload uses `error`, not
+      // `message`, so it falls back to the generic "Request failed with
+      // status code 400" and stashes the real body in .responseData instead.
+      // Useless for the Queries panel, whose whole point is showing the real
+      // reason a widget's query failed.
+      const serverMessage = e?.responseData?.error;
+      if (serverMessage && serverMessage !== e.message) throw new Error(serverMessage);
+      throw e;
+    }
   },
 };
 
@@ -2676,10 +2690,10 @@ export const dashboardGenAPI = {
   // body carries the current dashboard config when refining. Handlers:
   //   onStep({ type, message }) · onDone({ success, dashboardConfig }) · onError(Error)
   // Returns an abort fn.
-  generateStream: (connectionId, prompt, currentConfig, handlers = {}) => {
-    const { onStep, onDone, onError } = handlers;
+  generateStream: (connectionId, prompt, currentConfig, dashboardId, handlers = {}) => {
+    const { onStep, onDone, onError, onCreated } = handlers;
     const controller = new AbortController();
-    const body = JSON.stringify({ connectionId, prompt, currentConfig: currentConfig || null });
+    const body = JSON.stringify({ connectionId, prompt, currentConfig: currentConfig || null, dashboardId: dashboardId || null });
     const doFetch = () =>
       fetch(`${API_BASE_URL}/api/dashboards/generate/stream`, {
         method: "POST",
@@ -2688,6 +2702,20 @@ export const dashboardGenAPI = {
         body,
         signal: controller.signal,
       });
+    // The generation itself now survives a route change (the store that owns
+    // this call keeps running after the component unmounts) — but a page
+    // *reload/close* still tears down this fetch out from under us. Calling
+    // controller.abort() from a pagehide listener does NOT reliably turn this
+    // into an AbortError first: the browser's own network-stack teardown on
+    // navigation can reject the fetch with a bare `TypeError: Failed to fetch`
+    // — indistinguishable in shape from a genuinely dead backend — before our
+    // abort() call is even processed. Track unload via a flag instead of
+    // trusting the error's identity, and check the flag in the catch block
+    // below so an unload-induced failure is dropped rather than surfacing as
+    // a fake error that gets permanently written into the saved chat history.
+    let unloading = false;
+    const markUnloading = () => { unloading = true; controller.abort(); };
+    window.addEventListener("pagehide", markUnloading);
     (async () => {
       try {
         let res = await doFetch();
@@ -2723,7 +2751,12 @@ export const dashboardGenAPI = {
           if (!dataLines.length) return;
           let data = {};
           try { data = JSON.parse(dataLines.join("\n")); } catch { return; }
-          if (event === "step") onStep && onStep(data);
+          // Sent immediately, before any step — the backend has already
+          // resolved (or created) the dashboard and durably recorded the
+          // user's message server-side, so the caller can adopt this id
+          // right away rather than waiting for the whole generation to finish.
+          if (event === "created") onCreated && onCreated(data);
+          else if (event === "step") onStep && onStep(data);
           // `chat` = out-of-context reply (hi/thanks); must not fall through to `done`
           // or the workspace appends the canned "Done — built…" save message.
           else if (event === "chat") { finished = true; onDone && onDone(data); }
@@ -2742,11 +2775,16 @@ export const dashboardGenAPI = {
         }
         if (!finished) onError && onError(new Error("Generation ended unexpectedly"));
       } catch (e) {
-        if (e?.name === "AbortError") return;
+        if (e?.name === "AbortError" || unloading) return;
         onError && onError(e);
+      } finally {
+        window.removeEventListener("pagehide", markUnloading);
       }
     })();
-    return () => controller.abort();
+    return () => {
+      window.removeEventListener("pagehide", markUnloading);
+      controller.abort();
+    };
   },
 };
 

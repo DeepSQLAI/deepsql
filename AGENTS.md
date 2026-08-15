@@ -199,9 +199,11 @@ only covers cloud-specific, non-obvious caveats.
   hardcodes `ENCRYPTION_KEYS=${ENCRYPTION_KEYS:}`; with the OS env var unset this is a
   circular placeholder reference that fails `EncryptionService` bean creation at boot. The
   local `.env` sets `ENCRYPTION_KEYS=<id>:<base64key>` matching `ENCRYPTION_KEY_ID`.
-- **`SECURITY_AUTH_ENABLED=false`** (set in `.env`) enables the dev auto-admin bypass, so the
-  web UI needs no login. Auth defaults to ON in every profile otherwise (there is no
-  `admin/admin`); a real login needs the localhost admin-bootstrap flow (see README).
+- **`SECURITY_AUTH_ENABLED`** defaults to ON. This Cloud VM’s `.env` sets it
+  `true` and uses a real admin user (`admin@localhost` — create via localhost
+  bootstrap if missing; see `CLAUDE.md`). `SECURITY_AUTH_ENABLED=false` only
+  bypasses JWT/MCP token *validation*; it does not skip the login form or mint
+  an admin. Dev credentials are never `admin/admin`.
 - **The `scheduled_tasks` table and the `vector`/`pg_stat_statements` extensions** come from
   `docker/postgres/init/*.sql`. In the native (non-Docker) setup those were applied by hand;
   they persist in the snapshot. If you ever recreate the vault DB, re-apply
@@ -242,6 +244,21 @@ only covers cloud-specific, non-obvious caveats.
   over `~/.hermes/profiles/u-<user>/config.yaml` and re-POST `/provision`. Symptom
   of a bad profile: Hermes logs `Missed model deployment` and CLI agent returns
   empty / “ended before producing an answer”.
+- **After rotating MCP tokens, restart Hermes webui (and ensure the provisioner is
+  current).** `scripts/local-agent-provisioner.py` writes `DEEPSQL_TOKEN_FILE` +
+  `DEEPSQL_AUTH_TOKEN` into the profile; an old long-lived provisioner process will
+  skip the token-file path. Even with a fresh profile config, Hermes webui can keep
+  a stale MCP subprocess env (no auth token, `DEEPSQL_MCP_USER_ID=deepsql-agent`).
+  Symptom: Agent tab tools return `Unauthorized - Please login` while
+  `/api/agent/session` reports `mcpAuthOk: true`. Fix: restart
+  `scripts/local-agent-provisioner.py`, re-open Agent (re-provision), restart the
+  Hermes webui on `:8787`, and sync default `~/.hermes/config.yaml`
+  `mcp_servers.deepsql.env` from the active `u-<user>` profile if the shared MCP
+  is what webui spawns.
+- **Multi-schema fixture.** This VM’s Postgres also has an ACME-style DB with
+  non-`public` schemas (`crm`, `sales`, `finance`, `hr`, `inventory`) for Brain /
+  MCP cross-schema checks. Prefer schema-qualified SQL (`sales.orders`); bare
+  names follow the role’s `search_path` (usually `public`).
 - **`AGENT_WEBUI_URL` for native runs.** Default is `http://deepsql-agent:8787`
   (Compose DNS). Native local must set `AGENT_WEBUI_URL=http://127.0.0.1:8787` in
   `.env` or CLI/Slack `AgentChatClient` cannot reach the agent API.
