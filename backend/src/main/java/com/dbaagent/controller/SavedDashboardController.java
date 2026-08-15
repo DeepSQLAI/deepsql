@@ -5,6 +5,7 @@ import com.dbaagent.service.SavedDashboardService;
 import com.dbaagent.service.security.AccessControlService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -25,6 +26,19 @@ public class SavedDashboardController {
     @Autowired
     private AccessControlService accessControlService;
 
+    // Every write method below is load-then-save on a row a background generation
+    // turn (SavedDashboardService.beginGenerationTurn etc.) may be writing at the
+    // same time. Without this helper, the loser's raw Hibernate message
+    // ("Unexpected row count... where id=? and version=?") leaked straight into
+    // the API response as a 500 instead of a clean, retryable conflict.
+    private static ResponseEntity<Map<String, Object>> conflict(OptimisticLockingFailureException e) {
+        log.warn("Dashboard update lost a concurrent-write race: {}", e.getMessage());
+        Map<String, Object> body = new HashMap<>();
+        body.put("success", false);
+        body.put("message", "This dashboard changed elsewhere just now — please retry.");
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
     /** Publish this dashboard to the web (opt-in, revocable public link). */
     @PostMapping("/{id}/share")
     public ResponseEntity<Map<String, Object>> enableShare(@PathVariable UUID id) {
@@ -39,6 +53,8 @@ public class SavedDashboardController {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("success", false, "message", e.getMessage()));
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
+        } catch (OptimisticLockingFailureException e) {
+            return conflict(e);
         } catch (Exception e) {
             log.error("Error enabling dashboard share", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -59,6 +75,8 @@ public class SavedDashboardController {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("success", false, "message", e.getMessage()));
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
+        } catch (OptimisticLockingFailureException e) {
+            return conflict(e);
         } catch (Exception e) {
             log.error("Error setting dashboard share password", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -79,6 +97,8 @@ public class SavedDashboardController {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("success", false, "message", e.getMessage()));
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
+        } catch (OptimisticLockingFailureException e) {
+            return conflict(e);
         } catch (Exception e) {
             log.error("Error disabling dashboard share", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -196,6 +216,8 @@ public class SavedDashboardController {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(errorResponse);
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
+        } catch (OptimisticLockingFailureException e) {
+            return conflict(e);
         } catch (Exception e) {
             log.error("Error updating saved dashboard", e);
             Map<String, Object> errorResponse = new HashMap<>();
@@ -255,6 +277,8 @@ public class SavedDashboardController {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(errorResponse);
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
+        } catch (OptimisticLockingFailureException e) {
+            return conflict(e);
         } catch (Exception e) {
             log.error("Error toggling favorite", e);
             Map<String, Object> errorResponse = new HashMap<>();

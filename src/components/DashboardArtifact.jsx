@@ -97,7 +97,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const REDUCED_MOTION = typeof window !== 'undefined'
   && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 
-export default function DashboardArtifact({ connectionId, html, onError, queryFn }) {
+export default function DashboardArtifact({ connectionId, html, onError, queryFn, onQuery }) {
   const iframeRef = useRef(null)
   const [height, setHeight] = useState(600)
   const [loaded, setLoaded] = useState(false)
@@ -110,6 +110,12 @@ export default function DashboardArtifact({ connectionId, html, onError, queryFn
   // later-resolved connectionId/queryFn is always picked up (pump captures once).
   const runQueryRef = useRef(null)
   runQueryRef.current = queryFn || ((sql, limit, signal) => dashboardQueryAPI.run(connectionId, sql, limit, signal))
+
+  // Log every query the artifact runs (SQL, row count, timing) for the
+  // Queries panel — same ref-indirection as runQueryRef, since pump/runJob's
+  // closures are frozen at first render (empty-dep useCallback).
+  const onQueryRef = useRef(null)
+  onQueryRef.current = onQuery
 
   function post(msg) {
     iframeRef.current?.contentWindow?.postMessage(msg, '*')
@@ -124,6 +130,7 @@ export default function DashboardArtifact({ connectionId, html, onError, queryFn
   }, [])
 
   async function runJob(job) {
+    const startedAt = Date.now()
     for (let attempt = 0; ; attempt += 1) {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), QUERY_TIMEOUT_MS)
@@ -131,6 +138,10 @@ export default function DashboardArtifact({ connectionId, html, onError, queryFn
         const res = await runQueryRef.current(job.sql, job.limit, controller.signal)
         clearTimeout(timer)
         post({ __deepsql: true, type: 'result', id: job.id, columns: res.columns, rows: res.rows })
+        onQueryRef.current?.({
+          id: job.id, sql: job.sql, status: 'success',
+          rowCount: res.rows?.length || 0, durationMs: Date.now() - startedAt, timestamp: startedAt,
+        })
         return
       } catch (err) {
         clearTimeout(timer)
@@ -142,9 +153,11 @@ export default function DashboardArtifact({ connectionId, html, onError, queryFn
           await sleep(400 * (attempt + 1) + Math.floor(Math.random() * 250))
           continue
         }
-        post({
-          __deepsql: true, type: 'result', id: job.id,
-          error: timedOut ? 'Timed out' : (err?.message || 'query failed'),
+        const errorMsg = timedOut ? 'Timed out' : (err?.message || 'query failed')
+        post({ __deepsql: true, type: 'result', id: job.id, error: errorMsg })
+        onQueryRef.current?.({
+          id: job.id, sql: job.sql, status: 'error',
+          rowCount: 0, durationMs: Date.now() - startedAt, timestamp: startedAt, error: errorMsg,
         })
         return
       }
