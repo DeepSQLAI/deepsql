@@ -15,8 +15,7 @@ const BASE_SECTION_MIN_ROLE = {
   ...(AGENTS_ENABLED ? { brain: ROLES.DEVELOPER } : {}),
   'company-knowledge': ROLES.DEVELOPER,
   dashboards: ROLES.DEVELOPER,
-  'slow-queries': ROLES.ADMIN,
-  'workload-analysis': ROLES.ADMIN,
+  performance: ROLES.ADMIN,
   editor: ROLES.DEVELOPER,
   docs: ROLES.DEVELOPER,
 }
@@ -38,6 +37,10 @@ function resolveSectionAlias(section) {
       // Schema Docs was folded into Company Knowledge → Schema Context tab.
       // Persisted nav state from older sessions still routes correctly.
       return 'company-knowledge'
+    case 'slow-queries':
+    case 'workload-analysis':
+      // Slow Queries and Workload Analysis were merged into Performance.
+      return 'performance'
     default:
       return section
   }
@@ -75,8 +78,7 @@ export function getDefaultHomeSection(role, connection = null) {
     'digest',
     ...(AGENTS_ENABLED ? ['brain'] : []),
     'company-knowledge',
-    'slow-queries',
-    'workload-analysis',
+    'performance',
     'editor',
     'docs',
   ]

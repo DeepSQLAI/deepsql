@@ -8,6 +8,14 @@
   width: fit-content;
 }
 
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .tabButton {
   display: inline-flex;
   align-items: center;
@@ -44,4 +52,78 @@
   text-align: center;
   font-size: 13px;
   color: #9ca3af;
+}
+
+.setupCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 560px;
+  margin: 24px auto 0;
+  padding: 40px 28px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #fff;
+  text-align: center;
+}
+
+.setupIcon {
+  opacity: 0.4;
+  margin-bottom: 4px;
+}
+
+.setupTitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: #111827;
+}
+
+.setupCopy {
+  margin: 0 0 10px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #6b7280;
+}
+
+.setupCta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 10px 16px;
+  border: 1px solid #111827;
+  border-radius: 10px;
+  background: #111827;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.setupCta:hover {
+  opacity: 0.88;
+}
+
+.logSourceBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  color: #374151;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.logSourceBtn:hover {
+  border-color: #d1d5db;
+  color: #111827;
 }

@@ -9,7 +9,6 @@ import DashboardsSection from '@/components/sections/DashboardsSection'
 import DocsSection from '@/components/sections/DocsSection'
 import EditorSection from '@/components/sections/EditorSection'
 import SlowQueriesSection from '@/components/sections/SlowQueriesSection'
-import WorkloadAnalysisSection from '@/components/sections/WorkloadAnalysisSection'
 import PageTransitionBar from '@/components/layout/PageTransitionBar'
 import { useAuth } from '@/hooks/useAuth'
 import { AGENTS_ENABLED, canAccessHomeSection, normalizeHomeSection } from '@/lib/features'
@@ -23,8 +22,7 @@ const SECTION_MAP = {
   digest:  DigestFeedSection,
   ...(AGENTS_ENABLED ? { brain: BrainSection } : {}),
   'company-knowledge': CompanyKnowledgeSection,
-  'slow-queries': SlowQueriesSection,
-  'workload-analysis': WorkloadAnalysisSection,
+  performance: SlowQueriesSection,
   editor:  EditorSection,
   docs:    DocsSection,
 }
