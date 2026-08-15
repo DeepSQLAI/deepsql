@@ -218,7 +218,7 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
     const el = inputRef.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 140)}px`
+    el.style.height = `${Math.min(el.scrollHeight, 280)}px`
   }, [input])
 
   // Elapsed-time ticker so a 15-30s build reads as alive, not stuck. Reads the
