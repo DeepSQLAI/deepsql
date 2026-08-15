@@ -363,7 +363,7 @@ export default function ExplainAnalysisPanel({ analysis }) {
           )}
           {indexBottleneck && (
             <div className={styles.bannerNote}>
-              Note: index recommendations are workload-weighted across all queries — see Workload Analysis,
+              Note: index recommendations are workload-weighted across all queries — see Performance → Workload,
               not this single query.
             </div>
           )}
