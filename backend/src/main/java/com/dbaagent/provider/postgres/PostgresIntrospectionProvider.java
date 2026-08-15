@@ -204,6 +204,18 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
         List<TableIndex> indexes = new ArrayList<>();
         Map<String, TableIndex> indexMap = new HashMap<>();
 
+        // Accept bare `orders` or qualified `crm.orders` so multi-schema UIs
+        // don't silently merge indexes from every schema that shares the name.
+        String schemaName = null;
+        String bareName = tableName;
+        if (tableName != null) {
+            int dot = tableName.lastIndexOf('.');
+            if (dot > 0) {
+                schemaName = tableName.substring(0, dot);
+                bareName = tableName.substring(dot + 1);
+            }
+        }
+
         String query = """
             SELECT
                 i.relname AS index_name,
@@ -212,16 +224,21 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
                 ix.indisprimary AS is_primary,
                 am.amname AS index_type
             FROM pg_class t
+            JOIN pg_namespace n ON n.oid = t.relnamespace
             JOIN pg_index ix ON t.oid = ix.indrelid
             JOIN pg_class i ON i.oid = ix.indexrelid
             JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
             JOIN pg_am am ON i.relam = am.oid
-            WHERE t.relname = ?
+            WHERE t.relkind IN ('r', 'p', 'm', 'v')
+              AND t.relname = ?
+              AND (?::text IS NULL OR n.nspname = ?)
             ORDER BY i.relname, a.attnum
             """;
 
         try (PreparedStatement stmt = connection.prepareStatement(query)) {
-            stmt.setString(1, tableName);
+            stmt.setString(1, bareName);
+            stmt.setString(2, schemaName);
+            stmt.setString(3, schemaName);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {

@@ -153,6 +153,16 @@ public class MySQLIntrospectionProvider implements IntrospectionProvider {
         List<TableIndex> indexes = new ArrayList<>();
         Map<String, TableIndex> indexMap = new HashMap<>();
 
+        String schemaName = database;
+        String bareName = tableName;
+        if (tableName != null) {
+            int dot = tableName.lastIndexOf('.');
+            if (dot > 0) {
+                schemaName = tableName.substring(0, dot);
+                bareName = tableName.substring(dot + 1);
+            }
+        }
+
         String query = """
             SELECT INDEX_NAME, COLUMN_NAME, NON_UNIQUE, INDEX_TYPE, SEQ_IN_INDEX
             FROM INFORMATION_SCHEMA.STATISTICS
@@ -161,8 +171,8 @@ public class MySQLIntrospectionProvider implements IntrospectionProvider {
             """;
 
         try (PreparedStatement stmt = connection.prepareStatement(query)) {
-            stmt.setString(1, database);
-            stmt.setString(2, tableName);
+            stmt.setString(1, schemaName);
+            stmt.setString(2, bareName);
 
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
