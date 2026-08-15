@@ -61,6 +61,13 @@ const emptySession = () => ({
   // build (falls back to config?.html), or after a build that DID need a real
   // reload (self-review changed something), in which case it's just config.html.
   renderHtml: null,
+  // A user-set name from the breadcrumb title editor, taking precedence over
+  // both the saved dashboard's name and the HTML-derived config.title (see
+  // titleFromHtml in DashboardWorkspace) until the next agent build re-derives
+  // one — same rationale as titleFromHtml's own comment: without this, a
+  // rename would only "stick" until the next chat turn overwrites the title
+  // from the regenerated HTML's <title>.
+  titleOverride: null,
 })
 
 // A single stable reference for "no session yet" reads. useDashboardSession's
@@ -278,6 +285,14 @@ export const useDashboardChatStore = create((set, get) => ({
             messages: [...cur.messages, { role: 'agent', text: 'Done — built and verified against your data. Saved as a draft — tell me what to change.' }],
           }
         })
+        // completeBuildTurn (the backend's own persistence for this turn) just
+        // wrote its own HTML-derived name over whatever was there — a rename
+        // made before/during this turn needs re-applying now, or it would only
+        // ever have been true in this tab's UI, never in the saved row.
+        const { titleOverride, savedId } = get().getSession(key)
+        if (titleOverride && savedId) {
+          savedDashboardsAPI.updateDashboard(savedId, { name: titleOverride }).catch(() => {})
+        }
       },
       onError: (e) => get().patchSession(key, (cur) => ({
         thinking: false,
@@ -355,7 +370,7 @@ export const useDashboardChatStore = create((set, get) => ({
     const session = state.sessions[k] || emptySession()
     const body = {
       connectionId,
-      name: cfg.title || 'Untitled dashboard',
+      name: session.titleOverride || cfg.title || 'Untitled dashboard',
       description: cfg.description || '',
       dashboardConfig: JSON.stringify(cfg),
       chatMessages: JSON.stringify(msgs || session.messages),
@@ -374,6 +389,23 @@ export const useDashboardChatStore = create((set, get) => ({
     } catch (e) {
       get().patchSession(key, { dirty: true })
       throw e
+    }
+  },
+
+  // Breadcrumb title editor. A saved dashboard renames immediately via a
+  // lightweight partial update (SavedDashboardService.updateDashboard only
+  // touches fields that are non-null, so this can't clobber the config/chat
+  // history). A not-yet-saved dashboard has no row to PUT — titleOverride
+  // alone is enough, since persistDraft reads it as the name on first save.
+  renameDashboard: async (key, name) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    get().patchSession(key, { titleOverride: trimmed })
+    const state = get()
+    const k = resolveKeyIn(state, key)
+    const session = state.sessions[k] || emptySession()
+    if (session.savedId) {
+      await savedDashboardsAPI.updateDashboard(session.savedId, { name: trimmed })
     }
   },
 }))
@@ -396,4 +428,5 @@ export const useDashboardChatActions = () =>
     submitPrompt: state.submitPrompt,
     resumeIfRunning: state.resumeIfRunning,
     persistDraft: state.persistDraft,
+    renameDashboard: state.renameDashboard,
   })))

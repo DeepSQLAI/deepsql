@@ -71,6 +71,45 @@
   white-space: nowrap;
   max-width: 320px;
 }
+
+.crumbEditable {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  padding: 4px 6px;
+  margin: 0 -6px;
+  border-radius: 7px;
+  cursor: text;
+  min-width: 0;
+  transition: background 120ms ease-out;
+}
+.crumbEditable:hover { background: #f2f2f2; }
+
+.crumbEditIcon {
+  flex-shrink: 0;
+  color: #b0b0b0;
+  transition: color 120ms ease-out;
+}
+.crumbEditable:hover .crumbEditIcon { color: #777; }
+
+.crumbInput {
+  font-size: 14px;
+  font-weight: 590;
+  color: #111;
+  letter-spacing: -0.006em;
+  border: 1px solid #cfcaf0;
+  border-radius: 7px;
+  background: #fff;
+  padding: 3px 7px;
+  margin: 0 -7px;
+  width: 220px;
+  max-width: 320px;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(83, 74, 183, 0.12);
+}
+
 .spacer { flex: 1; }
 
 .pillLive,
@@ -123,6 +162,137 @@
   flex-direction: column;
   gap: 10px;
 }
+
+/* v0.dev-style intro: before the first message, the composer sits centered in
+   an otherwise-empty workspace. The instant the user sends, this whole column
+   collapses from full-width to the 340px docked panel and its centered content
+   becomes top-aligned — both genuinely animatable (width, margin, transform),
+   so the dock reads as one continuous motion rather than a cut. The canvas
+   mounts a beat later (it isn't rendered at all during intro), sliding the
+   docked panel's border-right into place as it appears. */
+.bodyIntro {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background:
+    radial-gradient(ellipse 700px 420px at 50% 38%, rgba(83, 74, 183, 0.06), transparent 70%),
+    #fff;
+}
+
+.agentIntro {
+  width: 100%;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  background: transparent;
+  padding: 32px 24px;
+  overflow-y: auto;
+  transition: width 420ms cubic-bezier(0.2, 0.8, 0.2, 1), background 420ms ease-out;
+}
+
+.agentIntro::before,
+.agentIntro::after {
+  content: '';
+  flex: 1;
+  transition: flex-basis 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Fired the instant the first message is sent: collapse the centered hero
+   down to the docked panel's width. The heading/example grid have already
+   unmounted (see the JSX's `!docking` guards) so only the composer is left
+   to glide from a wide centered card into the narrow docked composer. */
+.agentDocking {
+  width: 340px;
+  background: #fafafa;
+}
+.agentDocking::before { flex: 0 1 0%; }
+.agentDocking::after { flex: 1 1 auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .agent, .agentIntro, .agentDocking { transition: none; animation: none; }
+}
+
+.introHead {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  width: 100%;
+  max-width: 640px;
+  margin-bottom: 22px;
+  animation: introFade 380ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes introFade {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .introHead, .exampleGridIntro { animation: none; }
+}
+
+.agentScrollIntro { display: none; }
+
+.composerIntro {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  width: 100%;
+  max-width: 640px;
+  padding: 10px;
+  border: 1px solid #e2e2e2;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 12px 32px -14px rgba(83, 74, 183, 0.22), 0 2px 8px rgba(0, 0, 0, 0.04);
+  animation: introFade 380ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: max-width 420ms cubic-bezier(0.2, 0.8, 0.2, 1), border-radius 420ms ease-out,
+    box-shadow 420ms ease-out, margin 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.composerDocking {
+  max-width: 100%;
+  margin: 0 -12px -12px;
+  width: calc(100% + 24px);
+  border-radius: 0;
+  box-shadow: none;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+}
+
+.exampleGridIntro {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  max-width: 640px;
+  margin: 16px 0 20px;
+  animation: introFade 380ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (max-width: 620px) {
+  .exampleGridIntro { grid-template-columns: 1fr; }
+}
+
+.backLinkIntro {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 20px;
+  border: 1px solid #e2e2e2;
+  background: #fff;
+  border-radius: 9px;
+  padding: 7px 12px;
+  font-size: 13px;
+  color: #555;
+  cursor: pointer;
+  transition: background 120ms ease-out;
+}
+.backLinkIntro:hover { background: #f3f3f3; }
 
 .bubbleAgent {
   background: #fff;

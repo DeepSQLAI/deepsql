@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
-import { LineChart, ArrowUp, ChevronLeft, Sparkles, Check, Loader2, Brain, PencilRuler, ClipboardCheck, TrendingUp, Users, PieChart, Layers, Code2, X, Copy, Undo2, Play, Database, History, RotateCcw, Eye, RefreshCw, ChevronDown, BellRing, Trash2 } from 'lucide-react'
+import { LineChart, ArrowUp, ChevronLeft, Sparkles, Check, Loader2, Brain, PencilRuler, Pencil, ClipboardCheck, TrendingUp, Users, PieChart, Layers, Code2, X, Copy, Undo2, Play, Database, History, RotateCcw, Eye, RefreshCw, ChevronDown, BellRing, Trash2 } from 'lucide-react'
 import DashboardArtifact from '@/components/DashboardArtifact'
 import ShareMenu from './ShareMenu'
 import { savedDashboardsAPI } from '@/lib/api/client'
@@ -117,8 +117,8 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
   const key = keyRef.current
 
   const session = useDashboardSession(key)
-  const { ensureSession, patchSession, releaseAlias, submitPrompt, resumeIfRunning, persistDraft } = useDashboardChatActions()
-  const { messages, thinking, steps, startedAt, config, savedId, dirty, liveShell, liveWidget, renderHtml } = session
+  const { ensureSession, patchSession, releaseAlias, submitPrompt, resumeIfRunning, persistDraft, renameDashboard } = useDashboardChatActions()
+  const { messages, thinking, steps, startedAt, config, savedId, dirty, liveShell, liveWidget, renderHtml, titleOverride } = session
 
   const [input, setInput] = useState('')
   const [elapsed, setElapsed] = useState(0)
@@ -281,14 +281,54 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
   // to show, and resetting again here would wrongly wipe the ones just logged.
   useEffect(() => { if (liveShell) setQueries([]) }, [liveShell])
 
-  const name = config?.title || (isNew ? 'New dashboard' : dashboard?.name) || 'Dashboard'
+  // A user's explicit rename always wins — over both the HTML-derived title
+  // and the saved row's name — until they rename again (see renameDashboard).
+  const name = titleOverride || config?.title || (isNew ? 'Untitled dashboard' : dashboard?.name) || 'Untitled dashboard'
   // "Live" once published to the web; the ShareMenu keeps this in sync.
   const status = isPublic ? 'live' : 'draft'
   const sourceDirty = sourceDraft !== (config?.html || '')
 
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState(name)
+  const titleInputRef = useRef(null)
+
+  function startEditingTitle() {
+    setTitleDraft(name)
+    setEditingTitle(true)
+  }
+  function commitTitle() {
+    setEditingTitle(false)
+    const trimmed = titleDraft.trim()
+    if (!trimmed || trimmed === name) return
+    renameDashboard(key, trimmed)
+  }
+
+  useEffect(() => {
+    if (editingTitle) { titleInputRef.current?.focus(); titleInputRef.current?.select() }
+  }, [editingTitle])
+
+  // v0.dev-style intro: a brand-new dashboard starts with the composer centered
+  // and no side panel/canvas chrome at all. The instant the first user message
+  // is sent, it docks into the left panel and the canvas takes over — driven by
+  // whether a user message exists yet (not local state), so it resolves
+  // correctly even if this component remounts mid-turn (e.g. reopening a
+  // dashboard whose first turn already completed skips the intro entirely).
+  const hasUserMessage = messages.some((m) => m.role === 'user')
+  const [docking, setDocking] = useState(false)
+  // Keep rendering the intro layout for one animation cycle after the message
+  // that ends it — flipping the layout in the same commit as the message would
+  // cut straight to the docked panel instead of gliding into it.
+  const intro = isNew && (!hasUserMessage || docking)
+  useEffect(() => {
+    if (!docking) return undefined
+    const id = setTimeout(() => setDocking(false), 420)
+    return () => clearTimeout(id)
+  }, [docking])
+
   function submit(directPrompt) {
     const prompt = (directPrompt ?? input).trim()
     if (!prompt || thinking) return
+    if (isNew && !hasUserMessage) setDocking(true)
     setInput('')
     submitPrompt(key, connectionId, prompt)
   }
@@ -445,7 +485,24 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
         </button>
         <button className={styles.crumbLink} onClick={onClose}>Dashboards</button>
         <span className={styles.sep}>/</span>
-        <span className={styles.crumbCur}>{name}</span>
+        {editingTitle ? (
+          <input
+            ref={titleInputRef}
+            className={styles.crumbInput}
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onBlur={commitTitle}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); commitTitle() }
+              if (e.key === 'Escape') { e.preventDefault(); setEditingTitle(false) }
+            }}
+          />
+        ) : (
+          <button className={styles.crumbEditable} onClick={startEditingTitle} title="Rename dashboard">
+            <span className={styles.crumbCur}>{name}</span>
+            <Pencil size={12} className={styles.crumbEditIcon} />
+          </button>
+        )}
         <span className={styles.spacer} />
         <span className={status === 'live' ? styles.pillLive : styles.pillDraft}>{status === 'live' ? 'Live' : 'Draft'}</span>
         {config && (dirty || !savedId) && (
@@ -462,15 +519,22 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
         />
       </header>
 
-      <div className={styles.body}>
-        <aside className={styles.agent}>
-          <div className={styles.agentScroll} ref={scrollRef}>
-            {messages.map((msg, i) => (
+      <div className={intro ? styles.bodyIntro : styles.body}>
+        <aside className={intro ? `${styles.agentIntro} ${docking ? styles.agentDocking : ''}` : styles.agent}>
+          {intro && !docking && (
+            <div className={styles.introHead}>
+              <span className={styles.newIcon}><Sparkles size={22} color="#534AB7" /></span>
+              <h2 className={styles.newTitle}>Build a dashboard</h2>
+              <p className={styles.newSub}>Describe what you want and the DeepSQL agent builds it — read-only, grounded on your data.</p>
+            </div>
+          )}
+          <div className={intro ? styles.agentScrollIntro : styles.agentScroll} ref={scrollRef}>
+            {!intro && messages.map((msg, i) => (
               <div key={i} className={msg.role === 'user' ? styles.bubbleUser : (msg.error ? styles.bubbleErr : styles.bubbleAgent)}>
                 {msg.text}
               </div>
             ))}
-            {thinking && (
+            {!intro && thinking && (
               <div className={styles.trace}>
                 <div className={styles.traceHead}>
                   <span className={styles.traceHeadLabel}>
@@ -501,7 +565,18 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
               </div>
             )}
           </div>
-          <div className={styles.composer}>
+          {intro && !docking && (
+            <div className={styles.exampleGridIntro}>
+              {EXAMPLE_PROMPTS.map(({ icon: Icon, title, prompt }) => (
+                <button key={title} className={styles.exampleCard} onClick={() => submit(prompt)} disabled={thinking}>
+                  <span className={styles.exampleIcon}><Icon size={16} /></span>
+                  <span className={styles.exampleTitle}>{title}</span>
+                  <span className={styles.examplePrompt}>{prompt}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className={intro ? `${styles.composerIntro} ${docking ? styles.composerDocking : ''}` : styles.composer}>
             <textarea
               ref={inputRef}
               rows={1}
@@ -514,8 +589,10 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
             />
             <button className={styles.sendBtn} onClick={() => submit()} disabled={thinking || !input.trim()} aria-label="Send"><ArrowUp size={16} /></button>
           </div>
+          {intro && !docking && <button className={styles.backLinkIntro} onClick={onClose}><ChevronLeft size={14} /> Back to dashboards</button>}
         </aside>
 
+        {!intro && (
         <main className={styles.canvas}>
           {config?.html || liveConfig ? (
             <>
@@ -818,33 +895,18 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
             <div className={styles.newCanvas}>
               <div className={styles.newCanvasInner}>
                 <span className={styles.newIcon}><Sparkles size={22} color="#534AB7" /></span>
-                <h2 className={styles.newTitle}>{isNew ? 'Build a dashboard' : 'Nothing built here yet'}</h2>
+                <h2 className={styles.newTitle}>{thinking ? 'Building your dashboard…' : 'Nothing built here yet'}</h2>
                 <p className={styles.newSub}>
-                  {isNew
-                    ? 'Describe what you want on the left and the DeepSQL agent builds it here — read-only, grounded on your data.'
+                  {thinking
+                    ? 'The agent is grounding on your schema and verifying every query — this usually takes a bit.'
                     : 'This dashboard doesn’t have a build yet — the chat on the left may just be planning so far. Ask for a chart to get started.'}
                 </p>
-
-                <div className={styles.exampleGrid}>
-                  {EXAMPLE_PROMPTS.map(({ icon: Icon, title, prompt }) => (
-                    <button
-                      key={title}
-                      className={styles.exampleCard}
-                      onClick={() => submit(prompt)}
-                      disabled={thinking}
-                    >
-                      <span className={styles.exampleIcon}><Icon size={16} /></span>
-                      <span className={styles.exampleTitle}>{title}</span>
-                      <span className={styles.examplePrompt}>{prompt}</span>
-                    </button>
-                  ))}
-                </div>
-
-                <button className={styles.backLink} onClick={onClose}><ChevronLeft size={14} /> Back to dashboards</button>
+                {!thinking && <button className={styles.backLink} onClick={onClose}><ChevronLeft size={14} /> Back to dashboards</button>}
               </div>
             </div>
           )}
         </main>
+        )}
       </div>
     </div>
   )
