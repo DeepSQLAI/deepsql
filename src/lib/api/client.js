@@ -2691,7 +2691,7 @@ export const dashboardGenAPI = {
   //   onStep({ type, message }) · onDone({ success, dashboardConfig }) · onError(Error)
   // Returns an abort fn.
   generateStream: (connectionId, prompt, currentConfig, dashboardId, handlers = {}) => {
-    const { onStep, onDone, onError, onCreated } = handlers;
+    const { onStep, onChunk, onDone, onError, onCreated } = handlers;
     const controller = new AbortController();
     const body = JSON.stringify({ connectionId, prompt, currentConfig: currentConfig || null, dashboardId: dashboardId || null });
     const doFetch = () =>
@@ -2757,6 +2757,7 @@ export const dashboardGenAPI = {
           // right away rather than waiting for the whole generation to finish.
           if (event === "created") onCreated && onCreated(data);
           else if (event === "step") onStep && onStep(data);
+          else if (event === "chunk") onChunk && onChunk(data);
           // `chat` = out-of-context reply (hi/thanks); must not fall through to `done`
           // or the workspace appends the canned "Done — built…" save message.
           else if (event === "chat") { finished = true; onDone && onDone(data); }

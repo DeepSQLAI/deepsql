@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useState } from 'react'
+import { useRef, useEffect, useCallback, useState, useImperativeHandle, forwardRef } from 'react'
 import { dashboardQueryAPI } from '@/lib/api/client'
 import { THEME_CSS } from './dashboardTheme'
 import { CHART_JS } from './dashboardChartLib'
@@ -52,9 +52,64 @@ const BRIDGE = `
   window.addEventListener('load', function(){
     reportHeight();
     try { new ResizeObserver(reportHeight).observe(document.body); } catch(e){}
+    // Progressive build: an empty [data-widget] slot is otherwise just a static
+    // blank box until its widget chunk arrives. A shimmer says "this is loading,"
+    // not "this is broken" — applied as an injected class so it works regardless
+    // of the agent's own CSS, and self-removes the instant mount-widget fills the
+    // slot (its innerHTML write replaces this shimmer content entirely).
+    try {
+      var style = document.createElement('style');
+      style.textContent = '@keyframes dsqlShimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}'
+        + '.dsql-widget-loading{min-height:80px;border-radius:inherit;'
+        + 'background:linear-gradient(90deg,rgba(0,0,0,0.04) 25%,rgba(0,0,0,0.08) 37%,rgba(0,0,0,0.04) 63%);'
+        + 'background-size:200% 100%;animation:dsqlShimmer 1.4s ease-in-out infinite}'
+        + '@media (prefers-reduced-motion: reduce){.dsql-widget-loading{animation:none;background:rgba(0,0,0,0.04)}}';
+      document.head.appendChild(style);
+      document.querySelectorAll('[data-widget]').forEach(function(el){
+        if (!el.innerHTML.trim()) el.classList.add('dsql-widget-loading');
+      });
+    } catch(e){}
   });
   window.addEventListener('error', function(e){
     send({ __deepsql:true, type:'jserror', message: (e && e.message) || 'script error' });
+  });
+  // Progressive build: the parent injects one verified widget at a time into its
+  // [data-widget] slot instead of reloading the whole document. innerHTML does not
+  // execute <script> tags, so each one is re-created and appended in place —
+  // that's the only way to run script content assigned via innerHTML. The fade+
+  // rise transition is applied here (inline style, not a class) so it works
+  // regardless of what CSS the agent's own shell defines, and is skipped
+  // entirely under prefers-reduced-motion.
+  var reduceMotion = false;
+  try { reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch(e){}
+  window.addEventListener('message', function(e){
+    var d = e.data;
+    if (!d || d.__deepsql !== true || d.type !== 'mount-widget') return;
+    var slot = document.querySelector('[data-widget="' + d.id + '"]');
+    if (!slot) return;
+    slot.classList.remove('dsql-widget-loading');
+    slot.innerHTML = d.html;
+    var scripts = slot.querySelectorAll('script');
+    for (var i = 0; i < scripts.length; i++) {
+      var old = scripts[i];
+      var fresh = document.createElement('script');
+      for (var j = 0; j < old.attributes.length; j++) {
+        fresh.setAttribute(old.attributes[j].name, old.attributes[j].value);
+      }
+      fresh.textContent = old.textContent;
+      old.parentNode.replaceChild(fresh, old);
+    }
+    if (!reduceMotion) {
+      slot.style.opacity = '0';
+      slot.style.transform = 'translateY(8px)';
+      slot.style.transition = 'opacity 420ms cubic-bezier(0.2,0.8,0.2,1), transform 420ms cubic-bezier(0.2,0.8,0.2,1)';
+      requestAnimationFrame(function(){
+        requestAnimationFrame(function(){
+          slot.style.opacity = '1';
+          slot.style.transform = 'translateY(0)';
+        });
+      });
+    }
   });
 })();
 `
@@ -97,7 +152,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const REDUCED_MOTION = typeof window !== 'undefined'
   && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 
-export default function DashboardArtifact({ connectionId, html, onError, queryFn, onQuery }) {
+const DashboardArtifact = forwardRef(function DashboardArtifact({ connectionId, html, onError, queryFn, onQuery }, ref) {
   const iframeRef = useRef(null)
   const [height, setHeight] = useState(600)
   const [loaded, setLoaded] = useState(false)
@@ -120,6 +175,30 @@ export default function DashboardArtifact({ connectionId, html, onError, queryFn
   function post(msg) {
     iframeRef.current?.contentWindow?.postMessage(msg, '*')
   }
+
+  // Progressive build: DashboardWorkspace calls this as each dashboard-widget
+  // chunk arrives over SSE, well before the whole generation turn finishes.
+  // Mounting is the iframe's own job (see the bridge's 'mount-widget' handler,
+  // which also re-executes the widget's <script>) — this just forwards the call.
+  // A widget can arrive before the shell's onLoad fires (SSE is faster than a
+  // fresh iframe document parse+load); queue it and flush once loaded instead
+  // of posting into a contentWindow whose [data-widget] slots don't exist yet.
+  const pendingWidgetsRef = useRef([])
+  useImperativeHandle(ref, () => ({
+    mountWidget(id, widgetHtml) {
+      if (!loaded) { pendingWidgetsRef.current.push([id, widgetHtml]); return }
+      post({ __deepsql: true, type: 'mount-widget', id, html: widgetHtml })
+    },
+  }), [loaded])
+
+  useEffect(() => {
+    if (!loaded || pendingWidgetsRef.current.length === 0) return
+    const queued = pendingWidgetsRef.current
+    pendingWidgetsRef.current = []
+    for (const [id, widgetHtml] of queued) {
+      post({ __deepsql: true, type: 'mount-widget', id, html: widgetHtml })
+    }
+  }, [loaded])
 
   const pump = useCallback(() => {
     while (inflightRef.current < MAX_CONCURRENT && queueRef.current.length > 0) {
@@ -219,4 +298,6 @@ export default function DashboardArtifact({ connectionId, html, onError, queryFn
       }}
     />
   )
-}
+})
+
+export default DashboardArtifact

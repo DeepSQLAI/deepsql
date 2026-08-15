@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
-import { LineChart, ArrowUp, ChevronLeft, Sparkles, Check, Loader2, Brain, PencilRuler, ClipboardCheck, TrendingUp, Users, PieChart, Layers, Code2, X, Copy, Undo2, Play } from 'lucide-react'
+import { LineChart, ArrowUp, ChevronLeft, Sparkles, Check, Loader2, Brain, PencilRuler, ClipboardCheck, TrendingUp, Users, PieChart, Layers, Code2, X, Copy, Undo2, Play, Database } from 'lucide-react'
 import DashboardArtifact from '@/components/DashboardArtifact'
 import ShareMenu from './ShareMenu'
 import { useDashboardChatStore, useDashboardSession, useDashboardChatActions } from '@/lib/stores/useDashboardChatStore'
@@ -8,7 +8,7 @@ import styles from './DashboardWorkspace.module.css'
 const Editor = lazy(() => import('@monaco-editor/react'))
 
 // Icon per agent step phase, so the live trace reads at a glance.
-const STEP_ICON = { grounding: Brain, planning: PencilRuler, validating: ClipboardCheck, done: Check }
+const STEP_ICON = { grounding: Brain, planning: PencilRuler, sql: Database, validating: ClipboardCheck, done: Check }
 
 // Mirror of DashboardAgentService.extractTitle — a dashboard's name comes from
 // the artifact's <title> (then its <h1>). The backend only derives it while
@@ -50,7 +50,7 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
 
   const session = useDashboardSession(key)
   const { ensureSession, patchSession, releaseAlias, submitPrompt, resumeIfRunning, persistDraft } = useDashboardChatActions()
-  const { messages, thinking, steps, startedAt, config, savedId, dirty } = session
+  const { messages, thinking, steps, startedAt, config, savedId, dirty, liveShell, liveWidget, renderHtml } = session
 
   const [input, setInput] = useState('')
   const [elapsed, setElapsed] = useState(0)
@@ -64,6 +64,21 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
   const [queries, setQueries] = useState([])
   const scrollRef = useRef(null)
   const inputRef = useRef(null)
+  const artifactRef = useRef(null)
+  const mountedWidgetSeqRef = useRef(0)
+
+  // Progressive build: as soon as the shell chunk lands, show it as the live
+  // canvas (a build in progress has its own in-flight artifact, distinct from
+  // `config` — the last COMPLETED build — so this never clobbers or races it).
+  // Each widget chunk afterward is a one-shot mount into the already-loaded
+  // iframe; `seq` (not the widget id) gates the effect so the SAME widget id
+  // reappearing later (a self-review correction) still re-mounts.
+  const liveConfig = liveShell ? { renderMode: 'artifact', html: liveShell } : null
+  useEffect(() => {
+    if (!liveWidget || liveWidget.seq === mountedWidgetSeqRef.current) return
+    mountedWidgetSeqRef.current = liveWidget.seq
+    artifactRef.current?.mountWidget(liveWidget.id, liveWidget.html)
+  }, [liveWidget])
 
   // Seed this session exactly once per mount — restoring the persisted chat/
   // config for an existing dashboard, or a greeting for a new one. Never
@@ -151,9 +166,16 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
     setSourceDraft(html)
     setSourceEpoch((e) => e + 1)
   }, [config?.html])
-  // Query log is per-artifact — a new build/edit reloads the iframe, so its
-  // query history starts over too (mirrors DashboardArtifact's own reset).
-  useEffect(() => { setQueries([]) }, [config?.html])
+  // Query log is per-artifact. Reset the instant a NEW build/edit starts
+  // streaming (liveShell's rising edge) rather than waiting for config.html to
+  // change at the end — a live build already runs each widget's query well
+  // before onDone, so waiting for completion left the old dashboard's queries
+  // visible (and mixed with the new ones) for the whole build. Do NOT also
+  // reset on config.html changing: once a build finishes without a reload
+  // (nothing for self-review to correct — see onDone in useDashboardChatStore),
+  // config.html changes from null/old to the final string with no new queries
+  // to show, and resetting again here would wrongly wipe the ones just logged.
+  useEffect(() => { if (liveShell) setQueries([]) }, [liveShell])
 
   const name = config?.title || (isNew ? 'New dashboard' : dashboard?.name) || 'Dashboard'
   // "Live" once published to the web; the ShareMenu keeps this in sync.
@@ -291,12 +313,25 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
         </aside>
 
         <main className={styles.canvas}>
-          {config?.html ? (
+          {config?.html || liveConfig ? (
             <>
               <div className={styles.canvasToolbar}>
-                <div className={styles.viewToggle}>
-                  <button className={viewMode === 'source' ? styles.viewToggleBtnActive : styles.viewToggleBtn} onClick={() => setViewMode('source')}>Source</button>
-                  <button className={viewMode === 'preview' ? styles.viewToggleBtnActive : styles.viewToggleBtn} onClick={() => setViewMode('preview')}>Preview</button>
+                <div className={styles.canvasToolbarLeft}>
+                  <div className={styles.viewToggle}>
+                    {/* Editing source mid-build would be edited out from under the
+                        user the moment the next chunk lands — Source only makes
+                        sense once there's a finished, stable artifact. */}
+                    <button className={viewMode === 'source' ? styles.viewToggleBtnActive : styles.viewToggleBtn} onClick={() => setViewMode('source')} disabled={!config?.html} title={!config?.html ? 'Available once the build finishes' : undefined}>Source</button>
+                    <button className={viewMode === 'preview' ? styles.viewToggleBtnActive : styles.viewToggleBtn} onClick={() => setViewMode('preview')}>Preview</button>
+                  </div>
+                  {/* Only a real build in progress ever has a liveShell — a chat-only
+                      reply (e.g. "hi") never emits one, so this never shows for that. */}
+                  {liveConfig && !config?.html && (
+                    <span className={styles.buildingBadge}>
+                      <span className={styles.buildingDot} />
+                      Building dashboard…
+                    </span>
+                  )}
                 </div>
                 <div className={styles.canvasToolbarRight}>
                   {viewMode === 'source' && (
@@ -315,15 +350,16 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
               </div>
 
               <div className={styles.canvasBody}>
-                <div className={styles.canvasMain} style={{ display: viewMode === 'preview' ? 'block' : 'none' }}>
+                <div className={styles.canvasMain} style={{ display: viewMode === 'preview' || !config?.html ? 'block' : 'none' }}>
                   <DashboardArtifact
+                    ref={artifactRef}
                     connectionId={connectionId}
-                    html={config.html}
+                    html={liveConfig ? liveConfig.html : (renderHtml || config.html)}
                     onError={(msg) => console.warn('Dashboard artifact error:', msg)}
                     onQuery={logQuery}
                   />
                 </div>
-                {viewMode === 'source' && (
+                {viewMode === 'source' && config?.html && (
                   <div className={styles.sourceEditor}>
                     <Suspense fallback={<div className={styles.editorLoading}>Loading editor…</div>}>
                       <Editor

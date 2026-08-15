@@ -22,6 +22,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Synchronous client for the DeepSQL Agent webui API, reached over the compose
@@ -144,6 +146,26 @@ public class AgentChatClient {
      * assembled assistant text and the tool steps it ran.
      */
     public AgentReply sendAndAwait(String sessionId, String message) {
+        return sendAndAwait(sessionId, message, null);
+    }
+
+    /** Live per-tool-call notifications ("SQL · select …", "skill · …") as they happen. */
+    public interface ToolStepListener {
+        void onToolStep(String label);
+    }
+
+    /** A completed dashboard-shell or dashboard-widget fenced block, as soon as it closes. */
+    public record ArtifactChunk(String kind, String id, String html) { }
+
+    public interface ArtifactChunkListener {
+        void onChunk(ArtifactChunk chunk);
+    }
+
+    public AgentReply sendAndAwait(String sessionId, String message, ToolStepListener toolSteps) {
+        return sendAndAwait(sessionId, message, toolSteps, null);
+    }
+
+    public AgentReply sendAndAwait(String sessionId, String message, ToolStepListener toolSteps, ArtifactChunkListener chunks) {
         String streamId;
         try {
             JsonNode started = postJson("/api/chat/start", Map.of(
@@ -156,10 +178,10 @@ public class AgentChatClient {
         } catch (Exception e) {
             return AgentReply.fail("could not start agent turn: " + describe(e));
         }
-        return consumeStream(streamId);
+        return consumeStream(streamId, toolSteps, chunks);
     }
 
-    private AgentReply consumeStream(String streamId) {
+    private AgentReply consumeStream(String streamId, ToolStepListener toolStepListener, ArtifactChunkListener chunkListener) {
         String url = webuiUrl + "/api/chat/stream?stream_id=" + URLEncoder.encode(streamId, StandardCharsets.UTF_8);
         HttpRequest req = HttpRequest.newBuilder(URI.create(url))
             .header("Accept", "text/event-stream")
@@ -171,6 +193,13 @@ public class AgentChatClient {
         List<String> toolSteps = new ArrayList<>();
         boolean ended = false;
         String streamError = null;
+        // Scan position into `answer` for chunk detection — advances past each
+        // extracted dashboard-shell/dashboard-widget block so a closed fence is
+        // never re-matched, and resets with the buffer on `tool` (a chunk only
+        // ever appears in the FINAL answer, after the last tool call, per the
+        // skill's "no tool calls after it" contract — so a reset never splits one).
+        int[] chunkScanPos = { 0 };
+        int[] sqlStepCount = { 0 };
         try {
             HttpResponse<InputStream> resp = http.send(req, HttpResponse.BodyHandlers.ofInputStream());
             if (resp.statusCode() / 100 != 2) {
@@ -186,15 +215,25 @@ public class AgentChatClient {
                         String data = line.substring(5).trim();
                         if (event == null) continue;
                         switch (event) {
-                            case "token" -> answer.append(textField(data, "text"));
+                            case "token" -> {
+                                answer.append(textField(data, "text"));
+                                if (chunkListener != null) chunkScanPos[0] = scanForChunks(answer, chunkScanPos[0], chunkListener);
+                            }
                             case "tool" -> {
                                 String s = toolStep(data);
-                                if (s != null) toolSteps.add(s);
+                                if (s != null) {
+                                    toolSteps.add(s);
+                                    if (toolStepListener != null) {
+                                        String natural = naturalLanguageStep(data, sqlStepCount);
+                                        if (natural != null) toolStepListener.onToolStep(natural);
+                                    }
+                                }
                                 // Everything streamed before a tool call is interim
                                 // reasoning ("I'm pulling the schema…"). Channel users
                                 // only want the final answer, so drop it — the text
                                 // after the LAST tool is the real reply.
                                 answer.setLength(0);
+                                chunkScanPos[0] = 0;
                             }
                             case "error", "apperror" -> {
                                 String err = textField(data, "message");
@@ -274,6 +313,30 @@ public class AgentChatClient {
         return (node == null || node.isMissingNode() || node.isNull()) ? null : node.asText(null);
     }
 
+    // Matches a CLOSED fence only — requires the trailing ``` on its own line, so a
+    // fence still being streamed (no closing marker yet) never matches and is left
+    // for the next token to complete. Group 2 (id="...") is present only on a widget
+    // block. DOTALL so the body can span many token-appended lines.
+    private static final Pattern CHUNK_FENCE = Pattern.compile(
+        "```dashboard-(shell|widget)(?:\\s+id=\"([^\"]+)\")?\\s*\\n(.*?)\\n```",
+        Pattern.DOTALL);
+
+    /** Scans answer[fromPos..] for complete chunks, firing the listener for each. Returns the new scan position. */
+    private int scanForChunks(StringBuilder answer, int fromPos, ArtifactChunkListener listener) {
+        Matcher m = CHUNK_FENCE.matcher(answer).region(fromPos, answer.length());
+        int pos = fromPos;
+        while (m.find()) {
+            String kind = m.group(1);
+            String id = m.group(2);
+            String html = m.group(3);
+            try {
+                listener.onChunk(new ArtifactChunk(kind, id, html));
+            } catch (Exception ignored) { }
+            pos = m.end();
+        }
+        return pos;
+    }
+
     private String textField(String data, String field) {
         try {
             return objectMapper.readTree(data).path(field).asText("");
@@ -293,6 +356,40 @@ public class AgentChatClient {
             String skill = args.path("name").asText("");
             if (!skill.isBlank()) return "skill · " + skill;
             return name.isBlank() ? null : name;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // Present-progressive phrase per tool, for a user-facing live trace — never the
+    // raw tool name, query text, or a table/column name (the dashboard artifact
+    // itself is held to the same no-internals-visible bar; the trace shouldn't leak
+    // what the artifact is required to hide).
+    private static final String[] SQL_STEP_PHRASES = {
+        "Checking the numbers…", "Double-checking the data…", "Verifying a query against your data…",
+        "Confirming the figures…", "Running another check…",
+    };
+
+    // sqlStepCount varies the SQL-verification phrase across calls so a multi-widget
+    // build doesn't repeat one line 6 times — passed in per-call via int[] (a single-
+    // element mutable box) rather than an instance field, since this @Service is a
+    // shared singleton and an instance field would race across concurrent turns from
+    // different users/dashboards.
+    private String naturalLanguageStep(String data, int[] sqlStepCount) {
+        try {
+            JsonNode d = objectMapper.readTree(data);
+            String name = d.path("name").asText("");
+            JsonNode args = d.path("args");
+            if (!args.path("query").asText("").isBlank()) {
+                return SQL_STEP_PHRASES[sqlStepCount[0]++ % SQL_STEP_PHRASES.length];
+            }
+            if ("skill_view".equals(name)) return "Loading dashboard-building expertise…";
+            return switch (name.replaceFirst("^mcp_deepsql_", "")) {
+                case "get_brain_context", "list_business_rules" -> "Reviewing your business rules…";
+                case "get_schema", "get_relationships" -> "Understanding your database structure…";
+                case "execute_sql" -> SQL_STEP_PHRASES[sqlStepCount[0]++ % SQL_STEP_PHRASES.length];
+                default -> null; // an unrecognized/future tool stays silent rather than leaking its raw name
+            };
         } catch (Exception e) {
             return null;
         }
