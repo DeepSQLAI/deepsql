@@ -124,6 +124,38 @@ public class EmailService {
         return summary;
     }
 
+    public void sendDashboardAlert(String dashboardName, String condition, String reason, List<String> recipients) throws MessagingException {
+        JavaMailSenderImpl mailSender = buildMailSender();
+        MimeMessage message = mailSender.createMimeMessage();
+        MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+
+        helper.setFrom(resolveFromEmail());
+        helper.setTo(recipients.toArray(new String[0]));
+        helper.setSubject("🔔 Dashboard alert: " + dashboardName);
+        helper.setText(buildDashboardAlertEmailHtml(dashboardName, condition, reason), true);
+
+        mailSender.send(message);
+        log.info("Dashboard alert email sent to {} recipients for dashboard: {}", recipients.size(), dashboardName);
+    }
+
+    private String buildDashboardAlertEmailHtml(String dashboardName, String condition, String reason) {
+        return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"></head>"
+            + "<body style=\"font-family: Arial, sans-serif; line-height: 1.6; color: #333;\">"
+            + "<div style=\"background-color: #f59e0b; color: white; padding: 20px; border-radius: 8px 8px 0 0;\">"
+            + "<h1 style=\"margin: 0;\">Dashboard alert</h1>"
+            + "<p style=\"margin: 5px 0 0 0; opacity: 0.9;\">" + escapeHtml(dashboardName) + "</p>"
+            + "</div>"
+            + "<div style=\"padding: 20px; background-color: #f9fafb; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;\">"
+            + "<p style=\"margin: 0 0 8px;\"><strong>Condition:</strong> " + escapeHtml(condition) + "</p>"
+            + "<p style=\"margin: 0;\"><strong>Why it fired:</strong> " + escapeHtml(reason) + "</p>"
+            + "</div></body></html>";
+    }
+
+    private String escapeHtml(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
     public void sendTestEmail(String recipient) throws MessagingException {
         JavaMailSenderImpl mailSender = buildMailSender();
         MimeMessage message = mailSender.createMimeMessage();

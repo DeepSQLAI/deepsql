@@ -2920,6 +2920,24 @@ export const savedDashboardsAPI = {
     );
     return response.data;
   },
+
+  // Natural-language alerts, evaluated on a schedule by the DeepSQL agent
+  getAlerts: async (id) => {
+    const response = await apiClient.get(`/api/saved-dashboards/${id}/alerts`);
+    return response.data;
+  },
+  createAlert: async (id, alert) => {
+    const response = await apiClient.post(`/api/saved-dashboards/${id}/alerts`, alert);
+    return response.data;
+  },
+  updateAlert: async (id, alertId, updates) => {
+    const response = await apiClient.put(`/api/saved-dashboards/${id}/alerts/${alertId}`, updates);
+    return response.data;
+  },
+  deleteAlert: async (id, alertId) => {
+    const response = await apiClient.delete(`/api/saved-dashboards/${id}/alerts/${alertId}`);
+    return response.data;
+  },
 };
 
 // Playbook API

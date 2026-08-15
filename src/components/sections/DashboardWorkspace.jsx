@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
-import { LineChart, ArrowUp, ChevronLeft, Sparkles, Check, Loader2, Brain, PencilRuler, ClipboardCheck, TrendingUp, Users, PieChart, Layers, Code2, X, Copy, Undo2, Play, Database, History, RotateCcw, Eye } from 'lucide-react'
+import { LineChart, ArrowUp, ChevronLeft, Sparkles, Check, Loader2, Brain, PencilRuler, ClipboardCheck, TrendingUp, Users, PieChart, Layers, Code2, X, Copy, Undo2, Play, Database, History, RotateCcw, Eye, RefreshCw, ChevronDown, BellRing, Trash2 } from 'lucide-react'
 import DashboardArtifact from '@/components/DashboardArtifact'
 import ShareMenu from './ShareMenu'
 import { savedDashboardsAPI } from '@/lib/api/client'
@@ -13,6 +13,14 @@ const STEP_ICON = { grounding: Brain, planning: PencilRuler, sql: Database, vali
 
 // Mirrors SavedDashboardService's snapshotVersion triggers, in plain language.
 const VERSION_TRIGGER_LABEL = { AGENT_BUILD: 'Agent build', MANUAL_EDIT: 'Manual edit', RESTORE: 'Restore' }
+
+const AUTO_REFRESH_OPTIONS = [
+  { ms: 0, label: 'Off' },
+  { ms: 30_000, label: '30s' },
+  { ms: 5 * 60_000, label: '5m' },
+  { ms: 60 * 60_000, label: '1h' },
+]
+const AUTO_REFRESH_LABEL = Object.fromEntries(AUTO_REFRESH_OPTIONS.map((o) => [o.ms, o.label]))
 
 function versionRelTime(iso) {
   if (!iso) return ''
@@ -127,6 +135,16 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
   const [versionsLoading, setVersionsLoading] = useState(false)
   const [restoringId, setRestoringId] = useState(null)
   const [previewVersion, setPreviewVersion] = useState(null) // the version being previewed, or null
+  const [autoRefreshMs, setAutoRefreshMs] = useState(0) // 0 = off
+  const [showRefreshMenu, setShowRefreshMenu] = useState(false)
+  const [lastRefreshedAt, setLastRefreshedAt] = useState(null)
+  const refreshMenuRef = useRef(null)
+  const [showAlerts, setShowAlerts] = useState(false)
+  const [alerts, setAlerts] = useState([])
+  const [alertsLoading, setAlertsLoading] = useState(false)
+  const [newAlertText, setNewAlertText] = useState('')
+  const [newAlertEmail, setNewAlertEmail] = useState('')
+  const [savingAlert, setSavingAlert] = useState(false)
   const scrollRef = useRef(null)
   const inputRef = useRef(null)
   const artifactRef = useRef(null)
@@ -215,6 +233,27 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
   }, [thinking, startedAt])
 
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight }, [messages, thinking])
+
+  const refreshNow = useCallback(() => {
+    artifactRef.current?.reload()
+    setLastRefreshedAt(Date.now())
+  }, [])
+
+  // Auto-refresh: re-run the artifact's queries on a fixed cadence while a build
+  // isn't in flight — a build already replaces the whole iframe on completion, so
+  // ticking during one would just race a reload no one asked for.
+  useEffect(() => {
+    if (!autoRefreshMs || thinking) return undefined
+    const id = setInterval(refreshNow, autoRefreshMs)
+    return () => clearInterval(id)
+  }, [autoRefreshMs, thinking, refreshNow])
+
+  useEffect(() => {
+    if (!showRefreshMenu) return undefined
+    const onDocClick = (e) => { if (refreshMenuRef.current && !refreshMenuRef.current.contains(e.target)) setShowRefreshMenu(false) }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [showRefreshMenu])
 
   // Seed the Source editor when the artifact changes from OUTSIDE the editor —
   // a fresh agent build, or opening a saved dashboard. The editor itself is
@@ -313,6 +352,64 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
     const next = !showHistory
     setShowHistory(next)
     if (next) loadVersions()
+  }
+
+  function selectAutoRefresh(ms) {
+    setAutoRefreshMs(ms)
+    setShowRefreshMenu(false)
+  }
+
+  async function loadAlerts() {
+    if (!savedId) return
+    setAlertsLoading(true)
+    try {
+      const res = await savedDashboardsAPI.getAlerts(savedId)
+      setAlerts(res?.alerts || [])
+    } catch {
+      setAlerts([])
+    } finally {
+      setAlertsLoading(false)
+    }
+  }
+
+  function toggleAlerts() {
+    const next = !showAlerts
+    setShowAlerts(next)
+    if (next) loadAlerts()
+  }
+
+  async function createAlert() {
+    if (!savedId || !newAlertText.trim() || savingAlert) return
+    setSavingAlert(true)
+    try {
+      const recipients = newAlertEmail.trim()
+      await savedDashboardsAPI.createAlert(savedId, {
+        conditionText: newAlertText.trim(),
+        channels: recipients ? 'in-app,email' : 'in-app',
+        emailRecipients: recipients || null,
+      })
+      setNewAlertText('')
+      setNewAlertEmail('')
+      await loadAlerts()
+    } catch (e) {
+      patchSession(key, (cur) => ({ messages: [...cur.messages, { role: 'agent', text: `⚠ Couldn’t create alert: ${e?.response?.data?.message || e?.message || 'error'}`, error: true }] }))
+    } finally {
+      setSavingAlert(false)
+    }
+  }
+
+  async function toggleAlertEnabled(alert) {
+    try {
+      await savedDashboardsAPI.updateAlert(savedId, alert.id, { isEnabled: !alert.isEnabled })
+      await loadAlerts()
+    } catch { /* leave state as-is on failure */ }
+  }
+
+  async function deleteAlert(alertId) {
+    try {
+      await savedDashboardsAPI.deleteAlert(savedId, alertId)
+      setAlerts((prev) => prev.filter((a) => a.id !== alertId))
+    } catch { /* leave state as-is on failure */ }
   }
 
   async function restoreVersion(version) {
@@ -447,9 +544,49 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
                       <button className={styles.primaryBtnSm} onClick={applySource} disabled={!sourceDirty || thinking} title={thinking ? 'Wait for the current build to finish first' : undefined}><Play size={13} /> Apply</button>
                     </>
                   )}
+                  {viewMode === 'preview' && config?.html && (
+                    <div className={styles.refreshGroup} ref={refreshMenuRef}>
+                      <button
+                        className={styles.ghostBtn}
+                        onClick={refreshNow}
+                        title={lastRefreshedAt ? `Last refreshed ${new Date(lastRefreshedAt).toLocaleTimeString()}` : 'Refresh'}
+                      >
+                        <RefreshCw size={13} /> Refresh
+                      </button>
+                      <button
+                        className={autoRefreshMs ? styles.refreshMenuBtnActive : styles.refreshMenuBtn}
+                        onClick={() => setShowRefreshMenu((v) => !v)}
+                        title="Auto-refresh"
+                        aria-label="Auto-refresh options"
+                      >
+                        {autoRefreshMs ? AUTO_REFRESH_LABEL[autoRefreshMs] : <ChevronDown size={13} />}
+                      </button>
+                      {showRefreshMenu && (
+                        <div className={styles.refreshMenuPop}>
+                          {AUTO_REFRESH_OPTIONS.map(({ ms, label }) => (
+                            <button
+                              key={ms}
+                              className={autoRefreshMs === ms ? styles.refreshMenuItemActive : styles.refreshMenuItem}
+                              onClick={() => selectAutoRefresh(ms)}
+                            >
+                              {label}{autoRefreshMs === ms && <Check size={12} />}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <button
+                    className={showAlerts ? styles.queriesBtnActive : styles.queriesBtn}
+                    onClick={() => { setShowQueries(false); setShowHistory(false); toggleAlerts() }}
+                    disabled={!savedId}
+                    title={!savedId ? 'Save the dashboard first' : undefined}
+                  >
+                    <BellRing size={13} /> Alerts{alerts.filter((a) => a.isEnabled).length > 0 ? ` ${alerts.filter((a) => a.isEnabled).length}` : ''}
+                  </button>
                   <button
                     className={showHistory ? styles.queriesBtnActive : styles.queriesBtn}
-                    onClick={() => { setShowQueries(false); toggleHistory() }}
+                    onClick={() => { setShowQueries(false); setShowAlerts(false); toggleHistory() }}
                     disabled={!savedId}
                     title={!savedId ? 'Save the dashboard first' : undefined}
                   >
@@ -457,7 +594,7 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
                   </button>
                   <button
                     className={showQueries ? styles.queriesBtnActive : styles.queriesBtn}
-                    onClick={() => { setShowHistory(false); setShowQueries((v) => !v) }}
+                    onClick={() => { setShowHistory(false); setShowAlerts(false); setShowQueries((v) => !v) }}
                   >
                     <Code2 size={13} /> Queries{queries.length > 0 ? ` ${queries.length}` : ''}
                   </button>
@@ -522,6 +659,70 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
                             </div>
                             <pre className={styles.querySql}>{q.sql}</pre>
                             {q.status === 'error' && <div className={styles.queryErr}>{q.error}</div>}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </aside>
+                )}
+
+                {showAlerts && (
+                  <aside className={styles.queriesPanel}>
+                    <div className={styles.queriesPanelHead}>
+                      <span>Alerts</span>
+                      <button onClick={() => setShowAlerts(false)} aria-label="Close"><X size={14} /></button>
+                    </div>
+                    <div className={styles.queriesPanelList}>
+                      <div className={styles.alertComposer}>
+                        <textarea
+                          className={styles.alertComposerInput}
+                          rows={2}
+                          placeholder="Alert if… (e.g. “alert if the error rate exceeds 5% in the last hour”)"
+                          value={newAlertText}
+                          onChange={(e) => setNewAlertText(e.target.value)}
+                        />
+                        <input
+                          className={styles.alertComposerEmail}
+                          placeholder="Email to notify (optional)"
+                          value={newAlertEmail}
+                          onChange={(e) => setNewAlertEmail(e.target.value)}
+                        />
+                        <button
+                          className={styles.primaryBtnSm}
+                          onClick={createAlert}
+                          disabled={!newAlertText.trim() || savingAlert}
+                        >
+                          {savingAlert ? <Loader2 size={13} className={styles.spin} /> : <BellRing size={13} />} Add alert
+                        </button>
+                      </div>
+
+                      {alertsLoading ? (
+                        <div className={styles.queriesEmpty}><Loader2 size={14} className={styles.spin} /></div>
+                      ) : alerts.length === 0 ? (
+                        <div className={styles.queriesEmpty}>No alerts yet — describe a condition above and the DeepSQL agent will check it on a schedule.</div>
+                      ) : (
+                        alerts.map((a) => (
+                          <div key={a.id} className={styles.alertCard}>
+                            <div className={styles.alertCardHead}>
+                              <span className={a.isEnabled ? styles.alertBadgeOn : styles.alertBadgeOff}>
+                                {a.isEnabled ? 'On' : 'Off'}
+                              </span>
+                              <span className={styles.alertInterval}>every {a.checkIntervalMinutes}m</span>
+                              <div className={styles.alertCardActions}>
+                                <button className={styles.alertTextBtn} onClick={() => toggleAlertEnabled(a)}>
+                                  {a.isEnabled ? 'Disable' : 'Enable'}
+                                </button>
+                                <button className={styles.queryCopyBtn} onClick={() => deleteAlert(a.id)} title="Delete alert" aria-label="Delete alert">
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            </div>
+                            <div className={styles.alertCondition}>{a.conditionText}</div>
+                            {a.lastVerdict && (
+                              <div className={a.lastVerdict === 'FIRED' ? styles.alertLastFired : (a.lastVerdict === 'ERROR' ? styles.alertLastError : styles.alertLastOk)}>
+                                {a.lastVerdict === 'FIRED' ? '🔔 Fired' : (a.lastVerdict === 'ERROR' ? '⚠ Check failed' : '✓ OK')} — {a.lastVerdict === 'ERROR' ? a.lastError : a.lastReason}
+                              </div>
+                            )}
                           </div>
                         ))
                       )}

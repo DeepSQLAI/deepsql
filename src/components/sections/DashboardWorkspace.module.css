@@ -544,6 +544,17 @@
   cursor: pointer;
   transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
 }
+/* Tailwind's Preflight makes SVG sizing CSS-driven, not attribute-driven — an
+   icon's default flex-shrink:1 + min-width:auto then lets it collapse below
+   its intrinsic size inside these toolbar buttons. */
+.ghostBtn svg,
+.primaryBtnSm svg,
+.queriesBtn svg,
+.queriesBtnActive svg,
+.refreshMenuBtn svg,
+.refreshMenuBtnActive svg {
+  flex-shrink: 0;
+}
 
 .ghostBtn,
 .queriesBtn {
@@ -573,6 +584,86 @@
   background: #f5f3ff;
   color: #463c9f;
 }
+
+.refreshGroup {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+/* Refresh + the auto-refresh chevron read as one split button — square off the
+   touching edges so the 1px gap between them looks intentional, not like two
+   unrelated controls that happen to be adjacent. */
+.refreshGroup .ghostBtn {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.refreshMenuBtn,
+.refreshMenuBtnActive {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  min-width: 28px;
+  padding: 0 8px;
+  border: 1px solid #e2e2e2;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-top-right-radius: 7px;
+  border-bottom-right-radius: 7px;
+  border-left: none;
+  background: #fff;
+  color: #555;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+.refreshMenuBtn:hover { background: #f6f6f6; }
+
+.refreshMenuBtnActive {
+  border-color: #cfcaf0;
+  background: #f5f3ff;
+  color: #463c9f;
+}
+.refreshMenuBtnActive:hover { background: #ece8fc; }
+
+.refreshMenuPop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 100px;
+  padding: 4px;
+  border: 1px solid #ececec;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 28px -10px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.06);
+  animation: dsqlRefreshPopIn 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes dsqlRefreshPopIn { from { opacity: 0; transform: translateY(-4px) scale(0.97); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .refreshMenuPop { animation: none; } }
+
+.refreshMenuItem,
+.refreshMenuItemActive {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  padding: 6px 9px;
+  font-size: 12.5px;
+  color: #333;
+  text-align: left;
+  cursor: pointer;
+}
+.refreshMenuItem:hover { background: #f5f5f5; }
+.refreshMenuItemActive { color: #463c9f; font-weight: 600; background: #f5f3ff; }
 
 .canvasBody {
   flex: 1;
@@ -792,6 +883,103 @@
   border-radius: 999px;
   padding: 3px 9px;
 }
+
+.alertComposer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 11px;
+  border: 1px solid #ececec;
+  border-radius: 10px;
+  background: #fafafa;
+  margin-bottom: 4px;
+}
+
+.alertComposerInput {
+  resize: vertical;
+  min-height: 44px;
+  padding: 8px 9px;
+  border: 1px solid #e2e2e2;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12.5px;
+  font-family: inherit;
+  color: #222;
+  outline: none;
+}
+.alertComposerInput:focus { border-color: #b8aeee; }
+
+.alertComposerEmail {
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid #e2e2e2;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12.5px;
+  color: #222;
+  outline: none;
+}
+.alertComposerEmail:focus { border-color: #b8aeee; }
+
+.alertCard {
+  border: 1px solid #ececec;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.alertCardHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.alertCardActions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.alertTextBtn {
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+.alertTextBtn:hover { background: #f0f0f0; color: #333; }
+
+.alertBadgeOn,
+.alertBadgeOff {
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 2px 9px;
+  flex-shrink: 0;
+}
+.alertBadgeOn { color: #0F6E56; background: #E1F5EE; }
+.alertBadgeOff { color: #6b7280; background: #f1f0f5; }
+
+.alertInterval { font-size: 11px; color: #999; }
+
+.alertCondition { font-size: 12.5px; color: #333; line-height: 1.5; }
+
+.alertLastOk,
+.alertLastFired,
+.alertLastError {
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.alertLastOk { color: #6b7280; }
+.alertLastFired { color: #b45309; font-weight: 500; }
+.alertLastError { color: #9c2b2b; }
 
 .previewOverlay {
   position: fixed;

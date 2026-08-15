@@ -156,6 +156,7 @@ const DashboardArtifact = forwardRef(function DashboardArtifact({ connectionId, 
   const iframeRef = useRef(null)
   const [height, setHeight] = useState(600)
   const [loaded, setLoaded] = useState(false)
+  const [reloadEpoch, setReloadEpoch] = useState(0)
   const queueRef = useRef([])
   const inflightRef = useRef(0)
   const totalRef = useRef(0)
@@ -188,6 +189,12 @@ const DashboardArtifact = forwardRef(function DashboardArtifact({ connectionId, 
     mountWidget(id, widgetHtml) {
       if (!loaded) { pendingWidgetsRef.current.push([id, widgetHtml]); return }
       post({ __deepsql: true, type: 'mount-widget', id, html: widgetHtml })
+    },
+    // Re-run every widget's query from scratch — bumping the srcDoc-driving key
+    // forces a full iframe remount (changing srcDoc's string content alone isn't
+    // enough to guarantee a reload if html happens to be referentially unchanged).
+    reload() {
+      setReloadEpoch((e) => e + 1)
     },
   }), [loaded])
 
@@ -267,18 +274,22 @@ const DashboardArtifact = forwardRef(function DashboardArtifact({ connectionId, 
     return () => window.removeEventListener('message', onMessage)
   }, [onMessage])
 
-  // New artifact (generate/edit) reloads the iframe — reset the throttle so a
-  // fresh dashboard isn't blocked by the prior one's runaway cap, and fade the
-  // new one in rather than popping at whatever height it first reports.
+  // New artifact (generate/edit) or an explicit reload() call remounts the
+  // iframe — reset the throttle so a fresh load isn't blocked by the prior
+  // one's runaway cap, and fade the new one in rather than popping at whatever
+  // height it first reports.
   useEffect(() => {
     queueRef.current = []
     inflightRef.current = 0
     totalRef.current = 0
     setLoaded(false)
-  }, [html])
+  }, [html, reloadEpoch])
 
   return (
     <iframe
+      // key forces a genuine remount on reload() even when html is unchanged —
+      // srcDoc alone won't reliably reload if the string didn't change.
+      key={reloadEpoch}
       ref={iframeRef}
       title="Dashboard"
       sandbox="allow-scripts"
