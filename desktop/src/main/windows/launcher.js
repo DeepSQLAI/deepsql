@@ -11,7 +11,7 @@
 const { BrowserWindow, shell } = require('electron');
 const path = require('node:path');
 
-const { LAUNCHER_HTML, LAUNCHER_PRELOAD, IS_DEV } = require('../config');
+const { LAUNCHER_HTML, LAUNCHER_PRELOAD, DEVTOOLS_ENABLED } = require('../config');
 
 let window = null;
 
@@ -42,6 +42,9 @@ function create() {
       nodeIntegration: false,
       sandbox: false, // the preload needs ipcRenderer only; keep Node off in the page
       spellcheck: false,
+      // Holds saved profiles and drives the secrets IPC — no DevTools in a
+      // shipped build.
+      devTools: DEVTOOLS_ENABLED,
     },
   });
 
@@ -49,7 +52,7 @@ function create() {
 
   window.once('ready-to-show', () => {
     window.show();
-    if (IS_DEV) window.webContents.openDevTools({ mode: 'detach' });
+    if (DEVTOOLS_ENABLED) window.webContents.openDevTools({ mode: 'detach' });
   });
 
   // The launcher is a fixed local page. Anything that tries to navigate it

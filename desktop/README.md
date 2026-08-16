@@ -61,7 +61,8 @@ launch needs **right-click → Open** (or `xattr -dr com.apple.quarantine
 cd desktop
 npm install
 npm start            # run the app
-npm run dev          # run with DevTools open
+npm run dev          # run with DevTools open (unpackaged only — see "DevTools")
+npm test             # drift guard for the DevTools kill switch
 ```
 
 ## Building installers
@@ -195,6 +196,81 @@ connect time and says so, instead of letting it surface as a failed login.
   everything else goes to the OS browser.
 - **No credential proxying**: the client never sees database credentials. It
   speaks to DeepSQL's own API surface exactly as a browser does.
+- **DevTools are off in packaged builds** — see below.
+
+## DevTools
+
+A packaged build cannot open DevTools. Every window sets
+`webPreferences.devTools: DEVTOOLS_ENABLED`, and `config.js` defines that as
+`!app.isPackaged` — nothing else. Chromium then refuses to attach DevTools at
+all, so `openDevTools()` is a no-op and the shortcuts do nothing; the View menu
+omits **Toggle Developer Tools** (and with it the `Alt+Cmd+I` / `Ctrl+Shift+I`
+binding, which that item owned, since the app installs its own menu and so gets
+no `toggleDevTools` role from Electron).
+
+`DEVTOOLS_ENABLED` is deliberately **not** `IS_DEV`. `IS_DEV` is true whenever
+`DEEPSQL_DESKTOP_DEV=1`, and any user can set that on the shipped app —
+`DEEPSQL_DESKTOP_DEV=1 open -a DeepSQL` used to open DevTools automatically on
+both windows, no menu involved. Gating on `app.isPackaged` alone is what makes
+the switch unreachable from outside the build.
+
+The app also refuses to start when passed `--remote-debugging-port`,
+`--remote-debugging-pipe`, `--remote-allow-origins`, or `--inspect*`. Those open
+a DevTools *protocol* endpoint, a separate door that `devTools: false` does not
+close, and Chromium parses them before any app code runs — so the only remedy is
+to exit immediately, before a window opens or a tunnel comes up.
+
+Development is unaffected: `npm start` and `npm run dev` are unpackaged, so
+DevTools work as before.
+
+**Verifying the block** (source assertions cannot prove runtime behaviour):
+
+```bash
+npm test                          # drift guard: every window sets devTools, gated correctly
+npm run dist:mac                  # then, in the installed app:
+#   View menu has no "Toggle Developer Tools"; Alt+Cmd+I does nothing
+DEEPSQL_DESKTOP_DEV=1 open -a DeepSQL     # no DevTools — the closed hole
+/Applications/DeepSQL.app/Contents/MacOS/DeepSQL --remote-debugging-port=9222
+#   exits 1, logging "refusing to start with remote debugging enabled"
+```
+
+Known limits, stated plainly: `ELECTRON_RUN_AS_NODE=1` turns the binary into a
+plain Node process that never loads the app, and anyone able to modify the app
+bundle can undo any of this. These controls stop a curious user poking at the
+shipped client; they are not a defence against someone who controls the machine.
+Treat the backend's authorization as the real boundary.
+
+## Editing a connected profile
+
+Saving a profile applies it. If the connection is live and the edit changes what
+the transport does, the connection is rebuilt onto the new settings and the open
+window follows it to the new origin — a rebuilt tunnel binds a different local
+port, so the origin changes with it.
+
+The comparison is `profiles.transportFingerprint()`, over the fields that decide
+what the connection *is*: transport, URL, every TLS field, and the SSH host,
+port, username, auth method, key path, remote host/port/scheme, pinned local
+port, and pinned host key. Renaming a connection is not in it, so a rename never
+costs you a working tunnel. `stickyLocalPort` is not in it either — we choose
+that, not the user, and including it would make every connection differ from
+itself on the next connect.
+
+This is all-or-nothing per save. If the rebuild fails, the old connection is
+**not** kept: it was built from settings that no longer exist, so it is closed
+and the failure is reported, naming the fact that the previous session used the
+settings you replaced. A window that looks connected while serving settings you
+have changed is the state this design removes.
+
+Before this, `connect()` reused any live connection unconditionally. The launcher
+persists the form before every Connect, so the stored profile was always correct
+and the *store* was never the problem — the reused connection simply kept running
+the old settings, and Test reported a confident pass for settings that had been
+replaced. Changing a tunnel's remote port and pressing Connect did nothing at
+all.
+
+```bash
+npm run selftest:settings   # two fake servers; proves an edit moves the connection
+```
 
 ## Deep links
 
@@ -212,7 +288,16 @@ npm run smoke -- --ssh-host 20.29.48.144 --ssh-user ubuntu --key ~/keys/vm.pem
 
 # Exercise the tunnel end to end against a throwaway in-process SSH server
 npm run selftest:tunnel
+
+# Prove an edited setting reaches the live connection (two fake DeepSQL servers)
+npm run selftest:settings
+
+# Drift guard for the DevTools kill switch
+npm test
 ```
+
+Both self-tests redirect `userData` to a temp directory, so they never touch your
+real `profiles.json`.
 
 Logs are at `<userData>/logs/desktop.log`; the launcher footer has an **Open log
 file** link. Connection profiles live in `<userData>/profiles.json` (mode 0600,

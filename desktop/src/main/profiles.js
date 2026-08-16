@@ -265,6 +265,48 @@ function resolveSecrets(profile) {
 }
 
 /**
+ * A digest of every field that changes what the transport actually *does*.
+ *
+ * This is what makes an edit take effect. A live connection is a snapshot of the
+ * settings it was built from, and nothing about saving a profile rebuilds it —
+ * so without a comparison here, editing the remote port and pressing Connect
+ * reuses the old tunnel and the app keeps talking to the old port while the UI
+ * shows the new one.
+ *
+ * Excluded on purpose:
+ *  - `name`, `createdAt`, `lastConnectedAt` — presentational or bookkeeping;
+ *    renaming a connection must not drop a working tunnel.
+ *  - `stickyLocalPort` — chosen by us, not the user, and rewritten on every
+ *    connect. Including it would make each connection differ from itself.
+ * Included on purpose: `tls.fingerprint` and `ssh.hostKeyFingerprint`, so
+ * "Clear" on a pinned key genuinely re-runs trust-on-first-use rather than
+ * quietly reusing the session that was pinned to the old one. Both are written
+ * during connect *before* the entry is recorded, so a first connect does not
+ * leave the entry looking stale to the next one.
+ */
+function transportFingerprint(profile) {
+  if (!profile) return '';
+  const { tls, ssh } = profile;
+  return JSON.stringify([
+    profile.transport,
+    profile.url,
+    tls.mode,
+    tls.fingerprint,
+    tls.caPath,
+    ssh.host,
+    ssh.port,
+    ssh.username,
+    ssh.authMethod,
+    ssh.privateKeyPath,
+    ssh.remoteHost,
+    ssh.remotePort,
+    ssh.remoteScheme,
+    ssh.localPort,
+    ssh.hostKeyFingerprint,
+  ]);
+}
+
+/**
  * The origin the workspace window will navigate to for this profile.
  * For a tunnel the port is only known once the local listener is bound, so the
  * transport layer passes it in.
@@ -290,5 +332,6 @@ module.exports = {
   toSafeProfile,
   normalizeUrl,
   originFor,
+  transportFingerprint,
   storePath,
 };

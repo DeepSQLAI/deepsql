@@ -130,10 +130,47 @@ project** — `cd desktop && npm install`, not part of the root `package.json`.
 ```bash
 cd desktop
 npm start                 # run     npm run dev          # run with DevTools
+npm test                  # drift guard for the DevTools kill switch
 npm run dist:mac          # dmg + zip (arm64 + x64), also :win / :linux
 npm run smoke -- --url https://deepsql.example.com   # headless connection check
 npm run selftest:tunnel   # end-to-end SSH tunnel test (in-process SSH server)
+npm run selftest:settings # proves an edited setting reaches the live connection
 ```
+
+**A saved profile edit rebuilds the live connection; saving alone was never the
+bug.** The launcher persists the form before every Connect and Test, so
+`profiles.json` was always correct — but `transport.connect()` reused any live
+connection unconditionally, so changing a tunnel's remote port and pressing
+Connect did nothing, and Test reported a confident pass for settings the user had
+just replaced. `profiles.transportFingerprint()` now decides whether a live
+connection still *is* the connection being asked for; `transport.reconcile()`
+rebuilds it on save (`ipc.saveAndReconcile`), and `Workspace.updateProfile()`
+re-points the window, since a rebuilt tunnel binds a different local port and so
+changes the origin. The fingerprint deliberately excludes `name` (a rename must
+not drop a tunnel) and `stickyLocalPort` (chosen by us and rewritten every
+connect — including it would make a connection differ from itself). A failed
+rebuild does **not** restore the old connection: it was built from settings that
+no longer exist, so it stays closed and the failure is reported. Entries also
+store a profile re-read *after* the connect path's trust-on-first-use writes, or
+the next connect would see a mismatch it caused itself.
+
+**DevTools are disabled in packaged builds, and `IS_DEV` is the wrong switch for
+it.** Every window passes `webPreferences.devTools: DEVTOOLS_ENABLED`, defined in
+`config.js` as `!app.isPackaged` and nothing else. Do not "simplify" it to
+`IS_DEV`: `IS_DEV` is also true when `DEEPSQL_DESKTOP_DEV=1`, which any user can
+export against the shipped app — that is precisely the hole this closes, and it
+used to open DevTools automatically on both windows with no menu item involved.
+`devTools: false` is the load-bearing part (Chromium then refuses to attach at
+all, making `openDevTools()` a no-op); removing the menu item only hides the
+door, though it also drops the `Alt+Cmd+I`/`Ctrl+Shift+I` binding, since a custom
+`Menu.setApplicationMenu` means Electron contributes no `toggleDevTools` role.
+Separately, `index.js` exits on `--remote-debugging-port` and friends: those open
+a DevTools *protocol* endpoint that `devTools: false` does not cover. Verified
+behaviourally on Electron 43 (`devTools:false` → `isDevToolsOpened()` stays false
+after `openDevTools()`; a `devTools:true` control opens, so the check is not
+vacuous). `desktop/src/main/devtools.test.js` fails the build if a new
+`webPreferences` block omits `devTools` — the regression is otherwise silent,
+since Chromium's default is *enabled*.
 
 **It is a thin client and deliberately does not bundle the React frontend.** It
 navigates a `WebContentsView` at the real DeepSQL origin, so the UI is always the

@@ -23,6 +23,25 @@ const { app } = require('electron');
 const IS_DEV =
   process.env.DEEPSQL_DESKTOP_DEV === '1' || !app.isPackaged;
 
+/**
+ * Whether DevTools may be opened at all.
+ *
+ * Deliberately NOT derived from IS_DEV. IS_DEV is true whenever
+ * DEEPSQL_DESKTOP_DEV=1, and that variable is settable by anyone running the
+ * shipped app — `DEEPSQL_DESKTOP_DEV=1 open -a DeepSQL` used to hand a user
+ * DevTools on both windows, already open, with no menu item involved. Gating on
+ * app.isPackaged alone is what makes the switch unreachable from outside the
+ * build: a packaged app cannot be talked into a dev build by its own
+ * environment.
+ *
+ * This value must reach every webPreferences block in the app. `devTools: false`
+ * disables DevTools inside Chromium, so openDevTools() becomes a no-op and the
+ * keyboard shortcuts do nothing — removing menu items alone would not, since a
+ * WebContents that permits DevTools can still be opened by any code path that
+ * survives.
+ */
+const DEVTOOLS_ENABLED = !app.isPackaged;
+
 // Health probe served by the Spring backend through the frontend nginx.
 const HEALTH_PATH = '/api/actuator/health';
 
@@ -44,6 +63,7 @@ const PROTOCOL = 'deepsql';
 
 module.exports = {
   IS_DEV,
+  DEVTOOLS_ENABLED,
   HEALTH_PATH,
   HEALTH_INTERVAL_MS,
   CHROME_HEIGHT,

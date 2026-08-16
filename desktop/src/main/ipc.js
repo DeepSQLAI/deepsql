@@ -10,6 +10,7 @@ const transport = require('./transport');
 const launcher = require('./windows/launcher');
 const workspaces = require('./windows/workspace');
 const log = require('./logger');
+const { DEVTOOLS_ENABLED } = require('./config');
 
 function register() {
   // ── App ────────────────────────────────────────────────────────────────
@@ -34,7 +35,7 @@ function register() {
   // ── Profiles ───────────────────────────────────────────────────────────
   ipcMain.handle('profiles:list', () => profilesStore.list());
 
-  ipcMain.handle('profiles:save', (_event, input) => profilesStore.upsert(input || {}));
+  ipcMain.handle('profiles:save', (_event, input) => saveAndReconcile(input || {}));
 
   ipcMain.handle('profiles:delete', async (_event, id) => {
     await transport.disconnect(id);
@@ -42,10 +43,11 @@ function register() {
     return profilesStore.remove(id);
   });
 
-  ipcMain.handle('profiles:clear-host-key', (_event, id) => {
-    profilesStore.upsert({ id, ssh: { hostKeyFingerprint: '' } });
-    return profilesStore.toSafeProfile(profilesStore.get(id));
-  });
+  ipcMain.handle('profiles:clear-host-key', (_event, id) =>
+    // Also reconciled: clearing a pinned host key is meaningless while the
+    // session pinned to the old key stays up.
+    saveAndReconcile({ id, ssh: { hostKeyFingerprint: '' } }),
+  );
 
   ipcMain.handle('profiles:test', (_event, { id, transient }) =>
     transport.test(id, transient || {}),
@@ -133,7 +135,10 @@ function register() {
         launcher.create();
         break;
       case 'devtools':
-        workspace.contentView.webContents.toggleDevTools();
+        // `chrome:action` forwards any string the chrome renderer sends, so this
+        // is a live IPC path to DevTools regardless of whether the chrome UI
+        // draws a button for it. Honour it in dev builds only.
+        if (DEVTOOLS_ENABLED) workspace.contentView.webContents.toggleDevTools();
         break;
       default:
         break;
@@ -172,6 +177,48 @@ function register() {
         : `Pinned SSH host key ${payload.fingerprint}.`,
     });
   });
+}
+
+/**
+ * Persist a profile edit and make it take effect now.
+ *
+ * Saving used to be the whole story, which is why edits looked ignored: the
+ * store was updated correctly, but a live connection is a snapshot of the
+ * settings it was built from and nothing ever rebuilt it. Changing the remote
+ * port of a connected profile left the tunnel forwarding to the old port and the
+ * workspace showing the old origin, with the UI reporting the new values.
+ *
+ * The result is all-or-nothing per save: either the new settings are what is
+ * running, or the connection built from the replaced settings is closed and the
+ * caller is told why. There is no in-between state where the window looks
+ * connected but is serving something the user no longer asked for.
+ */
+async function saveAndReconcile(input) {
+  const saved = profilesStore.upsert(input);
+  const reconciled = await transport.reconcile(saved.id);
+  const workspace = workspaces.get(saved.id);
+
+  if (reconciled.changed && !reconciled.ok) {
+    // The old connection is already down. Close its window rather than leave a
+    // live-looking view over a transport that no longer exists.
+    workspace?.close();
+    log.warn('ipc', 'saved settings could not be applied to the live connection', {
+      id: saved.id,
+      code: reconciled.code,
+    });
+    return {
+      ...saved,
+      reconnected: false,
+      disconnected: true,
+      detail: reconciled.detail,
+      code: reconciled.code,
+    };
+  }
+
+  // Runs for an unchanged transport too, so a rename reaches the window chrome.
+  workspace?.updateProfile(profilesStore.get(saved.id), reconciled.origin);
+
+  return { ...saved, reconnected: Boolean(reconciled.changed), disconnected: false };
 }
 
 module.exports = { register };

@@ -330,18 +330,29 @@ async function testConnection() {
     const profile = await save();
     const result = await api.profiles.test(profile.id, transientSecrets());
     if (result.ok) {
-      setStatus('idle', 'Not connected');
+      // `rebuilt` means these settings differed from the live connection, which
+      // was rebuilt onto them — so the result describes the settings on screen,
+      // and the open window has already moved with it.
+      setStatus(result.rebuilt ? 'live' : 'idle', result.rebuilt ? 'Connected' : 'Not connected');
       say(
         `DeepSQL responded in ${result.latencyMs} ms${
           result.hostKeyFingerprint ? ` · host key ${result.hostKeyFingerprint}` : ''
-        }.`,
+        }.${result.rebuilt ? ' The open connection was rebuilt with these settings.' : ''}`,
         'ok',
       );
       state.profiles = await api.profiles.list();
       renderEditor();
     } else {
       setStatus('error', 'Failed');
-      say(result.detail, 'error');
+      // Name the lost session explicitly. The old connection was built from
+      // settings that have been replaced, so it is closed rather than kept —
+      // silently dropping it is what would feel unreliable.
+      say(
+        result.closedStaleConnection
+          ? `${result.detail} The previous connection used the settings you replaced, so it was closed.`
+          : result.detail,
+        'error',
+      );
     }
   } catch (err) {
     setStatus('error', 'Failed');
@@ -447,10 +458,21 @@ function wire() {
   el('clear-host-key').addEventListener('click', async () => {
     const profile = selected();
     if (!profile?.id) return;
-    await api.profiles.clearHostKey(profile.id);
+    const result = await api.profiles.clearHostKey(profile.id);
     state.profiles = await api.profiles.list();
     renderEditor();
-    say('Pinned host key cleared. The next connection will pin whatever the VM presents.');
+    // Clearing the pin now rebuilds a live connection, because leaving up the
+    // session that was pinned to the old key would make the clear cosmetic.
+    if (result?.disconnected) {
+      say(
+        `Pinned host key cleared, but reconnecting failed: ${result.detail}`,
+        'error',
+      );
+    } else if (result?.reconnected) {
+      say('Pinned host key cleared and reconnected, pinning the key the VM presented.', 'ok');
+    } else {
+      say('Pinned host key cleared. The next connection will pin whatever the VM presents.');
+    }
   });
 
   api.onStatus((payload) => {

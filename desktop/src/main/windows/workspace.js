@@ -20,7 +20,12 @@ const {
   shell,
 } = require('electron');
 
-const { CHROME_HEIGHT, CHROME_HTML, CHROME_PRELOAD, IS_DEV } = require('../config');
+const {
+  CHROME_HEIGHT,
+  CHROME_HTML,
+  CHROME_PRELOAD,
+  DEVTOOLS_ENABLED,
+} = require('../config');
 
 /** Must match `.banner { height }` in renderer/chrome/chrome.css. */
 const BANNER_HEIGHT = 36;
@@ -111,6 +116,7 @@ class Workspace {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false,
+        devTools: DEVTOOLS_ENABLED,
       },
     });
     this.chromeView.webContents.loadFile(CHROME_HTML);
@@ -124,6 +130,9 @@ class Workspace {
         webSecurity: true,
         // The DeepSQL dashboard artifact renders in a sandboxed iframe and
         // relies on the standard same-origin rules; nothing here may relax them.
+        // This is the view holding the user's authenticated DeepSQL session, so
+        // it is the one DevTools must never attach to in a shipped build.
+        devTools: DEVTOOLS_ENABLED,
       },
     });
 
@@ -156,7 +165,7 @@ class Workspace {
       launcherModule().send('workspace:closed', { profileId: this.profile.id });
     });
 
-    if (IS_DEV) {
+    if (DEVTOOLS_ENABLED) {
       this.contentView.webContents.openDevTools({ mode: 'bottom' });
     }
 
@@ -185,11 +194,14 @@ class Workspace {
 
   wireContentNavigation() {
     const wc = this.contentView.webContents;
-    const originHost = safeOrigin(this.origin);
 
+    // Resolved per call, not captured once. A settings change rebuilds the
+    // transport onto a new origin (a tunnel rebuild lands on a different local
+    // port), and a confinement check frozen at the old origin would then treat
+    // the app's own pages as external and bounce every click to the OS browser.
     const isInternal = (target) => {
       try {
-        return new URL(target).origin === originHost;
+        return new URL(target).origin === safeOrigin(this.origin);
       } catch {
         return false;
       }
@@ -212,7 +224,12 @@ class Workspace {
           width: 1200,
           height: 820,
           backgroundColor: '#f5f5f7',
-          webPreferences: { session: this.session, contextIsolation: true, sandbox: true },
+          webPreferences: {
+            session: this.session,
+            contextIsolation: true,
+            sandbox: true,
+            devTools: DEVTOOLS_ENABLED,
+          },
         });
         popup.loadURL(url);
         return { action: 'deny' };
@@ -280,6 +297,28 @@ class Workspace {
     if (this.chromeView && !this.chromeView.webContents.isDestroyed()) {
       this.chromeView.webContents.send(channel, payload);
     }
+  }
+
+  /**
+   * Adopt an edited profile, and move to a new origin if the transport was
+   * rebuilt onto one.
+   *
+   * Without this the window keeps serving the origin it opened with: a rebuilt
+   * tunnel binds a different local port, so the old origin is a port nothing is
+   * listening on any more, and the window sits there looking connected while
+   * every request fails.
+   */
+  updateProfile(profile, origin) {
+    this.profile = profile;
+    if (this.window) this.window.setTitle(`${profile.name} — DeepSQL`);
+
+    const nextOrigin = origin || this.origin;
+    if (nextOrigin !== this.origin) {
+      this.origin = nextOrigin;
+      // loadURL, not reload: the old URL's port is gone with the old tunnel.
+      this.contentView.webContents.loadURL(nextOrigin);
+    }
+    this.pushState();
   }
 
   // ── actions invoked from the chrome ──────────────────────────────────────

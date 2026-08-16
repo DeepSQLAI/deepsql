@@ -6,6 +6,7 @@ const launcher = require('./windows/launcher');
 const workspaces = require('./windows/workspace');
 const transport = require('./transport');
 const log = require('./logger');
+const { DEVTOOLS_ENABLED } = require('./config');
 
 function focusedWorkspace() {
   return workspaces.all().find((w) => w.window?.isFocused()) || workspaces.all()[0] || null;
@@ -113,11 +114,20 @@ function build() {
           click: () => bumpZoom(-0.5),
         },
         { type: 'separator' },
-        {
-          label: 'Toggle Developer Tools',
-          accelerator: isMac ? 'Alt+Cmd+I' : 'Ctrl+Shift+I',
-          click: () => focusedWorkspace()?.contentView.webContents.toggleDevTools(),
-        },
+        // The DevTools item exists only in a dev build. It also owns the
+        // Alt+Cmd+I / Ctrl+Shift+I binding: this app installs its own menu, so
+        // Electron adds no toggleDevTools role of its own, and dropping the item
+        // drops the shortcut with it. The webPreferences `devTools: false` in
+        // workspace.js is what makes that stick — this only hides the door.
+        ...(DEVTOOLS_ENABLED
+          ? [
+              {
+                label: 'Toggle Developer Tools',
+                accelerator: isMac ? 'Alt+Cmd+I' : 'Ctrl+Shift+I',
+                click: () => focusedWorkspace()?.contentView.webContents.toggleDevTools(),
+              },
+            ]
+          : []),
         { role: 'togglefullscreen' },
       ],
     },

@@ -44,11 +44,24 @@ class Transport extends EventEmitter {
    *   at the connect prompt and deliberately not persisted.
    */
   async connect(profileId, transient = {}) {
-    const existing = this.active.get(profileId);
-    if (existing) return { ok: true, origin: existing.origin, reused: true };
-
     const profile = profilesStore.get(profileId);
     if (!profile) throw new TunnelError('no-profile', 'That connection no longer exists.');
+
+    // Reuse a live connection only when it is still the connection the user is
+    // asking for. Reusing unconditionally is what made edits look ignored: the
+    // launcher persists the form before every Connect, so the stored profile was
+    // already correct and this early return handed back the *old* origin and
+    // left the old tunnel forwarding to the old port.
+    const existing = this.active.get(profileId);
+    if (existing) {
+      if (existing.fingerprint === profilesStore.transportFingerprint(profile)) {
+        return { ok: true, origin: existing.origin, reused: true };
+      }
+      log.info('transport', 'settings changed under a live connection, rebuilding', {
+        profileId,
+      });
+      await this.disconnect(profileId);
+    }
 
     const stored = profilesStore.resolveSecrets(profile);
     const credentials = {
@@ -112,7 +125,20 @@ class Transport extends EventEmitter {
       profilesStore.rememberCertFingerprint(profileId, health.fingerprint);
     }
 
-    const entry = { profile, origin, tunnel, health, timer: null };
+    // Re-read rather than reusing the `profile` fetched above: the connect path
+    // writes back through the store (trust-on-first-use pins the host key and
+    // the TLS certificate, and the bound local port is remembered), so the
+    // fingerprint has to be taken from the state that now exists on disk or the
+    // very next connect would see a mismatch it caused itself.
+    const settled = profilesStore.get(profileId) || profile;
+    const entry = {
+      profile: settled,
+      origin,
+      tunnel,
+      health,
+      timer: null,
+      fingerprint: profilesStore.transportFingerprint(settled),
+    };
     this.active.set(profileId, entry);
     profilesStore.markConnected(profileId);
     this.startHealthPolling(profileId);
@@ -177,13 +203,70 @@ class Transport extends EventEmitter {
    * leaves a stray tunnel behind.
    */
   async test(profileId, transient = {}) {
-    const alreadyOpen = this.active.has(profileId);
+    const wasOpen = this.active.has(profileId);
     try {
+      // connect() reuses only a connection matching the stored settings, so a
+      // pass here always describes the settings on screen. Previously a live
+      // connection was reused whatever it was built from, and Test reported a
+      // confident success for settings the user had just replaced.
       const result = await this.connect(profileId, transient);
-      if (!alreadyOpen) await this.disconnect(profileId);
-      return { ok: true, ...result };
+      // Only tear down a connection this call created. If connect() had to
+      // rebuild a live one, the rebuild *is* the connection the user wants —
+      // leave it up and tell the caller, whose workspace window is still
+      // pointed at the old origin.
+      if (!wasOpen) await this.disconnect(profileId);
+      return { ok: true, rebuilt: wasOpen && !result.reused, ...result };
     } catch (err) {
-      return { ok: false, code: err.code || 'error', detail: err.message };
+      return {
+        ok: false,
+        code: err.code || 'error',
+        detail: err.message,
+        // A failed rebuild has already closed the old connection: it was built
+        // from settings that no longer exist, so keeping it would be the stale
+        // state this whole change exists to remove. Say so, rather than leaving
+        // the user to discover the session went away.
+        closedStaleConnection: wasOpen && !this.active.has(profileId),
+      };
+    }
+  }
+
+  /**
+   * Bring a live connection back in line with its stored profile.
+   *
+   * Called after a profile is saved, so an edit takes effect at once instead of
+   * at some later reconnect. Returns what happened so the caller can re-point
+   * the workspace window: a tunnel rebuild almost always lands on a different
+   * local port, and therefore a different origin.
+   *
+   * @returns {{changed:boolean, ok:boolean, origin?:string, code?:string, detail?:string}}
+   */
+  async reconcile(profileId) {
+    const entry = this.active.get(profileId);
+    if (!entry) return { changed: false, ok: true };
+
+    const profile = profilesStore.get(profileId);
+    if (!profile) return { changed: false, ok: true };
+
+    if (entry.fingerprint === profilesStore.transportFingerprint(profile)) {
+      return { changed: false, ok: true, origin: entry.origin };
+    }
+
+    log.info('transport', 'reconciling live connection with saved settings', { profileId });
+    try {
+      // connect() sees the mismatch and rebuilds; going through it keeps one
+      // code path for building a connection.
+      const result = await this.connect(profileId);
+      return { changed: true, ok: true, origin: result.origin };
+    } catch (err) {
+      // The old connection is already down (connect() tears a mismatched one
+      // down before rebuilding). Report rather than resurrect it: it served
+      // settings the user has replaced.
+      log.error('transport', 'reconcile failed', {
+        profileId,
+        code: err.code,
+        message: err.message,
+      });
+      return { changed: true, ok: false, code: err.code || 'error', detail: err.message };
     }
   }
 }

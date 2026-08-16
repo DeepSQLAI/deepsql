@@ -10,7 +10,7 @@
 
 const { app, BrowserWindow, shell } = require('electron');
 
-const { PROTOCOL, IS_DEV } = require('./config');
+const { PROTOCOL, IS_DEV, DEVTOOLS_ENABLED } = require('./config');
 const ipc = require('./ipc');
 const menu = require('./menu');
 const updater = require('./updater');
@@ -19,9 +19,32 @@ const workspaces = require('./windows/workspace');
 const transport = require('./transport');
 const log = require('./logger');
 
+/**
+ * Chromium's debugging switches open a DevTools *protocol* endpoint, which is a
+ * separate door from the DevTools UI that `devTools: false` closes: a packaged
+ * app started with --remote-debugging-port will happily accept an external
+ * inspector on the workspace view and its authenticated session. Chromium parses
+ * these before any of our code runs, so the port may already be listening by the
+ * time we get here — refusing to start is what closes it again, immediately and
+ * before any window opens or any tunnel comes up.
+ *
+ * ELECTRON_RUN_AS_NODE is out of reach by construction: it turns the binary into
+ * a plain Node process that never loads this file.
+ */
+const DEBUG_SWITCH =
+  /^--(remote-debugging-port|remote-debugging-pipe|remote-allow-origins|inspect|inspect-brk|inspect-port)(=|$)/;
+
+const debugSwitches = process.argv.slice(1).filter((arg) => DEBUG_SWITCH.test(arg));
+
+if (debugSwitches.length > 0 && !DEVTOOLS_ENABLED) {
+  log.error('app', 'refusing to start with remote debugging enabled', {
+    switches: debugSwitches,
+  });
+  app.exit(1);
+}
 // Two instances would fight over the same profiles.json and could bind the same
 // sticky tunnel port; the second one just focuses the first.
-if (!app.requestSingleInstanceLock()) {
+else if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', (_event, argv) => {
