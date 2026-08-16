@@ -50,9 +50,19 @@ function Thumb({ id }) {
   )
 }
 
+// Placeholder count for the initial-load skeleton — enough to fill a typical
+// viewport width without over-committing to a specific grid density.
+const SKELETON_COUNT = 8
+
 export default function DashboardsHome({ connectionId, onOpen }) {
   const [dashboards, setDashboards] = useState([])
-  const [loading, setLoading] = useState(false)
+  // Starts true (not false) so the very first render — before the fetch effect
+  // has even run — shows the loading skeleton, not the "No dashboards yet"
+  // empty state. Without this, dashboards.length === 0 && !loading was
+  // momentarily true on every mount, flashing the empty state before the real
+  // list (or genuine empty state) landed a beat later.
+  const [loading, setLoading] = useState(true)
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
   const [filter, setFilter] = useState('all')
   const [folder, setFolder] = useState(null) // null = all folders
   const [search, setSearch] = useState('')
@@ -161,9 +171,14 @@ export default function DashboardsHome({ connectionId, onOpen }) {
       setDashboards([])
     } finally {
       setLoading(false)
+      setHasLoadedOnce(true)
     }
   }, [connectionId])
 
+  // Switching connections must re-show the skeleton, not the previous
+  // connection's cards (or a premature "no dashboards" for the new one) while
+  // the new fetch is in flight.
+  useEffect(() => { setHasLoadedOnce(false); setLoading(true) }, [connectionId])
   useEffect(() => { load() }, [load])
 
   const folders = useMemo(() => {
@@ -241,7 +256,19 @@ export default function DashboardsHome({ connectionId, onOpen }) {
         ))}
       </div>
 
-      {!loading && dashboards.length === 0 ? (
+      {!hasLoadedOnce ? (
+        <div className={styles.grid}>
+          {Array.from({ length: SKELETON_COUNT }, (_, i) => (
+            <div key={i} className={styles.skeletonCard}>
+              <div className={styles.skeletonThumb} />
+              <div className={styles.skeletonBody}>
+                <div className={styles.skeletonLine} style={{ width: '60%' }} />
+                <div className={styles.skeletonLine} style={{ width: '35%' }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : dashboards.length === 0 ? (
         <div className={styles.emptyState}>
           <span className={styles.emptyIcon}><LayoutDashboard size={22} /></span>
           <h2 className={styles.emptyTitle}>No dashboards yet</h2>
