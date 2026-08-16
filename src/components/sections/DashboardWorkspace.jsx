@@ -102,6 +102,20 @@ const EXAMPLE_PROMPTS = [
   { icon: Layers, title: 'Business overview', prompt: 'Build a dashboard with the most important KPIs and a couple of charts summarizing overall business health.' },
 ]
 
+// Rotates under the real live step while a build is in flight — genuine,
+// shippped-feature facts (not filler), so the wait teaches something instead
+// of just decorating it. Kept short; the real step above stays the primary line.
+const BUILD_TIPS = [
+  'Every query is verified against your real data before it ever reaches the screen.',
+  'Dashboards run read-only — the agent can look, never write.',
+  'Ask to add a chart or change a metric any time — it edits in place.',
+  'Every save keeps a version history, so you can always roll back a change.',
+  'Publish a dashboard to get a read-only link — no login required to view it.',
+  'Turn any dashboard into a TV/kiosk view that auto-refreshes on a wall display.',
+  'Set a plain-English alert and DeepSQL checks it on a schedule for you.',
+  'Duplicate a dashboard to branch it without touching the original.',
+]
+
 // Focused, chrome-less builder. Left = the agent (generate / refine); main = the
 // live dashboard canvas. The DeepSQL logo and breadcrumb return to the gallery.
 //
@@ -233,6 +247,17 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
   }, [thinking, startedAt])
 
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight }, [messages, thinking])
+
+  // Rotates BUILD_TIPS while the main canvas shows the "Building…" state, so a
+  // 15-30s wait has something changing on screen beyond the elapsed-time
+  // ticker. Starts at a random index (not always the same first tip) and
+  // resets once the build ends so the next one starts fresh.
+  const [tipIndex, setTipIndex] = useState(() => Math.floor(Math.random() * BUILD_TIPS.length))
+  useEffect(() => {
+    if (!thinking) return undefined
+    const id = setInterval(() => setTipIndex((i) => (i + 1) % BUILD_TIPS.length), 3500)
+    return () => clearInterval(id)
+  }, [thinking])
 
   const refreshNow = useCallback(() => {
     artifactRef.current?.reload()
@@ -891,17 +916,25 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
                 )}
               </div>
             </>
+          ) : thinking ? (
+            <div className={styles.newCanvas}>
+              <div className={styles.newCanvasInner}>
+                <span className={styles.newIconPulse}><Sparkles size={22} color="#534AB7" /></span>
+                <h2 className={styles.newTitle}>Building your dashboard…</h2>
+                <p className={styles.newSub}>
+                  {steps.length > 0 ? steps[steps.length - 1].message : 'Grounding on your schema and verifying every query…'}
+                  <span className={styles.buildElapsed}> · {elapsed}s</span>
+                </p>
+                <p key={tipIndex} className={styles.buildTip}>{BUILD_TIPS[tipIndex]}</p>
+              </div>
+            </div>
           ) : (
             <div className={styles.newCanvas}>
               <div className={styles.newCanvasInner}>
                 <span className={styles.newIcon}><Sparkles size={22} color="#534AB7" /></span>
-                <h2 className={styles.newTitle}>{thinking ? 'Building your dashboard…' : 'Nothing built here yet'}</h2>
-                <p className={styles.newSub}>
-                  {thinking
-                    ? 'The agent is grounding on your schema and verifying every query — this usually takes a bit.'
-                    : 'This dashboard doesn’t have a build yet — the chat on the left may just be planning so far. Ask for a chart to get started.'}
-                </p>
-                {!thinking && <button className={styles.backLink} onClick={onClose}><ChevronLeft size={14} /> Back to dashboards</button>}
+                <h2 className={styles.newTitle}>Nothing built here yet</h2>
+                <p className={styles.newSub}>This dashboard doesn’t have a build yet — the chat on the left may just be planning so far. Ask for a chart to get started.</p>
+                <button className={styles.backLink} onClick={onClose}><ChevronLeft size={14} /> Back to dashboards</button>
               </div>
             </div>
           )}
