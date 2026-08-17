@@ -23,6 +23,11 @@ Do NOT ask "should I update CLAUDE.md?" - just update it as part of task complet
 
 ## Recent Changes
 
+- 2026-08-17: `McpSqlGuardService` (and the matching MCP JS shim) no longer treats
+  `COMMENT` / `CALL` / `REPLACE` as mutating when they appear as table, column, or
+  function names. The guard matches statement verbs: mutating CTEs, `WITH … DELETE`,
+  `FOR UPDATE`, and `EXPLAIN DELETE`. `SELECT * FROM comment` is allowed. Dashboards
+  and `/api/mcp/query-readonly` share this guard.
 - 2026-02-04: Moved all Markdown docs into `docs/` (root docs under `docs/root/`), added a root `README.md` stub, and updated doc links.
 - 2026-03-12: Added a Phase 1 DeepSQL MCP stdio server in `mcp/` with read-only tools for connections, schema, chat, SQL execution, and EXPLAIN. See `docs/root/MCP_PHASE1.md`.
 - 2026-03-30: Main chat execution was tightened to stay schema-agnostic. Do not add customer-specific table names, column names, SQL templates, or prompt-to-table shortcuts in chat classifier, planner, resolver, composer, or execution paths. Fix chat behavior through generic semantic ranking, context retrieval, and guardrails instead.
