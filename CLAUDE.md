@@ -197,7 +197,7 @@ returns a number).
 ### Backend Rules
 1. **Database Provider Registry**: Use `DatabaseProviderRegistry` for all DB-specific operations. Do NOT add if/else or switch for database types.
 2. **LLM Provider Registry**: Use `LlmProviderRegistry` for all provider-specific LLM behavior. Do NOT add if/else or switch on provider type. Chat and embedding providers are registered and resolved independently — some providers offer only one. Providers are *factories* over credentials, not `ChatModel`s, so credentials stay resolvable per call and key rotation needs no restart.
-3. **SSH-Aware Access**: Always use `ConnectionService.getJdbcTemplate(connectionId, request)` — handles SSH tunneling transparently.
+3. **SSH-Aware Access**: Always use `ConnectionService.getJdbcTemplate(connectionId, request)` — handles SSH tunneling transparently. The bastion host is screened by `SshHostGuard` before any session is created (see SSRF guard below).
 4. **SQL Rule**: All generated SQL MUST use table-qualified column names (`table.column_name`).
 5. **RAG Caching**: Three-tier cache (memory → Redis → Azure Search). Redis failure is graceful (app continues without caching).
 6. **Virtual Threads**: Enabled for concurrency (JDK 25).
@@ -320,6 +320,36 @@ it against a real database — not a theoretical hardening pass.
   and `withInsert_isTreatedAsMutation` passed *because* of the stub. It now
   constructs a real `MySQLQueryExecutionProvider`. Do not reintroduce a stubbed
   dialect here; the mock is what let the blocker ship.
+
+### SSH Tunnel SSRF Guard
+
+`SshHostGuard` screens `request.getSshHost()` before `jsch.getSession(...)` in
+`SshTunnelService.createSession`, closing CodeQL `java/ssrf` alert #138. Both entry
+points are covered by that single call site (`establishTunnel` and
+`testSshConnection`).
+
+- **It resolves the host and checks every returned address**, not just the literal
+  string. A public hostname whose A record points at `169.254.169.254` or `10.x` is
+  still refused — a string-only check is defeated by one DNS record.
+- Blocked: loopback, wildcard, link-local (cloud metadata), RFC1918, CGNAT
+  (`100.64/10`), multicast, IPv6 ULA (`fc00::/7`), and IPv4-mapped/compatible IPv6
+  forms that smuggle a blocked v4 address through a v6 literal.
+- **`testSshConnection` calls the guard *outside* its try block.** That method catches
+  broad `Exception` and returns `false`, so a guard rejection inside it would render a
+  blocked host as an ordinary auth failure — the silent-failure anti-pattern above.
+  It propagates `IllegalArgumentException` instead, matching how a missing SSH password
+  already surfaces.
+- **It ships disabled** (`deepsql.ssh.host-guard.enabled=false`). Bastions legitimately
+  live on RFC1918 networks, so enabling it by default would break existing self-hosted
+  installs on upgrade. The trade-off is explicit: **on a default install the SSRF
+  surface is open** — an authenticated user who can create connections can still point
+  the tunnel at `169.254.169.254` or internal hosts. The CodeQL alert closes either way
+  (the sanitizer is on the call path regardless of the flag), so a closed alert here
+  does **not** mean deployments are protected. Do not read #138 going green as
+  "SSRF handled".
+- Operators who want the protection set `enabled=true` and allowlist their own bastion
+  via `deepsql.ssh.host-guard.allowed-hosts` (exact host, or a leading-dot suffix like
+  `.corp.internal`).
 
 ### Data Model Rules
 

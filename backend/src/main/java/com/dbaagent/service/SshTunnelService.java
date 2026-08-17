@@ -21,6 +21,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class SshTunnelService {
 
     private final DatabaseProviderRegistry providerRegistry;
+    private final SshHostGuard sshHostGuard;
 
     private static final int SSH_CONNECT_TIMEOUT = 30000; // 30 seconds
     private static final String LOCAL_BIND_HOST = "127.0.0.1";
@@ -33,8 +34,9 @@ public class SshTunnelService {
         for (int i = 0; i < LOCK_STRIPES; i++) tunnelLocks[i] = new Object();
     }
 
-    public SshTunnelService(DatabaseProviderRegistry providerRegistry) {
+    public SshTunnelService(DatabaseProviderRegistry providerRegistry, SshHostGuard sshHostGuard) {
         this.providerRegistry = providerRegistry;
+        this.sshHostGuard = sshHostGuard;
     }
 
     /**
@@ -102,6 +104,8 @@ public class SshTunnelService {
     private Session createSession(ConnectionRequest request) throws JSchException {
         // Create a new JSch instance per session to avoid shared state issues
         JSch jsch = new JSch();
+
+        sshHostGuard.assertAllowed(request.getSshHost());
 
         String sshHost = request.getSshHost();
         int sshPort = request.getSshPort() != null ? request.getSshPort() : 22;
@@ -233,6 +237,9 @@ public class SshTunnelService {
         if (!Boolean.TRUE.equals(request.getSshEnabled())) {
             return true; // SSH not required
         }
+
+        // Outside the try: a blocked host must surface its reason, not read as a failed login.
+        sshHostGuard.assertAllowed(request.getSshHost());
 
         Session session = null;
         try {

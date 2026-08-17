@@ -26,7 +26,8 @@ class SshTunnelServiceTest {
 
     @BeforeEach
     void setUp() {
-        sshTunnelService = new SshTunnelService(providerRegistry);
+        sshTunnelService = new SshTunnelService(
+                providerRegistry, new SshHostGuard(new SshHostGuardProperties()));
     }
 
     @Test
