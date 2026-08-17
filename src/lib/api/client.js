@@ -1386,6 +1386,11 @@ export const queryAPI = {
     if (requestOptions.mutationConfirmed != null) {
       payload.mutationConfirmed = requestOptions.mutationConfirmed;
     }
+    // Lets the caller cancel this run server-side; aborting the request alone
+    // leaves the query running on the database.
+    if (requestOptions.executionId) {
+      payload.executionId = requestOptions.executionId;
+    }
     // Use a longer axios timeout for queries with extended timeouts
     const axiosTimeout =
       timeoutSeconds != null
@@ -1398,6 +1403,13 @@ export const queryAPI = {
       `/api/connections/${connectionId}/query`,
       payload,
       Object.keys(config).length ? config : undefined,
+    );
+    return response.data;
+  },
+
+  cancelQuery: async (connectionId, executionId) => {
+    const response = await apiClient.post(
+      `/api/connections/${connectionId}/query/${encodeURIComponent(executionId)}/cancel`,
     );
     return response.data;
   },

@@ -29,9 +29,33 @@ public class QueryExecutorService {
     private final UserDataAccessPolicyService userDataAccessPolicyService;
     private final com.dbaagent.service.telemetry.TelemetryCounters telemetryCounters;
     private final KeyColumnAnalysisRepository keyColumnAnalysisRepository;
+    private final RunningQueryRegistry runningQueryRegistry;
 
     @Value("${db.query-timeout-seconds:30}")
     private int queryTimeoutSeconds;
+
+    /**
+     * Reads the connection's server-side session id via the dialect's own query.
+     * Never fatal: without it the query simply cannot be cancelled early.
+     */
+    private String resolveSessionPid(Connection connection, String dbType) {
+        String pidQuery;
+        try {
+            pidQuery = providerRegistry.getDialect(dbType).queryExecution().getSessionPidQuery();
+        } catch (Exception e) {
+            return null;
+        }
+        if (pidQuery == null) {
+            return null;
+        }
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(pidQuery)) {
+            return rs.next() ? rs.getString(1) : null;
+        } catch (SQLException e) {
+            log.debug("Could not resolve session pid: {}", e.getMessage());
+            return null;
+        }
+    }
 
     public List<DatabaseObject> getDatabaseObjects(String connectionId) throws SQLException {
         // Try to get from cache, but handle cache failures gracefully
@@ -547,12 +571,37 @@ public class QueryExecutorService {
         );
 
         try (Connection connection = connectionService.getConnection(connectionId, connRequest)) {
+            // Defense in depth: when the caller may not mutate, ask the database
+            // to enforce that too. Classification is a parser heuristic, so a
+            // read-only session is what keeps a future gap from becoming data
+            // loss — PostgreSQL then refuses the write itself.
+            boolean readOnlySession =
+                executionContext.mutationMode() == QueryExecutionContext.MutationMode.READ_ONLY_ONLY;
+            if (readOnlySession) {
+                try {
+                    connection.setReadOnly(true);
+                } catch (SQLException e) {
+                    // A driver that refuses the hint must not silently downgrade
+                    // to a writable session.
+                    throw new SQLException(
+                        "Could not open a read-only database session for this connection: " + e.getMessage(), e);
+                }
+            }
+
             // Per-query timeout override: use the request's timeout if provided,
             // otherwise fall back to the server default (db.query-timeout-seconds).
             int maxAllowedTimeoutSeconds = 600; // 10 minutes ceiling
             int effectiveTimeout = (queryRequest.getTimeoutSeconds() != null && queryRequest.getTimeoutSeconds() > 0)
                 ? Math.min(queryRequest.getTimeoutSeconds(), maxAllowedTimeoutSeconds)
                 : queryTimeoutSeconds;
+
+            // Publish the server-side session id so a client that abandons this
+            // request can terminate the query rather than leaving it to run out
+            // its timeout holding a pooled connection.
+            String sessionPid = resolveSessionPid(connection, connRequest.getDbType());
+            result.setSessionPid(sessionPid);
+            runningQueryRegistry.register(
+                queryRequest.getExecutionId(), connectionId, sessionPid, executionContext.actorUsername());
 
             // Execute all preamble statements (SET @var, USE db, etc.) on the same connection
             // so that session variables are in scope for the final SELECT.
@@ -573,15 +622,23 @@ public class QueryExecutorService {
                 stmt.setQueryTimeout(effectiveTimeout);
             }
 
-            // Apply limit if specified
+            // Row cap. setMaxRows is the enforcement: the driver stops handing
+            // back rows regardless of the query's shape, so a LIMIT inside a CTE,
+            // a comment, or a string literal can no longer defeat the cap. We ask
+            // for one extra row purely to detect truncation.
+            //
+            // Appending " LIMIT n" is kept as an optimization for simple SELECTs
+            // (it lets the database stop early rather than stream rows we drop),
+            // but correctness no longer depends on that textual check.
+            boolean limitRequested = queryRequest.getLimit() != null && queryRequest.getLimit() > 0;
+            int rowLimit = limitRequested ? queryRequest.getLimit() : 0;
             boolean limitApplied = false;
             String baseQuery = null; // original query without limit, for COUNT
-            if (queryRequest.getLimit() != null && queryRequest.getLimit() > 0) {
+            if (limitRequested) {
+                stmt.setMaxRows(rowLimit + 1);
+
                 String queryTrimmed = finalQuery.trim();
                 String queryLower = queryTrimmed.toLowerCase();
-                // Only add LIMIT to SELECT queries, not to SHOW/DESCRIBE/EXPLAIN commands.
-                // Use regex to check for actual LIMIT clause (avoids false positives from
-                // column names, comments, or identifiers that contain the word "limit").
                 boolean isSelect = queryLower.startsWith("select");
                 boolean alreadyHasLimit = queryLower.matches("(?s).*\\blimit\\s+\\d+.*");
                 if (isSelect && !alreadyHasLimit) {
@@ -589,7 +646,10 @@ public class QueryExecutorService {
                     if (baseQuery.endsWith(";")) {
                         baseQuery = baseQuery.substring(0, baseQuery.length() - 1);
                     }
-                    finalQuery = baseQuery + " LIMIT " + queryRequest.getLimit();
+                    // Ask for one more than we will return, matching setMaxRows,
+                    // so an exactly-at-the-cap result is still detectable as
+                    // truncated rather than looking complete.
+                    finalQuery = baseQuery + " LIMIT " + (rowLimit + 1);
                     limitApplied = true;
                 }
             }
@@ -620,9 +680,16 @@ public class QueryExecutorService {
                         }
                         result.setColumns(columns);
 
-                        // Get rows
+                        // Get rows. setMaxRows let one extra row through so we can
+                        // tell "exactly at the cap" from "there were more"; it is
+                        // counted but never returned.
                         List<List<Object>> rows = new ArrayList<>();
+                        boolean truncated = false;
                         while (rs.next()) {
+                            if (limitRequested && rows.size() >= rowLimit) {
+                                truncated = true;
+                                break;
+                            }
                             List<Object> row = new ArrayList<>();
                             for (int i = 1; i <= columnCount; i++) {
                                 Object value = rs.getObject(i);
@@ -632,11 +699,14 @@ public class QueryExecutorService {
                         }
                         result.setRows(rows);
                         result.setRowCount(rows.size());
-
-                        // If a limit was applied, mark result as limited and fetch total row count.
-                        // The COUNT query runs on the same connection so @session variables are in scope.
-                        if (limitApplied && baseQuery != null) {
+                        if (truncated) {
                             result.setIsLimited(true);
+                        }
+
+                        // Fetch the true total only when we appended the LIMIT
+                        // ourselves, since that is the one case where baseQuery is
+                        // a valid standalone statement to wrap in COUNT(*).
+                        if (truncated && limitApplied && baseQuery != null) {
                             try (Statement countStmt = connection.createStatement()) {
                                 countStmt.setQueryTimeout(effectiveTimeout > 0 ? effectiveTimeout : 60);
                                 // Strip trailing ORDER BY before wrapping in COUNT subquery,
@@ -661,6 +731,8 @@ public class QueryExecutorService {
                     result.setRows(Arrays.asList(Arrays.asList(updateCount)));
                 }
             }
+        } finally {
+            runningQueryRegistry.unregister(queryRequest.getExecutionId());
         }
 
         result.setExecutionTimeMs(System.currentTimeMillis() - startTime);

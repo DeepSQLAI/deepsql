@@ -216,7 +216,8 @@ public class UserDataAccessPolicyService {
             result.getTotalRowCount(),
             result.getIsLimited(),
             result.getExecutionTimeMs(),
-            result.getQuery()
+            result.getQuery(),
+            result.getSessionPid()
         );
         logPolicyEvent(SecurityEventType.CHAT_ACCESS_POLICY_REDACTED, executionContext.actorUsername(), connectionId, "result_redacted", Map.of(
             "query", truncate(result.getQuery()),
