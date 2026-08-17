@@ -261,6 +261,11 @@ broken. Assert the *outcome*, never the attempt:
 - **Silent-failure rule, concretely:** the CLI rendered an unreachable server as
   `No databases connected yet` because one `catch` covered both the connection fetch
   and decorative extras. An unreachable host must never look like an empty account.
+- **SQL mutation guards must match statement verbs, not identifiers.**
+  `McpSqlGuardService` / `mcp/deepsql-phase1-lib.js` used `\bCOMMENT\b` / `\bCALL\b`,
+  so `SELECT * FROM comment` was rejected as "potentially mutating." Plenty of
+  schemas have a `comment` table. Assert `SELECT * FROM comment` is allowed *and*
+  that `WITH x AS (DELETE …) SELECT …` / `WITH x AS (…) DELETE …` still are not.
 
 ### Data Model Rules
 
