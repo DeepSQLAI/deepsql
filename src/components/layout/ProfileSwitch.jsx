@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeftRight, Check, ChevronDown, X } from 'lucide-react'
-import HelpTooltip from '@/components/tabs/Brain/components/HelpTooltip'
 import { useAuth } from '@/hooks/useAuth'
 import { getDefaultHomeSection } from '@/lib/features'
 import { adminAPI } from '@/lib/api/client'
@@ -109,22 +108,16 @@ export default function ProfileSwitch() {
             Switch user
             <ChevronDown size={14} />
           </button>
-          <HelpTooltip
-            content={{
-              title: 'Exit profile',
-              description: 'Return to your administrator session. Policies and permissions go back to full admin access.',
-            }}
+          <button
+            type="button"
+            className={styles.exitBtn}
+            onClick={handleStop}
+            disabled={switching}
+            data-testid="profile-switch-exit"
           >
-            <button
-              type="button"
-              className={styles.exitBtn}
-              onClick={handleStop}
-              disabled={switching}
-            >
-              <X size={14} />
-              Exit
-            </button>
-          </HelpTooltip>
+            <X size={14} />
+            Exit
+          </button>
         </div>
         {open && (
           <CandidateMenu
@@ -141,12 +134,6 @@ export default function ProfileSwitch() {
 
   return (
     <div className={styles.switchWrap} ref={rootRef} data-testid="profile-switch">
-      <HelpTooltip
-        content={{
-          title: 'Switch profile',
-          description: 'View the product as a sub-user to verify connection access, chat policies, and role permissions. Only administrators can do this. Your admin session stays signed in.',
-        }}
-      >
         <button
           type="button"
           className={styles.trigger}
@@ -159,7 +146,6 @@ export default function ProfileSwitch() {
           <span>View as</span>
           <ChevronDown size={14} />
         </button>
-      </HelpTooltip>
       {open && (
         <CandidateMenu
           candidates={candidates}

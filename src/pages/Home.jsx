@@ -7,7 +7,6 @@ import DigestFeedSection from '@/components/sections/DigestSection'
 import BrainSection from '@/components/sections/BrainSection'
 import CompanyKnowledgeSection from '@/components/sections/CompanyKnowledgeSection'
 import DashboardsSection from '@/components/sections/DashboardsSection'
-import DocsSection from '@/components/sections/DocsSection'
 import EditorSection from '@/components/sections/EditorSection'
 import SlowQueriesSection from '@/components/sections/SlowQueriesSection'
 import PageTransitionBar from '@/components/layout/PageTransitionBar'
@@ -25,7 +24,6 @@ const SECTION_MAP = {
   'company-knowledge': CompanyKnowledgeSection,
   performance: SlowQueriesSection,
   editor:  EditorSection,
-  docs:    DocsSection,
 }
 
 export default function Home() {

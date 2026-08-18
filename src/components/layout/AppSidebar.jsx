@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { BookOpen, Brain, Code2, Database, Settings, PanelLeftClose, PanelLeftOpen, LogOut, User, ChevronDown, Check, Newspaper, Gauge, MessageSquare, LayoutDashboard } from 'lucide-react'
+import { Brain, Code2, Database, Settings, PanelLeftClose, PanelLeftOpen, LogOut, User, ChevronDown, Check, Newspaper, Gauge, MessageSquare, LayoutDashboard } from 'lucide-react'
 import { useActiveSection, useSetActiveSection } from '@/lib/stores/useNavStore'
 import { useConnectionManager } from '@/lib/hooks/useConnectionManager'
 import { AGENTS_ENABLED, canAccessHomeSection, getConnectionAccessBadge, getConnectionAccessLabel } from '@/lib/features'
@@ -16,7 +16,6 @@ const NAV_ITEMS = [
   { id: 'company-knowledge', label: 'Brain', icon: Brain },
   { id: 'performance', label: 'Performance', icon: Gauge },
   { id: 'editor',  label: 'Editor',  icon: Code2 },
-  { id: 'docs',    label: 'Docs',    icon: BookOpen },
 ]
 
 export default function AppSidebar() {
@@ -92,8 +91,7 @@ export default function AppSidebar() {
         <nav className={styles.nav}>
           {visibleNavItems.map(({ id, label, icon: Icon }) => {
             // Freeze these sections until the first DB connection is added.
-            // Docs is reference content — available even without any connection.
-            const requiresConnection = id !== 'agent' && id !== 'digest' && id !== 'docs'
+            const requiresConnection = id !== 'agent' && id !== 'digest'
             const isLocked = requiresConnection && connections.length === 0
             const lockTitle = isLocked
               ? 'Add a database connection to unlock'
