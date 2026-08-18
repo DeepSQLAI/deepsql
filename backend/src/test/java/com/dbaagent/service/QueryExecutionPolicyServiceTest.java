@@ -410,6 +410,43 @@ class QueryExecutionPolicyServiceTest {
     }
 
     @Test
+    void hiddenWriteScan_staysLinearOnAdversarialInput() {
+        // The text backstop used a lazy wildcard (\bSELECT\b[\s\S]*?\bINTO)
+        // and a regex block-comment strip, both of which backtracked
+        // quadratically: 224KB of repeated "SELECT " burned ~44s of CPU inside
+        // the guard, before the query ever reached the database. Any
+        // authenticated Editor user could stall a request thread with it.
+        String repeatedSelect = "SELECT " + "SELECT ".repeat(32_000);
+        String unterminatedBlockComment = "SELECT 1 /*" + "a/*".repeat(32_000);
+
+        for (String hostile : List.of(repeatedSelect, unterminatedBlockComment)) {
+            long startedAt = System.currentTimeMillis();
+            service.enforce(
+                new QueryRequest(hostile, null, null),
+                QueryExecutionContext.editor("viewer", false, false),
+                "postgresql"
+            );
+            long elapsed = System.currentTimeMillis() - startedAt;
+            assertThat(elapsed)
+                .as("classification of a %d char statement must not backtrack", hostile.length())
+                .isLessThan(5_000L);
+        }
+    }
+
+    @Test
+    void insertIntoSelect_isNotMisreadAsSelectInto() {
+        // SELECT_INTO_PATTERN matches a bare INTO target now that the SELECT
+        // prefix is gone, so the caller must gate it on the statement actually
+        // reading as a SELECT.
+        QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
+            new QueryRequest("INSERT INTO archive SELECT * FROM orders", null, null),
+            QueryExecutionContext.editor("admin", true, true),
+            "postgresql"
+        );
+        assertThat(decision.primaryQueryType()).isEqualTo("INSERT");
+    }
+
+    @Test
     void insertIntoSelect_isStillClassifiedAsInsert() {
         QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
             new QueryRequest("INSERT INTO archive SELECT * FROM orders", null, null),

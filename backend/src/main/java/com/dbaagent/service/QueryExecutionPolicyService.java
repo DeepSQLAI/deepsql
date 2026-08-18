@@ -62,8 +62,13 @@ public class QueryExecutionPolicyService {
         "\\bAS\\s*\\(\\s*(INSERT|UPDATE|DELETE|MERGE)\\b",
         Pattern.CASE_INSENSITIVE
     );
+    // Anchored on INTO alone, with no leading wildcard. The previous form
+    // (\bSELECT\b[\s\S]*?\bINTO ...) backtracked quadratically: 224KB of
+    // repeated "SELECT " took ~44s of CPU in the guard before the query reached
+    // the database. The caller already knows the statement is a SELECT, so the
+    // prefix bought nothing.
     private static final Pattern SELECT_INTO_PATTERN = Pattern.compile(
-        "\\bSELECT\\b[\\s\\S]*?\\bINTO\\s+(?!STRICT\\b)[\"`\\w]",
+        "\\bINTO\\s+(?!STRICT\\b)[\"`\\w]",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -350,19 +355,45 @@ public class QueryExecutionPolicyService {
             return null;
         }
         String scrubbed = stripLeadingComments(stripComments(stripQuotedLiterals(sql)));
-        if (!scrubbed.regionMatches(true, 0, "WITH", 0, 4)) {
-            return SELECT_INTO_PATTERN.matcher(scrubbed).find() ? "SELECT INTO" : null;
-        }
-        if (CTE_WRITE_PATTERN.matcher(scrubbed).find()) {
+        boolean startsWithWith = scrubbed.regionMatches(true, 0, "WITH", 0, 4);
+        if (startsWithWith && CTE_WRITE_PATTERN.matcher(scrubbed).find()) {
             return "WRITE (in CTE)";
         }
-        return SELECT_INTO_PATTERN.matcher(scrubbed).find() ? "SELECT INTO" : null;
+        // SELECT_INTO_PATTERN matches a bare INTO target, so it must only be
+        // consulted for statements that actually read as a SELECT — otherwise
+        // "INSERT INTO t SELECT ..." would be relabelled SELECT INTO.
+        if (startsWithWith || scrubbed.regionMatches(true, 0, "SELECT", 0, 6)) {
+            return SELECT_INTO_PATTERN.matcher(scrubbed).find() ? "SELECT INTO" : null;
+        }
+        return null;
     }
 
+    // Removes block and line comments with a single linear scan. The regex form
+    // matched a lazy wildcard between block-comment delimiters and backtracked
+    // quadratically on an unterminated block comment: 96KB of input cost ~14s
+    // of CPU.
     private String stripComments(String sql) {
-        return sql
-            .replaceAll("(?s)/\\*.*?\\*/", " ")
-            .replaceAll("(?m)--[^\\n]*", " ");
+        StringBuilder out = new StringBuilder(sql.length());
+        int i = 0;
+        int len = sql.length();
+        while (i < len) {
+            char c = sql.charAt(i);
+            if (c == '/' && i + 1 < len && sql.charAt(i + 1) == '*') {
+                int end = sql.indexOf("*/", i + 2);
+                i = end < 0 ? len : end + 2;
+                out.append(' ');
+                continue;
+            }
+            if (c == '-' && i + 1 < len && sql.charAt(i + 1) == '-') {
+                int nl = sql.indexOf('\n', i + 2);
+                i = nl < 0 ? len : nl;
+                out.append(' ');
+                continue;
+            }
+            out.append(c);
+            i++;
+        }
+        return out.toString();
     }
 
     private boolean isUseStatement(String sql) {
