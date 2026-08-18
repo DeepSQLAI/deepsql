@@ -187,8 +187,10 @@ public class S3LogFetchService {
     private static final int MAX_PRESIGNED_REDIRECTS = 5;
 
     /**
-     * Every hop of a presigned fetch must be https to a public address. The
-     * initial URL and each redirect target both go through here.
+     * Validates and rebuilds a presigned fetch URL: https only, to a public
+     * address. Returns a URI reconstructed from checked components rather than
+     * the input, so no unvalidated part of the caller's string survives into
+     * the request (java/ssrf). The initial URL and every redirect hop pass here.
      */
     private URI assertFetchableUrl(URI uri) {
         String scheme = uri.getScheme();
@@ -208,7 +210,14 @@ public class S3LogFetchService {
             throw new IllegalArgumentException(
                 "Presigned log URL resolves to a restricted address (" + blocked.getHostAddress() + ")");
         }
-        return uri;
+        try {
+            // Rebuild from validated pieces; scheme is pinned to the https literal.
+            return new URI("https", uri.getRawUserInfo(), host, uri.getPort(),
+                uri.getRawPath(), uri.getRawQuery(), uri.getRawFragment())
+                .parseServerAuthority();
+        } catch (java.net.URISyntaxException e) {
+            throw new IllegalArgumentException("Malformed presigned log URL");
+        }
     }
 
     boolean isPresignedUrl(String s3Url) {

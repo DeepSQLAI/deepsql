@@ -46,6 +46,27 @@ class PatternUtilTest {
     }
 
     @Test
+    void backtrackingGapStaysFastOnAbusiveInput() {
+        // \bA\b.*\bB\b backtracks super-linearly when B is absent; the input
+        // cap keeps it bounded. This input would take tens of seconds uncapped.
+        String regex = "\\b(how many|count|number of)\\b.*\\b(rows?|records?)\\b";
+        String abusive = "count ".repeat(50_000);
+
+        long start = System.nanoTime();
+        boolean result = PatternUtil.containsPattern(abusive, regex);
+        long millis = (System.nanoTime() - start) / 1_000_000;
+
+        assertFalse(result);
+        assertTrue(millis < 1000, "took " + millis + "ms, expected bounded");
+    }
+
+    @Test
+    void matchWithinTheCapIsUnaffected() {
+        assertTrue(PatternUtil.containsPattern("how many rows are there",
+            "\\b(how many|count)\\b.*\\b(rows?)\\b"));
+    }
+
+    @Test
     void reusesTheCompiledPatternForTheSameRegex() {
         String regex = "\\bcache-me\\b";
         assertTrue(PatternUtil.containsPattern("cache-me please", regex));

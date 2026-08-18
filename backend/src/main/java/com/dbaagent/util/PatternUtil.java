@@ -5,17 +5,30 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
- * Unanchored regex matching over a cached pattern.
+ * Unanchored regex matching over a cached pattern, on a length-bounded input.
  *
- * Replaces {@code s.matches(".*RE.*")}. String.matches anchors the whole input,
- * so the surrounding {@code .*} only exists to undo that anchoring — and the
- * combination of those wrappers with an alternation is what drives the
- * polynomial backtracking CodeQL reports as java/polynomial-redos. find() on
- * the bare expression is equivalent and linear.
+ * Replaces {@code s.matches(".*RE.*")}: String.matches anchors the whole input,
+ * so the surrounding {@code .*} exists only to undo that anchoring, and find()
+ * on the bare expression is equivalent.
+ *
+ * Some of the caller expressions have an inner {@code A.*B} gap that backtracks
+ * super-linearly when B is absent (java/polynomial-redos) — measured at tens of
+ * seconds on a crafted multi-thousand-token input. Rather than reshape ~90
+ * classifier patterns (and risk changing what they match), the input is capped
+ * to {@link #MAX_SCAN_CHARS} before matching. The gap can then backtrack only
+ * within that window, which bounds every pattern to a few milliseconds. Real
+ * chat messages and identifiers are far shorter, so matching is unchanged for
+ * every legitimate input; only an abusive one is truncated.
  */
 public final class PatternUtil {
 
     private PatternUtil() {}
+
+    /**
+     * Longest input scanned. Well above any real question or identifier, far
+     * below the length where a backtracking gap becomes expensive.
+     */
+    static final int MAX_SCAN_CHARS = 4096;
 
     private static final int MAX_CACHED_PATTERNS = 512;
     private static final Map<String, Pattern> CACHE = new ConcurrentHashMap<>();
@@ -24,7 +37,10 @@ public final class PatternUtil {
         if (input == null) {
             return false;
         }
-        return cached(regex).matcher(input).find();
+        CharSequence scanned = input.length() > MAX_SCAN_CHARS
+                ? input.subSequence(0, MAX_SCAN_CHARS)
+                : input;
+        return cached(regex).matcher(scanned).find();
     }
 
     private static Pattern cached(String regex) {
