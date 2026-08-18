@@ -3,6 +3,7 @@ package com.dbaagent.service;
 import com.dbaagent.dto.ConnectionChatAccessPolicyResponse;
 import com.dbaagent.dto.PolicyPreviewResponse;
 import com.dbaagent.model.ConnectionChatAccessPolicy;
+import com.dbaagent.model.ColumnMetadata;
 import com.dbaagent.model.SecurityEventOutcome;
 import com.dbaagent.model.SecurityEventType;
 import com.dbaagent.model.SchemaMetadata;
@@ -24,10 +25,21 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
 public class ConnectionChatAccessPolicyService {
+
+    private static final Pattern ONLY_SCHEMA_PATTERN = Pattern.compile(
+        "(?:only|just)\\s+(?:have\\s+)?(?:access\\s+to\\s+)?(?:the\\s+)?schema\\s+([a-z_][a-z0-9_]*)",
+        Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern ACCESS_ONLY_SCHEMA_PATTERN = Pattern.compile(
+        "access\\s+only\\s+to\\s+(?:schema\\s+)?([a-z_][a-z0-9_]*)",
+        Pattern.CASE_INSENSITIVE
+    );
 
     private final ConnectionChatAccessPolicyRepository policyRepository;
     private final TableClassificationRepository tableClassificationRepository;
@@ -89,7 +101,8 @@ public class ConnectionChatAccessPolicyService {
                 "updatedBy", updatedBy,
                 "blockedSensitivityCategories", parsedPolicy.blockedSensitivityCategories(),
                 "deniedTables", parsedPolicy.deniedTables(),
-                "deniedColumns", parsedPolicy.deniedColumns()
+                "deniedColumns", parsedPolicy.deniedColumns(),
+                "allowedSchemas", parsedPolicy.allowedSchemas()
             ))
             .build());
 
@@ -140,6 +153,7 @@ public class ConnectionChatAccessPolicyService {
             new LinkedHashSet<>(policy.getBlockedSensitivityCategories() == null ? List.of() : policy.getBlockedSensitivityCategories()),
             new LinkedHashSet<>(policy.getDeniedTables() == null ? List.of() : policy.getDeniedTables()),
             new LinkedHashSet<>(policy.getDeniedColumns() == null ? List.of() : policy.getDeniedColumns()),
+            new LinkedHashSet<>(parsedPolicy.allowedSchemas()),
             policy.isBlockMode(),
             policy.isRedactMode(),
             policy.getPlainEnglishPolicy(),
@@ -149,29 +163,7 @@ public class ConnectionChatAccessPolicyService {
     }
 
     private ParsedPolicy parsedFromPolicy(ConnectionChatAccessPolicy policy) {
-        List<String> impactedTables = new ArrayList<>();
-        List<String> impactedColumns = new ArrayList<>();
-        Map<String, ProtectionDescriptor> descriptors = buildProtectionDescriptors(
-            policy.getConnectionId(),
-            policy.getBlockedSensitivityCategories(),
-            policy.getDeniedTables(),
-            policy.getDeniedColumns()
-        );
-        descriptors.values().forEach(descriptor -> {
-            if (descriptor.protectWholeTable()) {
-                impactedTables.add(descriptor.tableName());
-            }
-            descriptor.restrictedColumns().forEach(column -> impactedColumns.add(descriptor.tableName() + "." + column));
-        });
-        return new ParsedPolicy(
-            normalizeList(policy.getBlockedSensitivityCategories()),
-            normalizeList(policy.getDeniedTables()),
-            normalizeList(policy.getDeniedColumns()),
-            impactedTables,
-            impactedColumns,
-            policy.isBlockMode(),
-            policy.isRedactMode()
-        );
+        return parsePolicy(policy.getConnectionId(), policy.getPlainEnglishPolicy());
     }
 
     private ParsedPolicy parsePolicy(String connectionId, String plainEnglishPolicy) {
@@ -202,39 +194,49 @@ public class ConnectionChatAccessPolicyService {
         }
 
         SchemaMetadata schemaMetadata = tryScanSchema(connectionId);
+        Set<String> allowedSchemas = extractAllowedSchemas(normalized, schemaMetadata);
         LinkedHashSet<String> deniedTables = new LinkedHashSet<>();
         LinkedHashSet<String> deniedColumns = new LinkedHashSet<>();
+
         if (schemaMetadata != null) {
             for (TableMetadata table : schemaMetadata.getTables()) {
-                if (containsWord(normalized, table.getName())) {
-                    deniedTables.add(table.getName());
+                if (!schemaInScope(table.getSchema(), allowedSchemas)) {
+                    continue;
+                }
+                String qualifiedTable = qualifyTable(table.getSchema(), table.getName());
+                if (containsWord(normalized, qualifiedTable) || containsWord(normalized, table.getName())) {
+                    deniedTables.add(qualifiedTable);
                 }
                 if (table.getColumns() != null) {
                     table.getColumns().forEach(column -> {
-                        String qualified = table.getName() + "." + column.getName();
-                        if (containsWord(normalized, qualified) || containsWord(normalized, column.getName())) {
-                            deniedColumns.add(qualified);
+                        String qualifiedColumn = qualifiedTable + "." + column.getName();
+                        if (containsWord(normalized, qualifiedColumn)) {
+                            deniedColumns.add(qualifiedColumn);
                         }
                     });
                 }
             }
+            addNumericAmountDenials(normalized, allowedSchemas, schemaMetadata, deniedColumns);
         }
 
         Map<String, ProtectionDescriptor> descriptors = buildProtectionDescriptors(
             connectionId,
             new ArrayList<>(blockedCategories),
             new ArrayList<>(deniedTables),
-            new ArrayList<>(deniedColumns)
+            new ArrayList<>(deniedColumns),
+            allowedSchemas,
+            schemaMetadata
         );
 
         List<String> impactedTables = descriptors.values().stream()
             .filter(ProtectionDescriptor::protectWholeTable)
-            .map(ProtectionDescriptor::tableName)
+            .map(ProtectionDescriptor::qualifiedTableName)
             .distinct()
             .sorted()
             .toList();
         List<String> impactedColumns = descriptors.values().stream()
-            .flatMap(descriptor -> descriptor.restrictedColumns().stream().map(column -> descriptor.tableName() + "." + column))
+            .flatMap(descriptor -> descriptor.restrictedColumns().stream()
+                .map(column -> descriptor.qualifiedTableName() + "." + column))
             .distinct()
             .sorted()
             .toList();
@@ -243,6 +245,7 @@ public class ConnectionChatAccessPolicyService {
             new ArrayList<>(blockedCategories),
             new ArrayList<>(deniedTables),
             new ArrayList<>(deniedColumns),
+            new ArrayList<>(allowedSchemas),
             impactedTables,
             impactedColumns,
             true,
@@ -256,50 +259,219 @@ public class ConnectionChatAccessPolicyService {
         List<String> deniedTables,
         List<String> deniedColumns
     ) {
+        return buildProtectionDescriptors(
+            connectionId,
+            blockedSensitivityCategories,
+            deniedTables,
+            deniedColumns,
+            Set.of(),
+            tryScanSchema(connectionId)
+        );
+    }
+
+    public Map<String, ProtectionDescriptor> buildProtectionDescriptors(
+        String connectionId,
+        List<String> blockedSensitivityCategories,
+        List<String> deniedTables,
+        List<String> deniedColumns,
+        Set<String> allowedSchemas,
+        SchemaMetadata schemaMetadata
+    ) {
+        SchemaMetadata effectiveSchema = schemaMetadata != null ? schemaMetadata : tryScanSchema(connectionId);
         Set<String> categorySet = normalizeSet(blockedSensitivityCategories);
         Set<String> deniedTableSet = normalizeSet(deniedTables);
         Set<String> deniedColumnSet = normalizeSet(deniedColumns);
+        Set<String> allowedSchemaSet = normalizeSet(new ArrayList<>(allowedSchemas));
+
+        Map<String, List<String>> schemasByBareTable = indexSchemasByBareTable(effectiveSchema);
 
         Map<String, ProtectionDescriptor> descriptors = new LinkedHashMap<>();
         for (TableClassification classification : tableClassificationRepository.findLatestByConnectionIdOrderByTableNameAsc(connectionId)) {
-            String tableName = classification.getTableName();
-            ProtectionDescriptor descriptor = descriptors.computeIfAbsent(
-                normalizeName(tableName),
-                ignored -> new ProtectionDescriptor(tableName, false, new LinkedHashSet<>())
-            );
+            String bareTable = classification.getTableName();
+            List<String> schemas = schemasByBareTable.getOrDefault(normalizeName(bareTable), List.of(""));
+            for (String schema : schemas) {
+                if (!schemaInScope(schema, allowedSchemaSet)) {
+                    continue;
+                }
+                String qualifiedTable = qualifyTable(schema, bareTable);
+                ProtectionDescriptor descriptor = descriptors.computeIfAbsent(
+                    normalizeName(qualifiedTable),
+                    ignored -> new ProtectionDescriptor(schema, bareTable, false, new LinkedHashSet<>())
+                );
 
-            boolean tableExplicitlyDenied = deniedTableSet.contains(normalizeName(tableName));
-            boolean tableCategoryBlocked = categorySet.contains(normalizeName(classification.getSensitivityLevel()));
-            if (tableExplicitlyDenied) {
-                descriptor.protectWholeTable = true;
-            }
-            if (tableCategoryBlocked && (classification.getSensitiveColumns() == null || classification.getSensitiveColumns().isEmpty())) {
-                descriptor.protectWholeTable = true;
-            }
+                boolean tableExplicitlyDenied = deniedTableSet.contains(normalizeName(qualifiedTable))
+                    || deniedTableSet.contains(normalizeName(bareTable));
+                boolean tableCategoryBlocked = categorySet.contains(normalizeName(classification.getSensitivityLevel()));
+                if (tableExplicitlyDenied) {
+                    descriptor.protectWholeTable = true;
+                }
+                if (tableCategoryBlocked && (classification.getSensitiveColumns() == null || classification.getSensitiveColumns().isEmpty())) {
+                    descriptor.protectWholeTable = true;
+                }
 
-            if (classification.getSensitiveColumns() != null) {
-                for (Map<String, Object> sensitiveColumn : classification.getSensitiveColumns()) {
-                    String column = String.valueOf(sensitiveColumn.get("column"));
-                    String type = sensitiveColumn.get("type") == null ? "" : String.valueOf(sensitiveColumn.get("type"));
-                    if (categorySet.contains(normalizeName(type))
-                        || deniedColumnSet.contains(normalizeName(tableName + "." + column))
-                        || deniedColumnSet.contains(normalizeName(column))
-                        || tableExplicitlyDenied) {
-                        descriptor.restrictedColumns.add(column);
+                if (classification.getSensitiveColumns() != null) {
+                    for (Map<String, Object> sensitiveColumn : classification.getSensitiveColumns()) {
+                        String column = String.valueOf(sensitiveColumn.get("column"));
+                        String type = sensitiveColumn.get("type") == null ? "" : String.valueOf(sensitiveColumn.get("type"));
+                        String qualifiedColumn = qualifiedTable + "." + column;
+                        if (categorySet.contains(normalizeName(type))
+                            || deniedColumnSet.contains(normalizeName(qualifiedColumn))
+                            || tableExplicitlyDenied) {
+                            descriptor.restrictedColumns.add(column);
+                        }
                     }
                 }
             }
         }
 
-        deniedTableSet.forEach(table -> descriptors.computeIfAbsent(table, key -> new ProtectionDescriptor(table, true, new LinkedHashSet<>())).protectWholeTable = true);
+        deniedTableSet.forEach(tableRef -> {
+            String normalized = normalizeName(tableRef);
+            descriptors.computeIfAbsent(normalized, key -> descriptorFromTableRef(tableRef, true)).protectWholeTable = true;
+        });
         deniedColumnSet.forEach(columnRef -> {
-            String[] parts = columnRef.split("\\.", 2);
-            if (parts.length == 2) {
-                ProtectionDescriptor descriptor = descriptors.computeIfAbsent(parts[0], key -> new ProtectionDescriptor(parts[0], false, new LinkedHashSet<>()));
+            String[] parts = columnRef.split("\\.", 3);
+            if (parts.length == 3) {
+                String qualifiedTable = parts[0] + "." + parts[1];
+                ProtectionDescriptor descriptor = descriptors.computeIfAbsent(
+                    normalizeName(qualifiedTable),
+                    key -> descriptorFromTableRef(qualifiedTable, false)
+                );
+                descriptor.restrictedColumns.add(parts[2]);
+            } else if (parts.length == 2) {
+                ProtectionDescriptor descriptor = descriptors.computeIfAbsent(
+                    normalizeName(columnRef.substring(0, columnRef.lastIndexOf('.'))),
+                    key -> descriptorFromTableRef(parts[0], false)
+                );
                 descriptor.restrictedColumns.add(parts[1]);
             }
         });
         return descriptors;
+    }
+
+    public Map<String, ProtectionDescriptor> buildProtectionDescriptors(
+        ConnectionChatAccessPolicyService.EffectivePolicy policy
+    ) {
+        if (policy == null || !policy.protectsAnything()) {
+            return Map.of();
+        }
+        return buildProtectionDescriptors(
+            policy.connectionId(),
+            new ArrayList<>(policy.blockedSensitivityCategories()),
+            new ArrayList<>(policy.deniedTables()),
+            new ArrayList<>(policy.deniedColumns()),
+            policy.allowedSchemas(),
+            null
+        );
+    }
+
+    static String qualifyTable(String schema, String table) {
+        if (table == null || table.isBlank()) {
+            return "";
+        }
+        if (schema == null || schema.isBlank() || "public".equalsIgnoreCase(schema)) {
+            return table;
+        }
+        return schema + "." + table;
+    }
+
+    private ProtectionDescriptor descriptorFromTableRef(String tableRef, boolean protectWholeTable) {
+        String[] parts = tableRef.split("\\.", 2);
+        if (parts.length == 2) {
+            return new ProtectionDescriptor(parts[0], parts[1], protectWholeTable, new LinkedHashSet<>());
+        }
+        return new ProtectionDescriptor(null, tableRef, protectWholeTable, new LinkedHashSet<>());
+    }
+
+    private Map<String, List<String>> indexSchemasByBareTable(SchemaMetadata schemaMetadata) {
+        Map<String, List<String>> schemasByBareTable = new LinkedHashMap<>();
+        if (schemaMetadata == null || schemaMetadata.getTables() == null) {
+            return schemasByBareTable;
+        }
+        for (TableMetadata table : schemaMetadata.getTables()) {
+            schemasByBareTable
+                .computeIfAbsent(normalizeName(table.getName()), ignored -> new ArrayList<>())
+                .add(table.getSchema() == null ? "" : table.getSchema());
+        }
+        return schemasByBareTable;
+    }
+
+    private void addNumericAmountDenials(
+        String normalized,
+        Set<String> allowedSchemas,
+        SchemaMetadata schemaMetadata,
+        Set<String> deniedColumns
+    ) {
+        if (!containsAny(normalized, "integer", "float", "numeric", "decimal", "int")
+            || !containsAny(normalized, "amount")) {
+            return;
+        }
+        boolean allowCurrencyStrings = containsAny(normalized, "currency")
+            && containsAny(normalized, "string", "varchar", "text", "code");
+
+        for (TableMetadata table : schemaMetadata.getTables()) {
+            if (!schemaInScope(table.getSchema(), allowedSchemas)) {
+                continue;
+            }
+            if (table.getColumns() == null) {
+                continue;
+            }
+            String qualifiedTable = qualifyTable(table.getSchema(), table.getName());
+            for (ColumnMetadata column : table.getColumns()) {
+                String columnName = normalizeName(column.getName());
+                if (!columnName.contains("amount")) {
+                    continue;
+                }
+                if (allowCurrencyStrings && columnName.contains("currency")) {
+                    continue;
+                }
+                String dataType = normalizeName(column.getDataType());
+                if (dataType.contains("int")
+                    || dataType.contains("numeric")
+                    || dataType.contains("decimal")
+                    || dataType.contains("float")
+                    || dataType.contains("double")
+                    || dataType.contains("real")) {
+                    deniedColumns.add(qualifiedTable + "." + column.getName());
+                }
+            }
+        }
+    }
+
+    private Set<String> extractAllowedSchemas(String normalized, SchemaMetadata schemaMetadata) {
+        LinkedHashSet<String> schemas = new LinkedHashSet<>();
+        for (Pattern pattern : List.of(ONLY_SCHEMA_PATTERN, ACCESS_ONLY_SCHEMA_PATTERN)) {
+            Matcher matcher = pattern.matcher(normalized);
+            while (matcher.find()) {
+                schemas.add(normalizeName(matcher.group(1)));
+            }
+        }
+        if (schemas.isEmpty() && containsAny(normalized, "cannot access any other schema", "no other schema")) {
+            for (Pattern pattern : List.of(
+                Pattern.compile("schema\\s+([a-z_][a-z0-9_]*)", Pattern.CASE_INSENSITIVE)
+            )) {
+                Matcher matcher = pattern.matcher(normalized);
+                while (matcher.find()) {
+                    schemas.add(normalizeName(matcher.group(1)));
+                }
+            }
+        }
+        if (schemaMetadata != null && !schemas.isEmpty()) {
+            Set<String> known = new LinkedHashSet<>();
+            for (TableMetadata table : schemaMetadata.getTables()) {
+                if (table.getSchema() != null) {
+                    known.add(normalizeName(table.getSchema()));
+                }
+            }
+            schemas.retainAll(known);
+        }
+        return schemas;
+    }
+
+    private boolean schemaInScope(String schema, Set<String> allowedSchemas) {
+        if (allowedSchemas == null || allowedSchemas.isEmpty()) {
+            return true;
+        }
+        return allowedSchemas.contains(normalizeName(schema));
     }
 
     private SchemaMetadata tryScanSchema(String connectionId) {
@@ -348,7 +520,7 @@ public class ConnectionChatAccessPolicyService {
     }
 
     private String normalizeName(String value) {
-        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        return value == null ? "" : value.trim().replace("\"", "").replace("`", "").toLowerCase(Locale.ROOT);
     }
 
     public record EffectivePolicy(
@@ -358,6 +530,7 @@ public class ConnectionChatAccessPolicyService {
         Set<String> blockedSensitivityCategories,
         Set<String> deniedTables,
         Set<String> deniedColumns,
+        Set<String> allowedSchemas,
         boolean blockMode,
         boolean redactMode,
         String plainEnglishPolicy,
@@ -365,11 +538,16 @@ public class ConnectionChatAccessPolicyService {
         List<String> impactedColumns
     ) {
         public static EffectivePolicy none() {
-            return new EffectivePolicy(false, null, null, Set.of(), Set.of(), Set.of(), false, false, null, List.of(), List.of());
+            return new EffectivePolicy(false, null, null, Set.of(), Set.of(), Set.of(), Set.of(), false, false, null, List.of(), List.of());
         }
 
         public boolean protectsAnything() {
-            return present && (!blockedSensitivityCategories.isEmpty() || !deniedTables.isEmpty() || !deniedColumns.isEmpty());
+            return present && (
+                !blockedSensitivityCategories.isEmpty()
+                    || !deniedTables.isEmpty()
+                    || !deniedColumns.isEmpty()
+                    || !allowedSchemas.isEmpty()
+            );
         }
     }
 
@@ -377,6 +555,7 @@ public class ConnectionChatAccessPolicyService {
         List<String> blockedSensitivityCategories,
         List<String> deniedTables,
         List<String> deniedColumns,
+        List<String> allowedSchemas,
         List<String> impactedTables,
         List<String> impactedColumns,
         boolean blockMode,
@@ -385,18 +564,28 @@ public class ConnectionChatAccessPolicyService {
     }
 
     public static final class ProtectionDescriptor {
+        private final String schemaName;
         private final String tableName;
         private boolean protectWholeTable;
         private final Set<String> restrictedColumns;
 
-        private ProtectionDescriptor(String tableName, boolean protectWholeTable, Set<String> restrictedColumns) {
+        private ProtectionDescriptor(String schemaName, String tableName, boolean protectWholeTable, Set<String> restrictedColumns) {
+            this.schemaName = schemaName;
             this.tableName = tableName;
             this.protectWholeTable = protectWholeTable;
             this.restrictedColumns = restrictedColumns;
         }
 
+        public String schemaName() {
+            return schemaName;
+        }
+
         public String tableName() {
             return tableName;
+        }
+
+        public String qualifiedTableName() {
+            return qualifyTable(schemaName, tableName);
         }
 
         public boolean protectWholeTable() {
