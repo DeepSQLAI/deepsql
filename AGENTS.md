@@ -186,6 +186,11 @@ only covers cloud-specific, non-obvious caveats.
   `HERMES_WEBUI_ALLOWED_ORIGINS` (upstream env name).
 - A demo target DB `demo_shop` (same Postgres server, sample `customers`/`products`/`orders`)
   exists for exercising connection/schema features without an external database.
+- A multi-schema fixture DB `acme_erp` (schemas: `crm`, `sales`, `finance`, `inventory`,
+  `hr`, `marts`) exists for chat-access-policy and multi-schema tests. Seed with:
+  `sudo -u postgres psql -f docker/postgres/init/11_create_acme_erp.sql` then
+  `bash scripts/seed-acme-erp.sh` (registers `ACME ERP (Multi-Schema)` when backend auth
+  is disabled or you have an admin session cookie).
 
 ### Non-obvious setup caveats (each cost real debugging time)
 
