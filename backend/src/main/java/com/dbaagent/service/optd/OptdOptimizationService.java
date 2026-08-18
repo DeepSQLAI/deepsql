@@ -356,12 +356,12 @@ public class OptdOptimizationService {
         replaced = replaced.replaceAll("(?i)\\b(from|join)\\s+\\$\\d+", "$1 " + placeholder);
         replaced = replaced.replaceAll("(?i)\\b(from|join)\\s*\\(\\s*\\d+\\s*\\)", "$1 " + placeholder);
         replaced = replaced.replaceAll("(?i)\\b(from|join)\\s+\\d+", "$1 " + placeholder);
-        java.util.regex.Pattern paren = java.util.regex.Pattern.compile("(?i)\\b(from|join)\\s*\\(([^)]*)\\)");
+        java.util.regex.Pattern paren = java.util.regex.Pattern.compile("(?i)\\b(from|join)\\s*+\\(([^)]*+)\\)");
         java.util.regex.Matcher matcher = paren.matcher(replaced);
         StringBuffer buffer = new StringBuffer();
         while (matcher.find()) {
             String inner = matcher.group(2);
-            if (inner != null && inner.matches("\\s*[\\?\\$\\d\\s]+")) {
+            if (inner != null && inner.matches("[\\?\\$\\d\\s]++")) {
                 matcher.appendReplacement(buffer, matcher.group(1) + " " + placeholder);
             }
         }
@@ -439,7 +439,7 @@ public class OptdOptimizationService {
         result = result.replaceAll("(?i)\\bSTRAIGHT_JOIN\\b", "INNER JOIN");
         // FORCE/USE/IGNORE INDEX/KEY [FOR JOIN|ORDER BY|GROUP BY] (index_list)
         result = result.replaceAll(
-            "(?i)\\b(FORCE|USE|IGNORE)\\s+(INDEX|KEY)\\s+(FOR\\s+(JOIN|ORDER\\s+BY|GROUP\\s+BY)\\s+)?\\([^)]*\\)",
+            "(?i)\\b(FORCE|USE|IGNORE)\\s++(INDEX|KEY)\\s++(FOR\\s++(JOIN|ORDER\\s++BY|GROUP\\s++BY)\\s++)?\\([^)]*+\\)",
             ""
         );
         return result;

@@ -1,5 +1,6 @@
 package com.dbaagent.service.agent;
 
+import com.dbaagent.util.PatternUtil;
 import com.dbaagent.model.SchemaMetadata;
 import com.dbaagent.service.ChatQuestionRoutingService;
 import com.dbaagent.service.ConversationCarryoverDecision;
@@ -987,7 +988,7 @@ public class AgentOrchestrator {
             || lower.contains("query text")
             || lower.contains("full text")
             || lower.contains("sql text")
-            || lower.matches(".*\\b(show|give|provide|return|share)\\b.*\\b(query|sql|statement|text)\\b.*")
+            || PatternUtil.containsPattern(lower, "\\b(show|give|provide|return|share)\\b.*\\b(query|sql|statement|text)\\b")
             || mentionsSlowQueryOrdinal(lower) && (lower.contains("query")
                 || lower.contains("sql")
                 || lower.contains("statement")

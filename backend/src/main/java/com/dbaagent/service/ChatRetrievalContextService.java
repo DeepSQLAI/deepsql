@@ -4,6 +4,7 @@ import com.dbaagent.model.CompanyKnowledgeEntry;
 import com.dbaagent.model.QualifiedTableName;
 import com.dbaagent.model.SchemaMetadata;
 import com.dbaagent.model.TrainingDataEmbedding;
+import com.dbaagent.util.PatternUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,13 +41,13 @@ public class ChatRetrievalContextService {
             return RetrievalIntent.GENERAL;
         }
         String q = userQuestion.toLowerCase(Locale.ROOT);
-        if (q.matches(".*(valid values|possible values|allowed values|status values|enum|picklist|dropdown|what values|which values).*")) {
+        if (PatternUtil.containsPattern(q, "(valid values|possible values|allowed values|status values|enum|picklist|dropdown|what values|which values)")) {
             return RetrievalIntent.VALUE_LOOKUP;
         }
-        if (q.matches(".*(what does|meaning of|define|definition|business meaning|what is an? .*|mrr|arr|revpar|adr|occupancy|glossary|metric definition).*")) {
+        if (PatternUtil.containsPattern(q, "(what does|meaning of|define|definition|business meaning|what is an? .*|mrr|arr|revpar|adr|occupancy|glossary|metric definition)")) {
             return RetrievalIntent.BUSINESS_MEANING;
         }
-        if (q.matches(".*(sql|query example|example query|show me sql|write sql).*")) {
+        if (PatternUtil.containsPattern(q, "(sql|query example|example query|show me sql|write sql)")) {
             return RetrievalIntent.SQL_EXAMPLE;
         }
         return RetrievalIntent.GENERAL;
@@ -386,20 +387,20 @@ public class ChatRetrievalContextService {
         }
         String lower = message.toLowerCase(Locale.ROOT);
         boolean exactTableColumnQuestion = lower.contains("column")
-            && (lower.matches(".*\\b(how many|count|number of)\\b.*\\bcolumns?\\b.*")
-            || lower.matches(".*\\b(what|which|show|list|display|describe|schema|structure)\\b.*\\bcolumns?\\b.*")
-            || lower.matches(".*\\bcolumns?\\b.*\\b(in|for|of|on)\\b.*"));
+            && (PatternUtil.containsPattern(lower, "\\b(how many|count|number of)\\b.*\\bcolumns?\\b")
+            || PatternUtil.containsPattern(lower, "\\b(what|which|show|list|display|describe|schema|structure)\\b.*\\bcolumns?\\b")
+            || PatternUtil.containsPattern(lower, "\\bcolumns?\\b.*\\b(in|for|of|on)\\b"));
         if (exactTableColumnQuestion) {
             return true;
         }
-        boolean hasScopedQualifier = lower.matches(".*\\b(last|past|today|yesterday|month|week|day|year|active|inactive|for|from|where|between)\\b.*");
+        boolean hasScopedQualifier = PatternUtil.containsPattern(lower, "\\b(last|past|today|yesterday|month|week|day|year|active|inactive|for|from|where|between)\\b");
         if (hasScopedQualifier) {
             return false;
         }
-        return lower.matches(".*(show|list|what).*(tables?|columns?|schema|views?).*")
-            || lower.matches(".*(how many|count).*(tables?|rows?|records?).*")
-            || lower.matches(".*(describe|structure|definition).*")
-            || lower.matches(".*(largest|biggest|smallest|size).*table.*");
+        return PatternUtil.containsPattern(lower, "(show|list|what).*(tables?|columns?|schema|views?)")
+            || PatternUtil.containsPattern(lower, "(how many|count).*(tables?|rows?|records?)")
+            || PatternUtil.containsPattern(lower, "(describe|structure|definition)")
+            || PatternUtil.containsPattern(lower, "(largest|biggest|smallest|size).*table");
     }
 
     private Set<QualifiedTableName> resolveScopedTables(

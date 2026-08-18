@@ -24,6 +24,7 @@ import com.dbaagent.service.pipeline.PipelineProgressListener;
 import com.dbaagent.service.pipeline.PipelineResult;
 import com.dbaagent.service.pipeline.QueryGenerationPipeline;
 import com.dbaagent.service.pipeline.ResolvedContext;
+import com.dbaagent.util.PatternUtil;
 import com.dbaagent.util.PromptIntentSignals;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -814,7 +815,7 @@ public class UniversalChatTool extends AbstractSqlAgentTool {
         return normalized.contains("full query")
             || normalized.contains("full sql")
             || normalized.contains("query text")
-            || normalized.matches(".*\\bshow\\b.*\\b(query|sql)\\b.*");
+            || PatternUtil.containsPattern(normalized, "\\bshow\\b.*\\b(query|sql)\\b");
     }
 
     private String resolvePriorQuerySql(ResolvedConversationContext resolvedConversationContext) {
@@ -4214,14 +4215,14 @@ public class UniversalChatTool extends AbstractSqlAgentTool {
             return false;
         }
         String q = question.toLowerCase(Locale.ROOT);
-        if (q.matches(".*(top|bottom|least|most|highest|lowest|worst|best|slowest|fastest)\\s+\\d+.*")) return true;
-        if (q.matches(".*(show me|list|give me|find|fetch|retrieve|get me|display|return)\\s+.*\\b(accounts?|users?|customers?|orders?|records?|rows?|entries?|data|results?|transactions?|bookings?|customers?|properties?).*")) return true;
-        if (q.matches(".*which\\s+\\w+\\s+(are|have|do|did|has|were|is).*")) return true;
-        if (q.matches(".*(how many|count of|number of)\\s+.*(rows?|records?|accounts?|users?|customers?|orders?|bookings?|sessions?|transactions?).*")) return true;
-        if (q.matches(".*(report|summary|breakdown|overview|analysis)\\s+(of|on|for).*\\b(last|past|since|in the).*\\b(days?|weeks?|months?|years?).*")) return true;
-        if (q.matches(".*in the (last|past)\\s+\\d+\\s+(days?|weeks?|months?).*") &&
-            q.matches(".*(accounts?|users?|customers?|orders?|bookings?|queries?|transactions?|sessions?|customers?|properties?).*")) return true;
-        if (q.matches(".*(what|which|show|list|give me).*(fees?|taxes|refunds?|cancellations?|services?|details?|amounts?|methods?).*")) return true;
+        if (PatternUtil.containsPattern(q, "(top|bottom|least|most|highest|lowest|worst|best|slowest|fastest)\\s+\\d+")) return true;
+        if (PatternUtil.containsPattern(q, "(show me|list|give me|find|fetch|retrieve|get me|display|return)\\s+.*\\b(accounts?|users?|customers?|orders?|records?|rows?|entries?|data|results?|transactions?|bookings?|customers?|properties?)")) return true;
+        if (PatternUtil.containsPattern(q, "which\\s+\\w+\\s+(are|have|do|did|has|were|is)")) return true;
+        if (PatternUtil.containsPattern(q, "(how many|count of|number of)\\s+.*(rows?|records?|accounts?|users?|customers?|orders?|bookings?|sessions?|transactions?)")) return true;
+        if (PatternUtil.containsPattern(q, "(report|summary|breakdown|overview|analysis)\\s+(of|on|for).*\\b(last|past|since|in the).*\\b(days?|weeks?|months?|years?)")) return true;
+        if (PatternUtil.containsPattern(q, "in the (last|past)\\s+\\d+\\s+(days?|weeks?|months?)") &&
+            PatternUtil.containsPattern(q, "(accounts?|users?|customers?|orders?|bookings?|queries?|transactions?|sessions?|customers?|properties?)")) return true;
+        if (PatternUtil.containsPattern(q, "(what|which|show|list|give me).*(fees?|taxes|refunds?|cancellations?|services?|details?|amounts?|methods?)")) return true;
         return false;
     }
 

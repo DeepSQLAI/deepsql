@@ -351,6 +351,63 @@ points are covered by that single call site (`establishTunnel` and
   via `deepsql.ssh.host-guard.allowed-hosts` (exact host, or a leading-dot suffix like
   `.corp.internal`).
 
+### CodeQL Remediation (code scanning, 138 alerts on main)
+
+The 138 open alerts were only **5 rules**, and the counter badly overstates the
+work: 118 were one mechanical pattern. What was fixed and what was not:
+
+- **`java/polynomial-redos` (118).** Nearly all were `s.matches(".*RE.*")`.
+  `String.matches` anchors the whole input, so the wrapping `.*` exists only to
+  undo that anchoring — and `.*` + alternation is the backtracking. Rewritten to
+  `PatternUtil.containsPattern(s, "RE")` (`find()` over a cached compiled
+  Pattern) at **174 sites in 17 files** — more than the 118 flagged, since
+  CodeQL only reports where taint reaches. Equivalence was verified by
+  differential test over all 175 literals, not by inspection.
+  - **This is a behavior change on multi-line input.** `.` does not cross a
+    newline, so the old form *failed* to match a keyword after a line break;
+    `find()` matches it. That is a bug fix for intent classifiers, and it only
+    affects callers that do not pre-normalize — `PromptIntentSignals.normalize`
+    already collapses newlines, `ChatContextAssembler` does not.
+  - The remainder were compiled `Pattern` constants with genuinely ambiguous
+    quantifiers, fixed individually with possessive quantifiers / bounded gaps
+    (`PostgresSlowLogPatterns`, `QueryNormalizer`, `OptdOptimizationService`,
+    `SqlUsageService`, `QueryPlanCacheService`, `ChatHistoryService`,
+    `CompanyKnowledgeService`, `QueryExecutionPolicyService`).
+  - `PlanPatternLibraryService` also carried a real latent bug: `[^from]+` is a
+    character class ("not f/r/o/m"), so any column containing those letters
+    (`order_id`, `from_date`) defeated the collapse. Now a bounded lazy scan.
+- **`java/sql-injection` (15).** Not one bug — three distinct cases:
+  - `CardinalityEstimationService` (6) was a **real vulnerability**:
+    `quoteIdentifier` wrapped in quotes but never doubled an embedded quote, so
+    a table named `x" ; DROP TABLE users; --` escaped the quoting. Four of the
+    other five `quoteIdentifier` implementations in this repo already escape
+    correctly — this one was the outlier. It now delegates to the dialect's
+    `SamplingProvider` (also removing an if/else on `dbType`), and both
+    identifiers are resolved against `information_schema` first, so only
+    catalog-returned names ever reach interpolated SQL.
+  - `MySQLPrivilegeCheckProvider` (1) concatenated a database name into a
+    string literal; now a bind parameter.
+  - `QueryExecutorService` (3) and the EXPLAIN providers (4) execute
+    user-authored SQL **by design** — that is the Editor feature. They are not
+    parameterizable; their protection is the guard layer in the SQL Editor Guard
+    Rules above. Do not "fix" these by mangling the SQL.
+- **`java/spring-disabled-csrf-protection` (1).** Correct as-is and documented
+  in `SecurityConfig`: every route is `STATELESS` with header-carried JWT/MCP
+  tokens, so there is no ambient cookie session to forge. Re-enable CSRF the
+  moment any cookie-based auth appears.
+- **`js/command-line-injection` (1).** `spawn` already used array args (no
+  shell), but `authorize_url` comes from a server response and the win32 branch
+  routes through `cmd`. Now scheme-validated to http/https before opening.
+
+**Scan-flapping, confirmed.** Analyses on `main` report 137 results
+consistently — except commit `8b47c67`, which reported **3**. That is the commit
+GitHub labelled "Fixed in branch main"; the next healthy scan re-found
+everything and it showed as "Reappeared". Nothing was fixed or reverted. Before
+concluding an alert is resolved, check `results_count` on the analysis
+(`gh api repos/.../code-scanning/analyses?ref=...`) — a partial scan reads as a
+clean one. Note also that PR-triggered scans are diff-scoped and legitimately
+report 0 for untouched files.
+
 ### Data Model Rules
 
 - **`mcp_tokens.user_id` is a non-null FK with no cascade.** Deleting a user who holds

@@ -1,5 +1,6 @@
 package com.dbaagent.service.agent;
 
+import com.dbaagent.util.PatternUtil;
 import com.dbaagent.model.SchemaMetadata;
 import org.springframework.stereotype.Service;
 
@@ -246,7 +247,7 @@ public class AgentPlanner {
         }
         String normalized = clause.toLowerCase(Locale.ROOT);
         boolean hasActionVerb = ACTION_VERB_PATTERN.matcher(normalized).find()
-            || normalized.matches(".*\\b(is|are|was|were|had|have)\\b.*");
+            || PatternUtil.containsPattern(normalized, "\\b(is|are|was|were|had|have)\\b");
         return !hasActionVerb && (normalized.contains(",") || normalized.split("\\s+").length <= 8);
     }
 
@@ -314,8 +315,8 @@ public class AgentPlanner {
             return false;
         }
         String normalized = question.toLowerCase(Locale.ROOT);
-        return normalized.matches(".*(show|list|give|get|find|fetch|retrieve|count|how many|top|bottom|trend|breakdown|compare|volume|sql|configured|details?|amounts?).*")
-            || normalized.matches(".*(bookings?|orders?|payments?|revenue|customers?|users?|sessions?|queries?|rows?|records?|gmv|arr|mrr|fees?|taxes|refunds?|cancellations?|services?|usage|activity|events?|logs?).*");
+        return PatternUtil.containsPattern(normalized, "(show|list|give|get|find|fetch|retrieve|count|how many|top|bottom|trend|breakdown|compare|volume|sql|configured|details?|amounts?)")
+            || PatternUtil.containsPattern(normalized, "(bookings?|orders?|payments?|revenue|customers?|users?|sessions?|queries?|rows?|records?|gmv|arr|mrr|fees?|taxes|refunds?|cancellations?|services?|usage|activity|events?|logs?)");
     }
 
     private String summarizeQuestion(String question) {

@@ -24,6 +24,7 @@ import com.dbaagent.service.SchemaObjectNameUtil;
 import com.dbaagent.service.SchemaQuestionUtil;
 import com.dbaagent.service.SchemaTableMatchUtil;
 import com.dbaagent.service.brain.classification.SchemaClassificationService;
+import com.dbaagent.util.PatternUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -282,9 +283,9 @@ public class SchemaMetadataExecutor {
             return null;
         }
 
-        boolean asksForTableCount = lowerMessage.matches(".*(how many|count|number of).*(tables?).*") && !lowerMessage.contains("rows");
-        boolean asksForLargestTables = lowerMessage.matches(".*(largest|biggest|heaviest|top).*tables?.*")
-            || lowerMessage.matches(".*tables?.*(by size|sorted by size|largest|biggest).*");
+        boolean asksForTableCount = PatternUtil.containsPattern(lowerMessage, "(how many|count|number of).*(tables?)") && !lowerMessage.contains("rows");
+        boolean asksForLargestTables = PatternUtil.containsPattern(lowerMessage, "(largest|biggest|heaviest|top).*tables?")
+            || PatternUtil.containsPattern(lowerMessage, "tables?.*(by size|sorted by size|largest|biggest)");
 
         if (asksForTableCount && asksForLargestTables) {
             long tableCount = resolveTableCount(schema);
@@ -724,7 +725,7 @@ public class SchemaMetadataExecutor {
             );
         }
 
-        boolean largestQuestion = lowerMessage.matches(".*\\b(largest|biggest|top|heaviest)\\b.*");
+        boolean largestQuestion = PatternUtil.containsPattern(lowerMessage, "\\b(largest|biggest|top|heaviest)\\b");
         boolean patternSummaryQuestion = lowerMessage.contains("pattern")
             || (lowerMessage.contains("fact") && lowerMessage.contains("dimension"));
         if (largestQuestion) {
@@ -1552,7 +1553,7 @@ public class SchemaMetadataExecutor {
     }
 
     private String formatExactTableKeyColumnAnswer(TableMetadata table, List<ExactSchemaKeyColumnUtil.KeyColumnDescriptor> keyColumns, String lowerQuestion) {
-        boolean countQuestion = lowerQuestion.matches(".*(how many|count|number of).*(key columns?|primary keys?|foreign keys?|join columns?).*");
+        boolean countQuestion = PatternUtil.containsPattern(lowerQuestion, "(how many|count|number of).*(key columns?|primary keys?|foreign keys?|join columns?)");
         if (countQuestion) {
             return String.format(
                 "Table `%s` has **%d key columns**: %s.",
@@ -1613,20 +1614,20 @@ public class SchemaMetadataExecutor {
     }
 
     private boolean hasScopedOrTemporalQualifiers(String lowerMessage) {
-        if (lowerMessage.matches(".*\\b(in schema|in the .* schema|schema\\s+\\w+)\\b.*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "\\b(in schema|in the .* schema|schema\\s+\\w+)\\b")) {
             return true;
         }
-        if (lowerMessage.matches(".*\\b(on|in|for|of)\\s+(the\\s+)?\\w+\\s*(table)?\\b.*")
+        if (PatternUtil.containsPattern(lowerMessage, "\\b(on|in|for|of)\\s+(the\\s+)?\\w+\\s*(table)?\\b")
             && (lowerMessage.contains("index") || lowerMessage.contains("column") || lowerMessage.contains("constraint") || lowerMessage.contains("foreign key"))) {
             return true;
         }
-        if (lowerMessage.matches(".*\\b(today|yesterday|last week|last month|this week|this month|since|after|before|created|added|modified|updated|recent|new)\\b.*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "\\b(today|yesterday|last week|last month|this week|this month|since|after|before|created|added|modified|updated|recent|new)\\b")) {
             return true;
         }
-        if (lowerMessage.matches(".*\\b(where|with|that have|that are|containing|larger than|smaller than|more than|less than|greater|empty|non-empty)\\b.*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "\\b(where|with|that have|that are|containing|larger than|smaller than|more than|less than|greater|empty|non-empty)\\b")) {
             return true;
         }
-        if (lowerMessage.matches(".*\\b(like|starting with|ending with|matching|named|called)\\b.*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "\\b(like|starting with|ending with|matching|named|called)\\b")) {
             return true;
         }
         return false;

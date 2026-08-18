@@ -1,5 +1,6 @@
 package com.dbaagent.service.brain.keycolumn;
 
+import com.dbaagent.util.PatternUtil;
 import com.dbaagent.repository.brain.BrainRuleRepository;
 import com.dbaagent.model.brain.BrainRule;
 import com.dbaagent.dto.*;
@@ -1529,7 +1530,7 @@ public class KeyColumnAnalysisService {
 
                 // Check naming patterns
                 String columnName = analysis.getColumnName().toLowerCase();
-                boolean isSurrogateNaming = columnName.matches(".*(id|_id|uuid|key|_key).*");
+                boolean isSurrogateNaming = PatternUtil.containsPattern(columnName, "(id|_id|uuid|key|_key)");
                 boolean isPrimaryKeyNaming = columnName.equals("id") ||
                                             columnName.equals(analysis.getTableName().toLowerCase() + "_id");
 
@@ -1639,7 +1640,7 @@ public class KeyColumnAnalysisService {
                 Long totalRows = analysis.getTotalRows() != null ? analysis.getTotalRows() : 0L;
 
                 // Strategy 1: RANGE Partitioning (Time-based columns)
-                boolean isTimeColumn = columnName.matches(".*(date|time|timestamp|created|updated|modified).*");
+                boolean isTimeColumn = PatternUtil.containsPattern(columnName, "(date|time|timestamp|created|updated|modified)");
                 boolean hasTemporalQueries = analysis.getWhereCount() >= 5 || analysis.getOrderByCount() >= 3;
                 boolean isLargeTable = totalRows > 1_000_000;
 

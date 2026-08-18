@@ -2,6 +2,7 @@ package com.dbaagent.service.agent;
 
 import com.dbaagent.service.ConversationCarryoverDecision;
 import com.dbaagent.service.ResolvedConversationContext;
+import com.dbaagent.util.PatternUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -924,7 +925,7 @@ public class LlmOrchestrationService {
         boolean priorQueryFollowUp = normalized.contains("full query")
             || normalized.contains("full sql")
             || normalized.contains("query text")
-            || normalized.matches(".*\\bshow\\b.*\\b(query|sql)\\b.*")
+            || PatternUtil.containsPattern(normalized, "\\bshow\\b.*\\b(query|sql)\\b")
             || normalized.contains("scan")
             || normalized.contains("rows")
             || normalized.contains("slowness")
