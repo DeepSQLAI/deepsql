@@ -350,6 +350,24 @@ points are covered by that single call site (`establishTunnel` and
 - Operators who want the protection set `enabled=true` and allowlist their own bastion
   via `deepsql.ssh.host-guard.allowed-hosts` (exact host, or a leading-dot suffix like
   `.corp.internal`).
+- **Two sibling guards cover the other two `java/ssrf` alerts.** Address
+  classification is shared in `OutboundHostGuard` (resolve the host, check every
+  returned address, block loopback/link-local/RFC1918/CGNAT/ULA/IPv4-mapped-IPv6);
+  the three call sites differ only in policy and message.
+  - `DatabaseHostGuard` (alert #136, `ConnectionService`) screens the **JDBC** host.
+    The SSH guard never covered this — a direct, non-tunnelled connection does not
+    pass through `SshTunnelService` at all. Applied in `buildJdbcUrl` *and* the
+    Hikari pool path, and skipped when `tunnelPort != null` since a tunnelled
+    connection targets the local forwarded port. Also ships disabled
+    (`deepsql.database.host-guard.enabled`) — databases sit on RFC1918 even more
+    often than bastions do.
+  - `S3LogFetchService.assertFetchableUrl` (alert #137) screens the presigned log
+    URL. The real hazard was `setInstanceFollowRedirects(true)`: the JDK chases a
+    302 with no chance to inspect the target, so a presigned URL on a public host
+    could hand off to the metadata endpoint. Redirects are now followed manually
+    (max 5), with **every hop** re-checked for https + a public address. Unlike the
+    other two this is always on — there is no legitimate reason to fetch a slow
+    query log from a private address.
 
 ### CodeQL Remediation (code scanning, 138 alerts on main)
 

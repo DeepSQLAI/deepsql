@@ -32,7 +32,8 @@ class ConnectionServiceTest {
 
     @BeforeEach
     void setUp() {
-        connectionService = new ConnectionService(sshTunnelService, credentialService, providerRegistry);
+        connectionService = new ConnectionService(sshTunnelService, credentialService, providerRegistry,
+                new DatabaseHostGuard(new DatabaseHostGuardProperties()));
     }
 
     // ─── testConnection ──────────────────────────────────────────────────────

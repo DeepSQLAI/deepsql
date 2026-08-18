@@ -184,6 +184,33 @@ public class S3LogFetchService {
         );
     }
 
+    private static final int MAX_PRESIGNED_REDIRECTS = 5;
+
+    /**
+     * Every hop of a presigned fetch must be https to a public address. The
+     * initial URL and each redirect target both go through here.
+     */
+    private URI assertFetchableUrl(URI uri) {
+        String scheme = uri.getScheme();
+        if (scheme == null || !scheme.equalsIgnoreCase("https")) {
+            throw new IllegalArgumentException(
+                "Presigned log URL must use https, got: " + scheme);
+        }
+        String host = uri.getHost();
+        if (host == null || host.isBlank()) {
+            throw new IllegalArgumentException("Presigned log URL has no host");
+        }
+        java.net.InetAddress blocked =
+            OutboundHostGuard.findBlockedAddress(OutboundHostGuard.normalize(host));
+        if (blocked != null) {
+            log.warn("Blocked presigned log fetch to restricted host {} (resolved to {})",
+                host, blocked.getHostAddress());
+            throw new IllegalArgumentException(
+                "Presigned log URL resolves to a restricted address (" + blocked.getHostAddress() + ")");
+        }
+        return uri;
+    }
+
     boolean isPresignedUrl(String s3Url) {
         if (s3Url == null || s3Url.isBlank()) {
             return false;
@@ -197,26 +224,52 @@ public class S3LogFetchService {
 
     private InputStream downloadPresignedLog(String presignedUrl) {
         try {
-            HttpURLConnection connection = (HttpURLConnection) URI.create(presignedUrl).toURL().openConnection();
-            connection.setRequestMethod("GET");
-            connection.setConnectTimeout(15_000);
-            connection.setReadTimeout(60_000);
-            connection.setInstanceFollowRedirects(true);
+            // Redirects are followed manually: with setInstanceFollowRedirects(true)
+            // the JDK chases a 302 without giving us a chance to screen the target,
+            // so a presigned URL on a public host could hand off to 169.254.169.254
+            // or an internal address (java/ssrf).
+            URI current = assertFetchableUrl(URI.create(presignedUrl));
+            HttpURLConnection connection = null;
+            int status;
+            for (int redirects = 0; ; redirects++) {
+                if (redirects > MAX_PRESIGNED_REDIRECTS) {
+                    throw new RuntimeException("Too many redirects fetching presigned URL");
+                }
+                connection = (HttpURLConnection) current.toURL().openConnection();
+                connection.setRequestMethod("GET");
+                connection.setConnectTimeout(15_000);
+                connection.setReadTimeout(60_000);
+                connection.setInstanceFollowRedirects(false);
 
-            int status = connection.getResponseCode();
+                status = connection.getResponseCode();
+                if (status != HttpURLConnection.HTTP_MOVED_PERM
+                        && status != HttpURLConnection.HTTP_MOVED_TEMP
+                        && status != HttpURLConnection.HTTP_SEE_OTHER
+                        && status != 307 && status != 308) {
+                    break;
+                }
+                String location = connection.getHeaderField("Location");
+                connection.disconnect();
+                if (location == null || location.isBlank()) {
+                    throw new RuntimeException("Redirect without a Location header");
+                }
+                current = assertFetchableUrl(current.resolve(location));
+            }
+
             if (status < 200 || status >= 300) {
                 throw new RuntimeException("Failed to download presigned URL, status " + status);
             }
 
             log.info("Streaming slow query log from presigned URL");
-            InputStream inputStream = connection.getInputStream();
+            final HttpURLConnection finalConnection = connection;
+            InputStream inputStream = finalConnection.getInputStream();
             return new java.io.FilterInputStream(inputStream) {
                 @Override
                 public void close() throws java.io.IOException {
                     try {
                         super.close();
                     } finally {
-                        connection.disconnect();
+                        finalConnection.disconnect();
                     }
                 }
             };

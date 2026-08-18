@@ -45,6 +45,7 @@ public class ConnectionService {
     private final SshTunnelService sshTunnelService;
     private final CredentialService credentialService;
     private final DatabaseProviderRegistry providerRegistry;
+    private final DatabaseHostGuard databaseHostGuard;
 
     public boolean testConnection(ConnectionRequest request) {
         Connection connection = null;
@@ -263,6 +264,10 @@ public class ConnectionService {
             log.info("SSH tunnel established on local port {} for connection: {}", tunnelPort, connectionId);
         }
 
+        if (tunnelPort == null) {
+            databaseHostGuard.assertAllowed(request.getHost());
+        }
+
         DatabaseDialect dialect = providerRegistry.getDialect(request.getDbType());
         ConnectionProvider connectionProvider = dialect.connection();
 
@@ -316,6 +321,13 @@ public class ConnectionService {
      * Delegates to the appropriate database provider.
      */
     private String buildJdbcUrl(ConnectionRequest request, Integer tunnelPort) {
+        // Guard here rather than at each caller: this is the single point every
+        // JDBC URL is built through (java/ssrf on ConnectionService). A tunnelled
+        // connection targets the local forwarded port, so only the direct case
+        // carries a user-supplied host worth screening.
+        if (tunnelPort == null) {
+            databaseHostGuard.assertAllowed(request.getHost());
+        }
         DatabaseDialect dialect = providerRegistry.getDialect(request.getDbType());
         return dialect.connection().buildJdbcUrl(request, tunnelPort);
     }
