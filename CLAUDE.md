@@ -93,7 +93,7 @@ backend/
     repository/     # Spring Data repositories
     provider/       # Database dialect registry (PostgreSQL, MySQL)
     config/         # Spring configuration
-    security/       # JWT auth, RBAC
+    security/       # JWT auth, RBAC, admin profile switch (`ImpersonationService`)
     llm/            # LLM provider registry, config resolver, OpenAI-compatible provider
     util/           # Shared utilities
   src/test/         # JUnit 5 tests
@@ -208,6 +208,9 @@ returns a number).
 3. **UI State**: Use Zustand stores from `src/lib/stores/`. Prefer selector hooks for optimized re-renders.
 4. **Tooltips**: Always use `HelpTooltip` component, never plain `title` attributes.
 5. **Design**: Minimal black/white/grey palette, Inter font, subtle transitions. See UX guidelines in full CLAUDE.md.
+
+### Admin profile switch
+Admins can **View as** a sub-user from the top-right of the home layout (`ProfileSwitch`) to verify connection ACLs, chat/editor policies, and role-gated nav. The admin JWT stays on the session; `ImpersonationService` sets an httpOnly `impersonate_user` cookie and `JwtAuthenticationFilter` overlays the target principal. `POST|DELETE|GET /api/admin/impersonate` are excluded from the overlay so stop/list still run as the real admin. Cannot target another ADMIN, self, or a non-ACTIVE account. `/auth/me` returns the **effective** user plus `impersonating` / `impersonatorUsername`.
 
 ### Git Rules
 - Do NOT commit automatically — wait for explicit user instruction.

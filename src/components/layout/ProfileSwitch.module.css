@@ -1,0 +1,227 @@
+.switchWrap {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  z-index: 40;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  color: #111827;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.trigger:hover:not(:disabled) {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+
+.trigger:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.banner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 8px 16px;
+  background: #111827;
+  color: #f9fafb;
+  flex-shrink: 0;
+  z-index: 30;
+}
+
+.bannerCopy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.bannerLabel {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #9ca3af;
+}
+
+.bannerName {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.bannerMeta {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.bannerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.secondaryBtn,
+.exitBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.secondaryBtn {
+  background: transparent;
+  border: 1px solid #4b5563;
+  color: #e5e7eb;
+}
+
+.secondaryBtn:hover:not(:disabled) {
+  background: #1f2937;
+}
+
+.exitBtn {
+  background: #fff;
+  border: 1px solid #fff;
+  color: #111827;
+}
+
+.exitBtn:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
+.secondaryBtn:disabled,
+.exitBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 320px;
+  max-height: 360px;
+  overflow: auto;
+  background: #fff;
+  color: #111827;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 50;
+}
+
+.banner .menu {
+  right: 16px;
+  top: calc(100% + 4px);
+}
+
+.menuLabel {
+  padding: 10px 12px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuItem:hover:not(:disabled) {
+  background: #f9fafb;
+}
+
+.menuItem:disabled {
+  cursor: default;
+}
+
+.menuItemActive {
+  background: #f3f4f6;
+}
+
+.menuItemMain {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.menuItemName {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.menuItemEmail {
+  font-size: 11px;
+  color: #6b7280;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menuEmpty,
+.menuError {
+  padding: 12px;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.menuError,
+.error {
+  color: #b91c1c;
+  font-size: 12px;
+}
+
+.roleBadge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #374151;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.banner .roleBadge {
+  background: #374151;
+  color: #e5e7eb;
+}

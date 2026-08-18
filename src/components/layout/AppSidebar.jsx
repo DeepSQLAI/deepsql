@@ -29,7 +29,7 @@ export default function AppSidebar() {
   const [showConnectionDropdown, setShowConnectionDropdown] = useState(false)
   const userMenuRef = useRef(null)
   const connectionDropdownRef = useRef(null)
-  const { logout, role, username, isAdmin } = useAuth()
+  const { logout, role, username, impersonating } = useAuth()
   const { connections, connectionId, selectedConnection, changeConnection, isLoading, refetch } = useConnectionManager()
   const visibleNavItems = NAV_ITEMS.filter(({ id }) => canAccessHomeSection(id, role, selectedConnection))
 
@@ -194,7 +194,12 @@ export default function AppSidebar() {
                   <div className={styles.userDropdownAvatar}>
                     <User size={18} />
                   </div>
-                  <span className={styles.userDropdownName}>{username}</span>
+                  <div>
+                    <span className={styles.userDropdownName}>{username}</span>
+                    {impersonating && (
+                      <span className={styles.userDropdownMeta}>Viewing as this user</span>
+                    )}
+                  </div>
                 </div>
                 <div className={styles.userDropdownDivider} />
                 <button

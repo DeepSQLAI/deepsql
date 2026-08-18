@@ -53,6 +53,7 @@ class AccessControlServiceTest {
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        com.dbaagent.security.ImpersonationContext.clear();
     }
 
     @Test
@@ -95,6 +96,39 @@ class AccessControlServiceTest {
             .thenReturn(resolved("conn-1", EffectiveConnectionAccess.ADMIN, ConnectionOwnershipType.ADMIN));
 
         assertDoesNotThrow(() -> accessControlService.assertCanAccessConnection("conn-1"));
+    }
+
+    /**
+     * Profile switch has to punch through the auth-disabled admin bypass.
+     * Otherwise an admin "viewing as" an editor still sees every connection.
+     */
+    @Test
+    void impersonationDisablesAdminBypassWhileAuthIsOff() {
+        ReflectionTestUtils.setField(accessControlService, "authEnabled", false);
+
+        com.dbaagent.model.User impersonator = new com.dbaagent.model.User();
+        impersonator.setId(1L);
+        impersonator.setUsername("admin");
+        impersonator.setRole("ADMIN");
+        com.dbaagent.model.User target = new com.dbaagent.model.User();
+        target.setId(2L);
+        target.setUsername("marts-editor");
+        target.setRole("DEVELOPER");
+        com.dbaagent.security.ImpersonationContext.enter(
+            new com.dbaagent.security.ImpersonationContext.State(impersonator, target)
+        );
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken("marts-editor", null, List.of())
+        );
+
+        when(connectionAccessService.resolveAccess("conn-1", "marts-editor", false))
+            .thenReturn(resolved("conn-1", EffectiveConnectionAccess.CHAT_EDITOR, ConnectionOwnershipType.ASSIGNED));
+
+        assertFalse(accessControlService.isCurrentUserAdmin());
+        assertEquals("marts-editor", accessControlService.requireCurrentUsername());
+        assertDoesNotThrow(() -> accessControlService.assertCanUseChatEditor("conn-1"));
+        verify(connectionAccessService).resolveAccess("conn-1", "marts-editor", false);
+        verify(connectionAccessService, never()).resolveAccess(eq("conn-1"), eq(null), eq(true));
     }
 
     /**
