@@ -40,6 +40,22 @@ public class ConnectionChatAccessPolicyService {
         "access\\s+only\\s+to\\s+(?:schema\\s+)?([a-z_][a-z0-9_]*)",
         Pattern.CASE_INSENSITIVE
     );
+    private static final Pattern DENY_CLAUSE_PATTERN = Pattern.compile(
+        "(?:cannot|can't|must not|do not|don't|never)\\s+(?:query|access|see|select|read|use|return|expose)\\s+(.+?)(?=\\s+(?:but|except|however|strictly)\\b|[.;]|$)"
+            + "|(?:redact|block|deny|hide)\\s+(.+?)(?=\\s+(?:but|except|however)\\b|[.;]|$)",
+        Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+    );
+    private static final Pattern ALLOW_CLAUSE_PATTERN = Pattern.compile(
+        "(?:but\\s+|except(?:\\s+that)?\\s+)?\\bcan\\s+(?:query|access|see|select|read|use|return)\\s+(.+?)(?=\\s+(?:strictly)\\b|[.;]|$)",
+        Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+    );
+    private static final List<TypeFamily> TYPE_FAMILIES = List.of(
+        new TypeFamily("integer", Set.of("int", "integer", "bigint", "smallint", "tinyint", "serial", "bigserial", "int2", "int4", "int8")),
+        new TypeFamily("float", Set.of("float", "double", "real", "numeric", "decimal", "number", "money", "float4", "float8")),
+        new TypeFamily("string", Set.of("varchar", "character varying", "character", "char", "text", "clob", "uuid", "json", "jsonb", "string", "citext")),
+        new TypeFamily("boolean", Set.of("bool", "boolean")),
+        new TypeFamily("temporal", Set.of("date", "time", "timestamp", "timestamptz", "datetime", "interval"))
+    );
 
     private final ConnectionChatAccessPolicyRepository policyRepository;
     private final TableClassificationRepository tableClassificationRepository;
@@ -216,7 +232,7 @@ public class ConnectionChatAccessPolicyService {
                     });
                 }
             }
-            addNumericAmountDenials(normalized, allowedSchemas, schemaMetadata, deniedColumns);
+            applyColumnConstraints(normalized, allowedSchemas, schemaMetadata, deniedColumns);
         }
 
         Map<String, ProtectionDescriptor> descriptors = buildProtectionDescriptors(
@@ -395,45 +411,161 @@ public class ConnectionChatAccessPolicyService {
         return schemasByBareTable;
     }
 
-    private void addNumericAmountDenials(
+    private void applyColumnConstraints(
         String normalized,
         Set<String> allowedSchemas,
         SchemaMetadata schemaMetadata,
         Set<String> deniedColumns
     ) {
-        if (!containsAny(normalized, "integer", "float", "numeric", "decimal", "int")
-            || !containsAny(normalized, "amount")) {
+        Set<String> knownColumnNames = collectColumnNames(schemaMetadata, allowedSchemas);
+        List<ColumnConstraint> denials = extractConstraints(normalized, DENY_CLAUSE_PATTERN, knownColumnNames);
+        List<ColumnConstraint> allowances = extractConstraints(normalized, ALLOW_CLAUSE_PATTERN, knownColumnNames);
+        if (denials.isEmpty()) {
             return;
         }
-        boolean allowCurrencyStrings = containsAny(normalized, "currency")
-            && containsAny(normalized, "string", "varchar", "text", "code");
 
         for (TableMetadata table : schemaMetadata.getTables()) {
-            if (!schemaInScope(table.getSchema(), allowedSchemas)) {
-                continue;
-            }
-            if (table.getColumns() == null) {
+            if (!schemaInScope(table.getSchema(), allowedSchemas) || table.getColumns() == null) {
                 continue;
             }
             String qualifiedTable = qualifyTable(table.getSchema(), table.getName());
             for (ColumnMetadata column : table.getColumns()) {
-                String columnName = normalizeName(column.getName());
-                if (!columnName.contains("amount")) {
-                    continue;
-                }
-                if (allowCurrencyStrings && columnName.contains("currency")) {
-                    continue;
-                }
-                String dataType = normalizeName(column.getDataType());
-                if (dataType.contains("int")
-                    || dataType.contains("numeric")
-                    || dataType.contains("decimal")
-                    || dataType.contains("float")
-                    || dataType.contains("double")
-                    || dataType.contains("real")) {
+                boolean denied = denials.stream().anyMatch(constraint -> constraint.matches(column));
+                boolean allowed = allowances.stream().anyMatch(constraint -> constraint.matches(column));
+                if (denied && !allowed) {
                     deniedColumns.add(qualifiedTable + "." + column.getName());
                 }
             }
+        }
+    }
+
+    private List<ColumnConstraint> extractConstraints(String normalized, Pattern clausePattern, Set<String> knownColumnNames) {
+        List<ColumnConstraint> constraints = new ArrayList<>();
+        Matcher matcher = clausePattern.matcher(normalized);
+        while (matcher.find()) {
+            String snippet = firstNonBlank(matcher);
+            if (snippet == null) {
+                continue;
+            }
+            LinkedHashSet<String> typeKeys = new LinkedHashSet<>();
+            for (TypeFamily family : TYPE_FAMILIES) {
+                if (family.mentionedIn(snippet)) {
+                    typeKeys.add(family.key());
+                }
+            }
+            LinkedHashSet<String> nameTokens = new LinkedHashSet<>();
+            knownColumnNames.stream()
+                .sorted((left, right) -> Integer.compare(right.length(), left.length()))
+                .filter(name -> containsWholeWord(snippet, name))
+                .forEach(nameTokens::add);
+            if (!typeKeys.isEmpty() || !nameTokens.isEmpty()) {
+                constraints.add(new ColumnConstraint(typeKeys, nameTokens));
+            }
+        }
+        return constraints;
+    }
+
+    private Set<String> collectColumnNames(SchemaMetadata schemaMetadata, Set<String> allowedSchemas) {
+        LinkedHashSet<String> names = new LinkedHashSet<>();
+        if (schemaMetadata == null || schemaMetadata.getTables() == null) {
+            return names;
+        }
+        for (TableMetadata table : schemaMetadata.getTables()) {
+            if (!schemaInScope(table.getSchema(), allowedSchemas) || table.getColumns() == null) {
+                continue;
+            }
+            for (ColumnMetadata column : table.getColumns()) {
+                String name = normalizeName(column.getName());
+                if (!name.isBlank() && !isTypeToken(name)) {
+                    names.add(name);
+                }
+            }
+        }
+        return names;
+    }
+
+    private boolean isTypeToken(String name) {
+        return TYPE_FAMILIES.stream().anyMatch(family -> family.aliases().contains(name) || family.key().equals(name));
+    }
+
+    private String firstNonBlank(Matcher matcher) {
+        for (int i = 1; i <= matcher.groupCount(); i++) {
+            String group = matcher.group(i);
+            if (group != null && !group.isBlank()) {
+                return group.toLowerCase(Locale.ROOT);
+            }
+        }
+        return null;
+    }
+
+    private boolean containsWholeWord(String haystack, String needle) {
+        if (haystack == null || needle == null || needle.isBlank()) {
+            return false;
+        }
+        return Pattern.compile("\\b" + Pattern.quote(needle) + "\\b", Pattern.CASE_INSENSITIVE)
+            .matcher(haystack)
+            .find();
+    }
+
+    private record TypeFamily(String key, Set<String> aliases) {
+        boolean mentionedIn(String snippet) {
+            if (containsWholeWordStatic(snippet, key)) {
+                return true;
+            }
+            return aliases.stream().anyMatch(alias -> containsWholeWordStatic(snippet, alias));
+        }
+
+        boolean matchesDataType(String dataType) {
+            String normalized = dataType == null
+                ? ""
+                : dataType.toLowerCase(Locale.ROOT).replaceAll("\\([^)]*\\)", " ").trim();
+            if (normalized.isBlank()) {
+                return false;
+            }
+            if (containsWholeWordStatic(normalized, key) || normalized.equals(key)) {
+                return true;
+            }
+            return aliases.stream().anyMatch(alias ->
+                containsWholeWordStatic(normalized, alias) || normalized.equals(alias)
+            );
+        }
+
+        private static boolean containsWholeWordStatic(String haystack, String needle) {
+            if (haystack == null || needle == null || needle.isBlank()) {
+                return false;
+            }
+            return Pattern.compile("\\b" + Pattern.quote(needle) + "\\b", Pattern.CASE_INSENSITIVE)
+                .matcher(haystack)
+                .find();
+        }
+    }
+
+    private record ColumnConstraint(Set<String> typeKeys, Set<String> nameTokens) {
+        boolean matches(ColumnMetadata column) {
+            if ((typeKeys == null || typeKeys.isEmpty()) && (nameTokens == null || nameTokens.isEmpty())) {
+                return false;
+            }
+            boolean typeOk = typeKeys == null || typeKeys.isEmpty()
+                || typeKeys.stream().anyMatch(key -> TYPE_FAMILIES.stream()
+                    .filter(family -> family.key().equals(key))
+                    .anyMatch(family -> family.matchesDataType(column.getDataType())));
+            boolean nameOk = nameTokens == null || nameTokens.isEmpty()
+                || nameTokens.stream().anyMatch(token -> columnNameMatches(column.getName(), token));
+            return typeOk && nameOk;
+        }
+
+        private static boolean columnNameMatches(String columnName, String token) {
+            String column = columnName == null ? "" : columnName.trim().replace("\"", "").replace("`", "").toLowerCase(Locale.ROOT);
+            String needle = token == null ? "" : token.trim().toLowerCase(Locale.ROOT);
+            if (column.isBlank() || needle.isBlank()) {
+                return false;
+            }
+            if (column.equals(needle)) {
+                return true;
+            }
+            return column.startsWith(needle + "_")
+                || column.endsWith("_" + needle)
+                || column.contains("_" + needle + "_");
         }
     }
 

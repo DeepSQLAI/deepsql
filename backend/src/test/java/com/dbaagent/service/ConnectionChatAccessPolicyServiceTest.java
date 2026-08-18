@@ -87,7 +87,7 @@ class ConnectionChatAccessPolicyServiceTest {
     }
 
     @Test
-    void previewPolicy_scopesNumericAmountRedactionToAllowedSchemaOnly() throws SQLException {
+    void previewPolicy_scopesTypedColumnConstraintsToAllowedSchema() throws SQLException {
         SchemaMetadata multiSchema = new SchemaMetadata();
         multiSchema.setTables(List.of(
             schemaTable("crm", "customers", "amount", "numeric", "name", "varchar"),
@@ -115,6 +115,48 @@ class ConnectionChatAccessPolicyServiceTest {
                 "marts.fct_enrollment.currency",
                 "marts.dim_ott_subscription.currency"
             );
+    }
+
+    @Test
+    void previewPolicy_appliesTypedColumnConstraintsToAnyColumnName() throws SQLException {
+        SchemaMetadata schema = new SchemaMetadata();
+        schema.setTables(List.of(
+            schemaTable("hr", "employees", "salary", "numeric", "email", "varchar"),
+            schemaTable("finance", "ledger", "amount", "numeric", "account_code", "varchar")
+        ));
+        when(schemaScannerService.scanSchema("conn-hr")).thenReturn(schema);
+        lenient().when(tableClassificationRepository.findLatestByConnectionIdOrderByTableNameAsc("conn-hr"))
+            .thenReturn(List.of());
+
+        PolicyPreviewResponse preview = service.previewPolicy(
+            "conn-hr",
+            "This user should have access only to schema hr. The user cannot query numeric salary columns."
+        );
+
+        assertThat(preview.getImpactedColumns())
+            .contains("hr.employees.salary")
+            .doesNotContain("finance.ledger.amount", "hr.employees.email");
+    }
+
+    @Test
+    void previewPolicy_typeOnlyConstraintIsStillSchemaScoped() throws SQLException {
+        SchemaMetadata schema = new SchemaMetadata();
+        schema.setTables(List.of(
+            schemaTable("finance", "ledger", "amount", "numeric", "account_code", "varchar"),
+            schemaTable("sales", "orders", "amount", "numeric", "status", "varchar")
+        ));
+        when(schemaScannerService.scanSchema("conn-fin")).thenReturn(schema);
+        lenient().when(tableClassificationRepository.findLatestByConnectionIdOrderByTableNameAsc("conn-fin"))
+            .thenReturn(List.of());
+
+        PolicyPreviewResponse preview = service.previewPolicy(
+            "conn-fin",
+            "Access only to schema finance. Redact numeric columns."
+        );
+
+        assertThat(preview.getImpactedColumns())
+            .contains("finance.ledger.amount")
+            .doesNotContain("sales.orders.amount", "finance.ledger.account_code");
     }
 
     @Test
