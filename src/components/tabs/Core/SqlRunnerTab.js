@@ -214,7 +214,7 @@ function looksLikeSingleLineDashComment(sql) {
 }
 
 export default function SqlRunnerTab({ connectionId }) {
-  const { isAdmin } = useAuth();
+  const { isAdmin, username } = useAuth();
   const { data: connectionsData } = useConnections();
   const currentConnection = (Array.isArray(connectionsData) ? connectionsData : []).find(
     (c) => c?.id === connectionId
@@ -260,7 +260,7 @@ export default function SqlRunnerTab({ connectionId }) {
   // Format-related notices (warning/info) live in their own state so a formatter parse error
   // never bleeds into the Results panel as a giant BNF trace.
   const [formatNotice, setFormatNotice] = useState(null);
-  const [databaseObjects, setDatabaseObjects] = useState(() => loadSchemaCache(connectionId) || []);
+  const [databaseObjects, setDatabaseObjects] = useState(() => loadSchemaCache(connectionId, username) || []);
   const [loadingObjects, setLoadingObjects] = useState(false);
   const [refreshingSchema, setRefreshingSchema] = useState(false);
   const [expandedNodes, setExpandedNodes] = useState(
@@ -326,7 +326,7 @@ export default function SqlRunnerTab({ connectionId }) {
       // Restore schema from localStorage cache for instant display, then
       // refresh in background. Only show the loading spinner on a cold start
       // (no cached objects at all).
-      const cachedSchema = loadSchemaCache(connectionId);
+      const cachedSchema = loadSchemaCache(connectionId, username);
       if (cachedSchema && cachedSchema.length > 0) {
         dbObjectsRef.current = cachedSchema;
         setDatabaseObjects(cachedSchema);
@@ -338,7 +338,7 @@ export default function SqlRunnerTab({ connectionId }) {
         fetchDatabaseObjects({ showSpinner: true });
       }
     }
-  }, [connectionId]);
+  }, [connectionId, username]);
 
   // Save state to cache whenever important state changes
   useEffect(() => {
@@ -398,7 +398,7 @@ export default function SqlRunnerTab({ connectionId }) {
       const response = await queryAPI.getDatabaseObjects(connectionId);
       if (response.success) {
         setDatabaseObjects(response.objects);
-        saveSchemaCache(connectionId, response.objects);
+        saveSchemaCache(connectionId, response.objects, username);
       }
     } catch (err) {
       console.error("Failed to fetch database objects:", err);
@@ -416,7 +416,7 @@ export default function SqlRunnerTab({ connectionId }) {
     brainAPI
       .rescanSchema(connectionId)
       .then(async () => {
-        clearSchemaCache(connectionId);
+        clearSchemaCache(connectionId, username);
         await fetchDatabaseObjects({ showSpinner: false });
       })
       .catch((err) => {

@@ -169,6 +169,96 @@ class UserDataAccessPolicyServiceTest {
         ).policy().allowedSchemas()).containsExactly("marts");
     }
 
+    @Test
+    void filterDatabaseObjects_keepsOnlyAllowedSchemas() {
+        ConnectionChatAccessPolicyService.EffectivePolicy schemaPolicy = new ConnectionChatAccessPolicyService.EffectivePolicy(
+            true,
+            "conn-1",
+            "analyst",
+            Set.of(),
+            Set.of(),
+            Set.of(),
+            Set.of("marts"),
+            true,
+            true,
+            "Only schema marts",
+            List.of(),
+            List.of()
+        );
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(schemaPolicy);
+
+        var marts = new com.dbaagent.model.DatabaseObject("fct_enrollment", "table", "marts", List.of(), 2L, null);
+        var crm = new com.dbaagent.model.DatabaseObject("customers", "table", "crm", List.of(), 2L, null);
+        var sales = new com.dbaagent.model.DatabaseObject("orders", "table", "sales", List.of(), 2L, null);
+
+        assertThat(service.filterDatabaseObjects("conn-1", "analyst", false, List.of(marts, crm, sales)))
+            .extracting(com.dbaagent.model.DatabaseObject::getName)
+            .containsExactly("fct_enrollment");
+    }
+
+    @Test
+    void filterSchemaMetadata_dropsOutOfScopeTablesAndRelationships() {
+        ConnectionChatAccessPolicyService.EffectivePolicy schemaPolicy = new ConnectionChatAccessPolicyService.EffectivePolicy(
+            true,
+            "conn-1",
+            "analyst",
+            Set.of(),
+            Set.of(),
+            Set.of(),
+            Set.of("marts"),
+            true,
+            true,
+            "Only schema marts",
+            List.of(),
+            List.of()
+        );
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(schemaPolicy);
+
+        var schema = new com.dbaagent.model.SchemaMetadata();
+        var marts = new com.dbaagent.model.TableMetadata();
+        marts.setSchema("marts");
+        marts.setName("fct_enrollment");
+        var crm = new com.dbaagent.model.TableMetadata();
+        crm.setSchema("crm");
+        crm.setName("customers");
+        schema.setTables(List.of(marts, crm));
+        var relationship = new com.dbaagent.model.RelationshipMetadata();
+        relationship.setFromTable("crm.customers");
+        relationship.setToTable("marts.fct_enrollment");
+        schema.setRelationships(List.of(relationship));
+
+        var filtered = service.filterSchemaMetadata("conn-1", "analyst", false, schema);
+        assertThat(filtered.getTables()).extracting(com.dbaagent.model.TableMetadata::getName)
+            .containsExactly("fct_enrollment");
+        assertThat(filtered.getRelationships()).isEmpty();
+    }
+
+    @Test
+    void assertTableSchemaAllowed_blocksOutOfScopeTableMetadata() {
+        ConnectionChatAccessPolicyService.EffectivePolicy schemaPolicy = new ConnectionChatAccessPolicyService.EffectivePolicy(
+            true,
+            "conn-1",
+            "analyst",
+            Set.of(),
+            Set.of(),
+            Set.of(),
+            Set.of("marts"),
+            true,
+            true,
+            "Only schema marts",
+            List.of(),
+            List.of()
+        );
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(schemaPolicy);
+
+        UserDataAccessPolicyException exception = assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.assertTableSchemaAllowed("conn-1", "analyst", false, "crm.customers")
+        );
+        assertThat(exception.getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
+        service.assertTableSchemaAllowed("conn-1", "analyst", false, "marts.fct_enrollment");
+    }
+
     private ConnectionChatAccessPolicyService.EffectivePolicy policy() {
         return new ConnectionChatAccessPolicyService.EffectivePolicy(
             true,

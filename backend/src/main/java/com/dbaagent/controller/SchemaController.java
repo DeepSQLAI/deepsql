@@ -9,6 +9,7 @@ import com.dbaagent.service.QueryExecutionPolicyException;
 import com.dbaagent.service.QueryExecutorService;
 import com.dbaagent.service.SqlExecutionAuditService;
 import com.dbaagent.service.UserDataAccessPolicyException;
+import com.dbaagent.service.UserDataAccessPolicyService;
 import com.dbaagent.service.SchemaScannerService;
 import com.dbaagent.service.VisualizationService;
 import com.dbaagent.service.security.AccessControlService;
@@ -36,6 +37,7 @@ public class SchemaController {
     private final QueryExecutorService queryExecutorService;
     private final AccessControlService accessControlService;
     private final SqlExecutionAuditService sqlExecutionAuditService;
+    private final UserDataAccessPolicyService userDataAccessPolicyService;
 
     @PostMapping("/scan")
     public ResponseEntity<Map<String, Object>> scanSchema(@PathVariable String connectionId) {
@@ -48,7 +50,7 @@ public class SchemaController {
             }
             accessControlService.assertCanUseChatEditor(connectionId);
 
-            SchemaMetadata schema = schemaScannerService.scanSchema(connectionId);
+            SchemaMetadata schema = scopedSchema(connectionId, schemaScannerService.scanSchema(connectionId));
             response.put("success", true);
             response.put("schema", schema);
             return ResponseEntity.ok(response);
@@ -78,7 +80,7 @@ public class SchemaController {
             }
             accessControlService.assertCanUseChatEditor(connectionId);
 
-            SchemaMetadata schema = schemaScannerService.scanSchema(connectionId);
+            SchemaMetadata schema = scopedSchema(connectionId, schemaScannerService.scanSchema(connectionId));
             response.put("success", true);
             response.put("schema", schema);
             return ResponseEntity.ok(response);
@@ -108,7 +110,7 @@ public class SchemaController {
             }
             accessControlService.assertCanUseChatEditor(connectionId);
 
-            SchemaMetadata schema = schemaScannerService.scanSchema(connectionId);
+            SchemaMetadata schema = scopedSchema(connectionId, schemaScannerService.scanSchema(connectionId));
             ErDiagramData erDiagram = visualizationService.generateErDiagram(schema, connectionId);
             DependencyGraphData dependencyGraph = visualizationService.generateDependencyGraph(schema, connectionId);
 
@@ -143,7 +145,10 @@ public class SchemaController {
             }
             accessControlService.assertCanUseChatEditor(connectionId);
 
-            List<DatabaseObject> objects = queryExecutorService.getDatabaseObjects(connectionId);
+            List<DatabaseObject> objects = scopedObjects(
+                connectionId,
+                queryExecutorService.getDatabaseObjects(connectionId)
+            );
             log.info("Successfully fetched {} database objects for connection: {}", objects.size(), connectionId);
             response.put("success", true);
             response.put("objects", objects);
@@ -273,6 +278,12 @@ public class SchemaController {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
             }
             accessControlService.assertCanUseChatEditor(connectionId);
+            userDataAccessPolicyService.assertTableSchemaAllowed(
+                connectionId,
+                accessControlService.getCurrentUsername(),
+                accessControlService.isCurrentUserAdmin(),
+                tableName
+            );
 
             List<TableIndex> indexes = queryExecutorService.getTableIndexes(connectionId, tableName);
             response.put("success", true);
@@ -282,6 +293,11 @@ public class SchemaController {
             response.put("success", false);
             response.put("message", "Failed to fetch table indexes: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        } catch (UserDataAccessPolicyException e) {
+            response.put("success", false);
+            response.put("message", e.getMessage());
+            response.put("errorCode", e.getErrorCode());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
         } catch (ResponseStatusException e) {
             response.put("success", false);
             response.put("message", e.getReason());
@@ -305,6 +321,12 @@ public class SchemaController {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
             }
             accessControlService.assertCanUseChatEditor(connectionId);
+            userDataAccessPolicyService.assertTableSchemaAllowed(
+                connectionId,
+                accessControlService.getCurrentUsername(),
+                accessControlService.isCurrentUserAdmin(),
+                tableName
+            );
 
             TableStats stats = queryExecutorService.getTableStats(connectionId, tableName);
             response.put("success", true);
@@ -314,6 +336,11 @@ public class SchemaController {
             response.put("success", false);
             response.put("message", "Failed to fetch table stats: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        } catch (UserDataAccessPolicyException e) {
+            response.put("success", false);
+            response.put("message", e.getMessage());
+            response.put("errorCode", e.getErrorCode());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
         } catch (ResponseStatusException e) {
             response.put("success", false);
             response.put("message", e.getReason());
@@ -323,5 +350,23 @@ public class SchemaController {
             response.put("message", "Failed to fetch table stats: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
         }
+    }
+
+    private SchemaMetadata scopedSchema(String connectionId, SchemaMetadata schema) {
+        return userDataAccessPolicyService.filterSchemaMetadata(
+            connectionId,
+            accessControlService.getCurrentUsername(),
+            accessControlService.isCurrentUserAdmin(),
+            schema
+        );
+    }
+
+    private List<DatabaseObject> scopedObjects(String connectionId, List<DatabaseObject> objects) {
+        return userDataAccessPolicyService.filterDatabaseObjects(
+            connectionId,
+            accessControlService.getCurrentUsername(),
+            accessControlService.isCurrentUserAdmin(),
+            objects
+        );
     }
 }

@@ -600,10 +600,18 @@ public class ConnectionChatAccessPolicyService {
     }
 
     private boolean schemaInScope(String schema, Set<String> allowedSchemas) {
+        return isSchemaInScope(schema, allowedSchemas);
+    }
+
+    public static boolean isSchemaInScope(String schema, Set<String> allowedSchemas) {
         if (allowedSchemas == null || allowedSchemas.isEmpty()) {
             return true;
         }
-        return allowedSchemas.contains(normalizeName(schema));
+        String normalized = schema == null ? "" : schema.trim().replace("\"", "").replace("`", "").toLowerCase(Locale.ROOT);
+        if (normalized.isBlank()) {
+            normalized = "public";
+        }
+        return allowedSchemas.contains(normalized);
     }
 
     private SchemaMetadata tryScanSchema(String connectionId) {

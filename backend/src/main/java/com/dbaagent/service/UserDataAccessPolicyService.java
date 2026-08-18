@@ -2,6 +2,9 @@ package com.dbaagent.service;
 
 import com.dbaagent.model.QueryRequest;
 import com.dbaagent.model.QueryResult;
+import com.dbaagent.model.DatabaseObject;
+import com.dbaagent.model.SchemaMetadata;
+import com.dbaagent.model.TableMetadata;
 import com.dbaagent.model.SecurityEventOutcome;
 import com.dbaagent.model.SecurityEventType;
 import lombok.RequiredArgsConstructor;
@@ -146,6 +149,96 @@ public class UserDataAccessPolicyService {
         }
 
         return QueryGuardDecision.allow(policy);
+    }
+
+    public List<DatabaseObject> filterDatabaseObjects(
+        String connectionId,
+        String username,
+        boolean actorIsAdmin,
+        List<DatabaseObject> objects
+    ) {
+        if (objects == null || objects.isEmpty()) {
+            return objects;
+        }
+        Set<String> allowedSchemas = allowedSchemasForActor(connectionId, username, actorIsAdmin);
+        if (allowedSchemas.isEmpty()) {
+            return objects;
+        }
+        return objects.stream()
+            .filter(object -> ConnectionChatAccessPolicyService.isSchemaInScope(object.getSchema(), allowedSchemas))
+            .toList();
+    }
+
+    public SchemaMetadata filterSchemaMetadata(
+        String connectionId,
+        String username,
+        boolean actorIsAdmin,
+        SchemaMetadata schema
+    ) {
+        if (schema == null) {
+            return null;
+        }
+        Set<String> allowedSchemas = allowedSchemasForActor(connectionId, username, actorIsAdmin);
+        if (allowedSchemas.isEmpty()) {
+            return schema;
+        }
+
+        SchemaMetadata filtered = new SchemaMetadata();
+        filtered.setDatabaseName(schema.getDatabaseName());
+        filtered.setDbType(schema.getDbType());
+        filtered.setTotalViews(schema.getTotalViews());
+        filtered.setTotalSizeBytes(schema.getTotalSizeBytes());
+        List<TableMetadata> tables = schema.getTables() == null ? List.of() : schema.getTables().stream()
+            .filter(table -> ConnectionChatAccessPolicyService.isSchemaInScope(table.getSchema(), allowedSchemas))
+            .toList();
+        filtered.setTables(tables);
+        filtered.setTotalTables((long) tables.size());
+        if (schema.getRelationships() != null) {
+            filtered.setRelationships(schema.getRelationships().stream()
+                .filter(relationship ->
+                    ConnectionChatAccessPolicyService.isSchemaInScope(schemaFromTableRef(relationship.getFromTable()), allowedSchemas)
+                        && ConnectionChatAccessPolicyService.isSchemaInScope(schemaFromTableRef(relationship.getToTable()), allowedSchemas))
+                .toList());
+        }
+        return filtered;
+    }
+
+    public void assertTableSchemaAllowed(
+        String connectionId,
+        String username,
+        boolean actorIsAdmin,
+        String tableRef
+    ) {
+        Set<String> allowedSchemas = allowedSchemasForActor(connectionId, username, actorIsAdmin);
+        if (allowedSchemas.isEmpty()) {
+            return;
+        }
+        String schema = schemaFromTableRef(tableRef);
+        if (!ConnectionChatAccessPolicyService.isSchemaInScope(schema, allowedSchemas)) {
+            throw new UserDataAccessPolicyException(
+                "This object is in schema '" + (schema.isBlank() ? "public" : schema)
+                    + "' which is outside your allowed schema scope.",
+                "POLICY_SCHEMA_BLOCKED"
+            );
+        }
+    }
+
+    private Set<String> allowedSchemasForActor(String connectionId, String username, boolean actorIsAdmin) {
+        ConnectionChatAccessPolicyService.EffectivePolicy policy =
+            policyService.resolveEffectivePolicy(connectionId, username, actorIsAdmin);
+        if (policy == null || policy.allowedSchemas() == null) {
+            return Set.of();
+        }
+        return policy.allowedSchemas();
+    }
+
+    private String schemaFromTableRef(String tableRef) {
+        if (tableRef == null || tableRef.isBlank()) {
+            return "";
+        }
+        String normalized = normalizeName(tableRef);
+        int separator = normalized.lastIndexOf('.');
+        return separator > 0 ? normalized.substring(0, separator) : "";
     }
 
     public QueryResult redactResult(
