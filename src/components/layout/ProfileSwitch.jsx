@@ -152,6 +152,8 @@ export default function ProfileSwitch() {
           className={styles.trigger}
           onClick={() => setOpen((value) => !value)}
           disabled={switching}
+          aria-label="View as another user"
+          data-testid="profile-switch-trigger"
         >
           <ArrowLeftRight size={14} />
           <span>View as</span>

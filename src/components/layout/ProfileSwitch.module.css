@@ -1,8 +1,10 @@
 .switchWrap {
-  position: absolute;
-  top: 12px;
-  right: 16px;
+  position: relative;
   z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 16px 0;
+  flex-shrink: 0;
 }
 
 .trigger {
