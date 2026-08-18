@@ -58,7 +58,8 @@ class QueryExecutorServiceCounterTest {
             queryExecutionPolicyService,
             userDataAccessPolicyService,
             telemetryCounters,
-            keyColumnAnalysisRepository
+            keyColumnAnalysisRepository,
+            new RunningQueryRegistry()
         );
     }
 

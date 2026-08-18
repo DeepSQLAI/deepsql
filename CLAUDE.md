@@ -267,6 +267,60 @@ broken. Assert the *outcome*, never the attempt:
   schemas have a `comment` table. Assert `SELECT * FROM comment` is allowed *and*
   that `WITH x AS (DELETE …) SELECT …` / `WITH x AS (…) DELETE …` still are not.
 
+### SQL Editor Guard Rules
+
+The Editor (`EditorSection` → `SqlRunnerTab` → `POST /connections/{id}/query` →
+`QueryExecutionPolicyService` → `QueryExecutorService`) is the only surface where a
+user submits arbitrary SQL. Everything below was a live bug, verified by executing
+it against a real database — not a theoretical hardening pass.
+
+- **Never classify SQL by its leading keyword alone.** `WITH x AS (DELETE FROM t
+  RETURNING *) SELECT * FROM x` parses as a `Select` and *every* leading-keyword
+  check calls it read-only — including `isReadOnlyQuery`, which reports anything
+  starting with `WITH` as safe. PostgreSQL executes data-modifying CTEs for real,
+  so a **non-admin** wiped whole tables through the Editor with no confirmation
+  prompt, logged as an ordinary `EDITOR_QUERY_EXECUTED / SUCCESS`. `SELECT … INTO
+  newtab` is the same class of bug (it is DDL). `classifyStatement` now inspects
+  the parse tree (`detectSelectWrite`) **and** runs a text backstop
+  (`detectHiddenWrite`) so an unparseable variant fails closed instead of falling
+  through to the keyword path.
+- **Read-only contexts open read-only JDBC sessions.** `QueryExecutorService` calls
+  `connection.setReadOnly(true)` whenever `mutationMode() == READ_ONLY_ONLY`, so
+  PostgreSQL refuses the write itself even if classification is wrong. Classification
+  is a parser heuristic; this is what keeps the *next* parser gap from being data
+  loss. A driver that rejects the hint raises rather than silently continuing
+  writable. HikariCP resets the flag on return to the pool (verified), so it cannot
+  leak into an admin's later write.
+- **Row caps are enforced with `setMaxRows`, not by appending `LIMIT n`.** The old
+  check skipped its own LIMIT whenever the regex `\blimit\s+\d+` matched anywhere —
+  including inside a comment, a string literal, or a subquery. `WITH a AS (SELECT …
+  LIMIT 100) SELECT * FROM a` is ordinary analyst SQL and returned **200k rows**
+  against a 1,000 cap, straight into an unbounded `ArrayList` and then an
+  unvirtualized table. The SQL `LIMIT` is still appended for simple SELECTs, but
+  only as an optimization — correctness no longer depends on that text match.
+- **Cancel must terminate the query, not just the HTTP request.** `abortController
+  .abort()` only closes the socket; the statement runs on holding one of the pool's
+  10 connections for up to its timeout. The client now sends an `executionId`,
+  `RunningQueryRegistry` maps it to the backend session pid (via the dialect's
+  `getSessionPidQuery()`), and `POST /connections/{id}/query/{executionId}/cancel`
+  terminates exactly that session. The previous UI behavior was worse than nothing:
+  it killed **every** active query on the connection, including other users' work.
+  The cancel endpoint is scoped to the connection *and* the user who started the
+  run, so an execution id is not a kill primitive for someone else's query.
+- **Keep the client timeout under the proxy's.** `docker/nginx/default.conf` gives
+  up at `proxy_read_timeout 300s`; the Editor used to ask for 600s, so a 6-minute
+  query returned an opaque 504 while still running. `QUERY_TIMEOUT_SECONDS = 240`
+  in `SqlRunnerTab.js` — change both together or not at all.
+- **`/api/connections/*/query` is rate-limited in nginx** (`limit_req zone=sqlexec`,
+  30r/m + burst 20, `429` on reject). It is the most expensive authenticated call
+  in the product.
+- **Test the policy against the real providers.** `QueryExecutionPolicyServiceTest`
+  used to stub `isReadOnlyQuery` to always return `false` — the exact opposite of
+  what the shipped providers do for `WITH`. It asserted behavior no deployment had,
+  and `withInsert_isTreatedAsMutation` passed *because* of the stub. It now
+  constructs a real `MySQLQueryExecutionProvider`. Do not reintroduce a stubbed
+  dialect here; the mock is what let the blocker ship.
+
 ### Data Model Rules
 
 - **`mcp_tokens.user_id` is a non-null FK with no cascade.** Deleting a user who holds

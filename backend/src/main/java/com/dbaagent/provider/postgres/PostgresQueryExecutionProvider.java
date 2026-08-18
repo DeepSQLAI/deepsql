@@ -127,4 +127,9 @@ public class PostgresQueryExecutionProvider implements QueryExecutionProvider {
             return String.valueOf(normalized.hashCode());
         }
     }
+
+    @Override
+    public String getSessionPidQuery() {
+        return "SELECT pg_backend_pid()";
+    }
 }

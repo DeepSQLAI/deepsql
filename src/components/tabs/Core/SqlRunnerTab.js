@@ -37,7 +37,6 @@ import {
   queryPerformanceAPI,
   explainAPI,
   brainAPI,
-  activeQueryAPI,
 } from "@/lib/api/client";
 import ExplainAnalysisPanel from "./ExplainAnalysisPanel";
 import QueryOptimizePanel from "./QueryOptimizePanel";
@@ -50,6 +49,10 @@ import {
   qualifyForSql,
   connectionHasMultipleSchemas,
 } from "@/lib/schemaNames";
+
+// Kept below the 300s proxy_read_timeout in docker/nginx/default.conf so a slow
+// query fails with a real message rather than an opaque 504.
+const QUERY_TIMEOUT_SECONDS = 240;
 
 // Constants for diagram layout
 const DIAGRAM_NODE_WIDTH = 240;
@@ -294,6 +297,7 @@ export default function SqlRunnerTab({ connectionId }) {
   const autocompleteRegisteredRef = useRef(false);
   const dbObjectsRef = useRef([]);
   const abortControllerRef = useRef(null);
+  const executionIdRef = useRef(null);
   // Note: savedQueriesPanelRef kept for potential future use, but panel UI is now in modal
   const savedQueriesPanelRef = useRef(null);
   const hasRowCount = (value) => value !== null && value !== undefined;
@@ -1256,19 +1260,27 @@ export default function SqlRunnerTab({ connectionId }) {
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+    // Identifies this run so cancelling can terminate it on the database.
+    const executionId =
+      globalThis.crypto?.randomUUID?.() ??
+      `exec-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    executionIdRef.current = executionId;
 
     try {
-      // Use extended timeout (10 min) for SQL editor queries to support long-running queries.
-      // The server default is 30s which is too short for analytical queries.
+      // The server default of 30s is too short for analytical queries, but the
+      // nginx proxy in front of the API gives up at 300s (docker/nginx/default.conf).
+      // Staying under that means a slow query surfaces as a real error here
+      // instead of an opaque gateway timeout.
       const response = await queryAPI.executeQuery(
         connectionId,
         trimmedQuery,
         1000,
-        600,
+        QUERY_TIMEOUT_SECONDS,
         abortController.signal,
         {
           executionOrigin: "EDITOR",
           mutationConfirmed,
+          executionId,
         },
       );
 
@@ -1344,29 +1356,25 @@ export default function SqlRunnerTab({ connectionId }) {
       }
     } finally {
       abortControllerRef.current = null;
+      executionIdRef.current = null;
       setIsRunning(false);
     }
   };
 
   const handleStopQuery = () => {
+    const executionId = executionIdRef.current;
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
     setIsRunning(false);
     setError(null);
-    // Best-effort: capture active queries and kill any running ones on the DB side.
-    // Fire-and-forget — don't block the UI on this.
-    if (connectionId) {
-      activeQueryAPI.capture(connectionId)
-        .then((queries) => {
-          const running = queries.filter((q) => q.state === "active" || q.state === "running");
-          running.forEach((q) => {
-            if (q.pid) {
-              activeQueryAPI.kill(connectionId, q.pid).catch(() => {});
-            }
-          });
-        })
-        .catch(() => {});
+    // Aborting above only drops the HTTP response; the statement keeps running
+    // and holds a pooled connection. Ask the server to terminate this specific
+    // execution. Previously this killed every active query on the connection,
+    // which could take out other users' work and DeepSQL's own background jobs.
+    if (connectionId && executionId) {
+      executionIdRef.current = null;
+      queryAPI.cancelQuery(connectionId, executionId).catch(() => {});
     }
   };
 
