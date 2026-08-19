@@ -201,6 +201,42 @@ class UserDataAccessPolicyServiceTest {
         assertThat(exception.getErrorCode()).isEqualTo("POLICY_SQL_BLOCKED");
     }
 
+    // A qualified protection names exactly one table. marts.customer_profiles is a
+    // different table from public.customer_profiles and must not be caught by it.
+    @Test
+    void enforcePreExecution_allowsSameNamedTableInAnotherSchemaWhenProtectionIsQualified() {
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy());
+        when(policyService.buildProtectionDescriptors(any(ConnectionChatAccessPolicyService.EffectivePolicy.class)))
+            .thenReturn(Map.of("public.customer_profiles",
+                descriptor("public", "customer_profiles", false, "email")));
+
+        service.enforcePreExecution(
+            "conn-1",
+            new QueryRequest("SELECT id FROM (SELECT id FROM marts.customer_profiles) t", null, null),
+            new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+        );
+    }
+
+    // The genuinely ambiguous direction is an unqualified REFERENCE, not an
+    // unqualified protection: qualifyTable() stores public.<t> as bare <t>, so a
+    // bare protected name means public, while a bare reference in a query
+    // resolves through search_path and could be any schema. Block that one.
+    @Test
+    void enforcePreExecution_blocksUnqualifiedReferenceBecauseSearchPathIsUnknown() {
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy());
+
+        UserDataAccessPolicyException exception = assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest("SELECT id FROM (SELECT id FROM customer_profiles) t", null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo("POLICY_SQL_BLOCKED");
+    }
+
     @Test
     void enforcePreExecution_blocksForbiddenSchemaInsideWhereSubquery() {
         assertThat(assertSchemaScopeBlocks(

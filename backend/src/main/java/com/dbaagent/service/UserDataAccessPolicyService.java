@@ -363,17 +363,18 @@ public class UserDataAccessPolicyService {
         }
         Set<String> referenced = new LinkedHashSet<>();
         for (String name : new TablesNamesFinder<>().getTables(statement)) {
-            addNameForms(name, referenced);
+            if (name != null && !name.isBlank()) {
+                referenced.add(normalizeName(name));
+            }
         }
         Set<String> inspected = new LinkedHashSet<>();
         for (PlainSelect branch : inspectedBranches) {
             collectDirectTables(branch, inspected);
         }
         for (ConnectionChatAccessPolicyService.ProtectionDescriptor descriptor : protectedObjects.values()) {
-            Set<String> forms = new LinkedHashSet<>();
-            addNameForms(descriptor.qualifiedTableName(), forms);
-            boolean isReferenced = forms.stream().anyMatch(referenced::contains);
-            boolean wasInspected = forms.stream().anyMatch(inspected::contains);
+            String protectedName = descriptor.qualifiedTableName();
+            boolean isReferenced = referenced.stream().anyMatch(name -> namesMatch(protectedName, name));
+            boolean wasInspected = inspected.stream().anyMatch(name -> namesMatch(protectedName, name));
             if (isReferenced && !wasInspected) {
                 throw new UserDataAccessPolicyException(
                     "This query reaches restricted data through a nested query DeepSQL cannot fully verify, so it was blocked before execution.",
@@ -383,28 +384,55 @@ public class UserDataAccessPolicyService {
         }
     }
 
-    /** Adds both the qualified name and its bare table part, so schema.t matches t. */
-    private void addNameForms(String name, Set<String> out) {
-        if (name == null || name.isBlank()) {
-            return;
+    /**
+     * Does a query's table reference name the protected table?
+     *
+     * Asymmetric on purpose, because the two sides carry different information.
+     * ConnectionChatAccessPolicyService.qualifyTable() drops the schema when it is
+     * "public", so a bare PROTECTED name means public.<table> -- it is not unknown.
+     * A bare REFERENCE in a query is genuinely unknown: it resolves through the
+     * session search_path and could be any schema.
+     *
+     *   reference unqualified -> match on bare name. Ambiguous, so block; the
+     *                            search_path may well point at the protected table.
+     *   protected public      -> the qualified reference must actually say public.
+     *                            marts.customer_profiles is a different table, and
+     *                            treating it as protected refused every other
+     *                            schema's copy -- which this product's own
+     *                            multi-schema fixtures (crm/sales/finance/hr) hit.
+     *   both qualified        -> exact match.
+     */
+    private boolean namesMatch(String protectedName, String referencedName) {
+        String protectedNorm = normalizeName(protectedName);
+        String referencedNorm = normalizeName(referencedName);
+        if (protectedNorm.isEmpty() || referencedNorm.isEmpty()) {
+            return false;
         }
-        String normalized = normalizeName(name);
-        out.add(normalized);
-        int dot = normalized.lastIndexOf('.');
-        if (dot > 0 && dot < normalized.length() - 1) {
-            out.add(normalized.substring(dot + 1));
+        if (!referencedNorm.contains(".")) {
+            return bareName(protectedNorm).equals(referencedNorm);
         }
+        if (!protectedNorm.contains(".")) {
+            return referencedNorm.equals("public." + protectedNorm);
+        }
+        return protectedNorm.equals(referencedNorm);
+    }
+
+    private String bareName(String normalizedName) {
+        int dot = normalizedName.lastIndexOf('.');
+        return dot > 0 && dot < normalizedName.length() - 1
+            ? normalizedName.substring(dot + 1)
+            : normalizedName;
     }
 
     /** Tables named directly in this branch's FROM/JOIN -- what inspection actually saw. */
     private void collectDirectTables(PlainSelect select, Set<String> out) {
         if (select.getFromItem() instanceof Table table) {
-            addNameForms(table.getFullyQualifiedName(), out);
+            out.add(normalizeName(table.getFullyQualifiedName()));
         }
         if (select.getJoins() != null) {
             for (Join join : select.getJoins()) {
                 if (join.getRightItem() instanceof Table table) {
-                    addNameForms(table.getFullyQualifiedName(), out);
+                    out.add(normalizeName(table.getFullyQualifiedName()));
                 }
             }
         }
