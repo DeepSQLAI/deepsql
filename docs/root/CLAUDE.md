@@ -821,7 +821,10 @@ though the properties themselves still sit in `application*.properties`.
       - `PUT /api/admin/users/{id}/role` - Update user role (ADMIN only)
       - `DELETE /api/admin/users/{id}` - Delete user (ADMIN only)
       - `GET /api/admin/roles` - Get all roles with permissions (ADMIN only)
-      - `GET /api/auth/me` - Get current user's profile including role/permissions
+      - `GET /api/admin/impersonate` - List switchable users and current profile-switch status (ADMIN only)
+      - `POST /api/admin/impersonate` - `{ userId }` start viewing the product as that user (ADMIN only; cannot target admins or self)
+      - `DELETE /api/admin/impersonate` - Stop profile switch and restore the admin session
+      - `GET /api/auth/me` - Get current user's profile including role/permissions; while switching, this is the **target** user plus `impersonating` / `impersonatorUsername`
     - **Frontend Components**:
       - `PermissionGuard.jsx` - Wrapper component for permission-based rendering
       - `UsersTab.jsx` - Admin user management tab in Workspace

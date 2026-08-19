@@ -28,6 +28,11 @@ AGENT_DIR="${HERMES_AGENT_DIR:-$HERMES_HOME/hermes-agent}"
 WEBUI_DIR="${HERMES_WEBUI_DIR:-$HERMES_HOME/hermes-webui}"
 AGENT_REPO="${HERMES_AGENT_REPO:-https://github.com/NousResearch/hermes-agent.git}"
 WEBUI_REPO="${HERMES_WEBUI_REPO:-https://github.com/nesquena/hermes-webui.git}"
+# Pinned to the same release tags as agent/Dockerfile. A host install and a
+# container install must yield the same runtime pair, or a bug reproduces on one
+# path and not the other. Bump both files together.
+AGENT_REF="${HERMES_AGENT_REF:-v2026.8.18}"
+WEBUI_REF="${HERMES_WEBUI_REF:-v0.52.76}"
 WEBUI_PORT="${HERMES_WEBUI_PORT:-8787}"
 # Default to loopback so a bare self-host install does not expose the Agent API
 # on the WAN (nginx /agent-api already gates via auth_request). Override to
@@ -57,14 +62,22 @@ resolve_venv_python() {
 }
 
 ensure_clone() {
-  local dir="$1" repo="$2" label="$3"
+  local dir="$1" repo="$2" label="$3" ref="$4"
   if [[ -d "$dir/.git" ]]; then
-    echo "✓ $label already present at $dir"
+    # Note: an install that predates pinning keeps whatever ref it already has.
+    # Re-pinning an existing checkout is deliberately not automatic — deleting a
+    # user's agent directory to change a version is not this script's call.
+    echo "✓ $label already present at $dir (ref unchanged; delete the directory to re-pin)"
     return 0
   fi
-  echo "→ Cloning $label into $dir"
+  echo "→ Cloning $label at $ref into $dir"
   mkdir -p "$(dirname "$dir")"
-  git clone --depth 1 "$repo" "$dir"
+  if ! git clone --depth 1 --branch "$ref" "$repo" "$dir"; then
+    echo "Error: could not clone $label at pinned ref '$ref' from $repo." >&2
+    echo "       If that tag was removed upstream, pick a current one and update" >&2
+    echo "       BOTH this script and agent/Dockerfile — they must stay in step." >&2
+    return 1
+  fi
 }
 
 ensure_agent_venv() {
@@ -412,8 +425,8 @@ require_command node
 require_command python3
 
 mkdir -p "$HERMES_HOME"
-ensure_clone "$AGENT_DIR" "$AGENT_REPO" "hermes-agent"
-ensure_clone "$WEBUI_DIR" "$WEBUI_REPO" "hermes-webui"
+ensure_clone "$AGENT_DIR" "$AGENT_REPO" "hermes-agent" "$AGENT_REF"
+ensure_clone "$WEBUI_DIR" "$WEBUI_REPO" "hermes-webui" "$WEBUI_REF"
 ensure_agent_venv
 ensure_mcp_sdk
 

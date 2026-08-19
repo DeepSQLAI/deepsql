@@ -186,6 +186,11 @@ only covers cloud-specific, non-obvious caveats.
   `HERMES_WEBUI_ALLOWED_ORIGINS` (upstream env name).
 - A demo target DB `demo_shop` (same Postgres server, sample `customers`/`products`/`orders`)
   exists for exercising connection/schema features without an external database.
+- A multi-schema fixture DB `acme_erp` (schemas: `crm`, `sales`, `finance`, `inventory`,
+  `hr`, `marts`) exists for chat-access-policy and multi-schema tests. Seed with:
+  `sudo -u postgres psql -f docker/postgres/init/11_create_acme_erp.sql` then
+  `bash scripts/seed-acme-erp.sh` (registers `ACME ERP (Multi-Schema)` when backend auth
+  is disabled or you have an admin session cookie).
 
 ### Non-obvious setup caveats (each cost real debugging time)
 
@@ -259,9 +264,16 @@ only covers cloud-specific, non-obvious caveats.
   non-`public` schemas (`crm`, `sales`, `finance`, `hr`, `inventory`) for Brain /
   MCP cross-schema checks. Prefer schema-qualified SQL (`sales.orders`); bare
   names follow the role’s `search_path` (usually `public`).
-- **`AGENT_WEBUI_URL` for native runs.** Default is `http://deepsql-agent:8787`
-  (Compose DNS). Native local must set `AGENT_WEBUI_URL=http://127.0.0.1:8787` in
-  `.env` or CLI/Slack `AgentChatClient` cannot reach the agent API.
+- **`AGENT_WEBUI_URL` / `AGENT_PROVISIONER_URL` for native runs.** Compose
+  defaults (`http://deepsql-agent:8787` and `…:8788/provision`) do not resolve
+  on the host. Native local must point both at loopback
+  (`http://127.0.0.1:8787` and `http://127.0.0.1:8788/provision`) or the Agent
+  tab returns 503 `Could not provision the DeepSQL Agent for this user`.
+  `scripts/start-backend.sh` remaps those hostnames automatically when they
+  don't resolve. If the agent container is used with a host-side Java backend,
+  set `DEEPSQL_API_BASE_URL=http://host.docker.internal:8080/api/` so MCP
+  tools can reach the native process (compose publishes `host.docker.internal`
+  via `extra_hosts`).
 - **DeepSQL CLI (`deepsql`) for agent testing.** Install from the repo package:
   `cd mcp && DEEPSQL_SKIP_AGENT_SETUP=1 npm install -g .` (prefix
   `~/.npm-global`, keep that on `PATH`). Auth against local backend with an MCP

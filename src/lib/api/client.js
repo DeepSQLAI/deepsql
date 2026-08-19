@@ -390,6 +390,21 @@ export const adminAPI = {
     return response.data
   },
 
+  startImpersonation: async (userId) => {
+    const response = await apiClient.post('/api/admin/impersonate', { userId })
+    return response.data
+  },
+
+  stopImpersonation: async () => {
+    const response = await apiClient.delete('/api/admin/impersonate')
+    return response.data
+  },
+
+  getImpersonationStatus: async () => {
+    const response = await apiClient.get('/api/admin/impersonate')
+    return response.data
+  },
+
   /**
    * Get all roles with their permissions (ADMIN only)
    */

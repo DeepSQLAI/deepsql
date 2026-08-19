@@ -37,12 +37,20 @@ RUN curl -fsSL https://astral.sh/uv/install.sh | sh \
 
 WORKDIR /opt/deepsql-agent
 
-# Upstream runtime clones. Refs are overridable at build time; defaults track
-# what scripts/self-host/setup-agent.sh installs for host-based installs.
+# Upstream runtime clones, PINNED to release tags. Overridable at build time;
+# defaults track what scripts/self-host/setup-agent.sh installs, so a container
+# install and a host install get the identical runtime pair.
+#
+# These were `main` and `master` — moving branches. That meant an upstream commit
+# could change what this image contains, and break it, with no change on our side:
+# exactly the failure the `mcp>=1.0,<2` pin below exists to prevent, left open one
+# layer up. The webui couples to the agent by direct import, so the two move
+# together — bump them as a PAIR and re-validate the agent actually answers, not
+# merely that the image builds.
 ARG AGENT_RUNTIME_REPO=https://github.com/NousResearch/hermes-agent.git
-ARG AGENT_RUNTIME_REF=main
+ARG AGENT_RUNTIME_REF=v2026.8.18
 ARG AGENT_API_REPO=https://github.com/nesquena/hermes-webui.git
-ARG AGENT_API_REF=master
+ARG AGENT_API_REF=v0.52.76
 
 # Runtime engine (Python agent).
 #
