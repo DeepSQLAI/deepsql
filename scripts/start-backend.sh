@@ -9,6 +9,8 @@ ENV_FILE="$PROJECT_ROOT/.env"
 echo "Starting DBA Agent Backend..."
 echo "================================"
 
+REMAP_SCRIPT="$SCRIPT_DIR/remap-compose-hosts-for-native.sh"
+
 if [ -f "$ENV_FILE" ]; then
     echo "Loading environment from .env..."
     set -a
@@ -18,13 +20,16 @@ if [ -f "$ENV_FILE" ]; then
         echo "Local source-run startup ignores SPRING_PROFILES_ACTIVE=prod from .env"
         unset SPRING_PROFILES_ACTIVE
     fi
+    # shellcheck source=remap-compose-hosts-for-native.sh
+    source "$REMAP_SCRIPT"
+    echo "Agent provisioner: ${AGENT_PROVISIONER_URL:-unset}"
 fi
 
 build_backend_launch_command() {
     local mvn_command="$1"
     local env_snippet=""
     if [ -f "$ENV_FILE" ]; then
-        env_snippet="set -a && source \"$ENV_FILE\" && set +a && if [ \"\${SPRING_PROFILES_ACTIVE:-}\" = \"prod\" ]; then unset SPRING_PROFILES_ACTIVE; fi && "
+        env_snippet="set -a && source \"$ENV_FILE\" && set +a && if [ \"\${SPRING_PROFILES_ACTIVE:-}\" = \"prod\" ]; then unset SPRING_PROFILES_ACTIVE; fi && source \"$REMAP_SCRIPT\" && "
     fi
     printf '%s' "${env_snippet}cd \"$PROJECT_ROOT/backend\" && exec ${mvn_command} spring-boot:run"
 }

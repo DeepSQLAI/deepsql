@@ -62,6 +62,22 @@ export default defineConfig({
         rewrite: (p) => p.replace(/^\/agent-api/, ''),
         timeout: 300000,
         proxyTimeout: 300000,
+        // Production nginx stamps X-Remote-User via auth_request. Vite has no
+        // equivalent, so the browser sends the effective username (including
+        // impersonation). EventSource cannot set headers — remember the last
+        // value and attach it to SSE / other proxied calls.
+        configure: (proxy) => {
+          let lastRemoteUser
+          proxy.on('proxyReq', (proxyReq, req) => {
+            const incoming = req.headers['x-remote-user']
+            if (typeof incoming === 'string' && incoming.trim()) {
+              lastRemoteUser = incoming.trim()
+            }
+            if (lastRemoteUser) {
+              proxyReq.setHeader('X-Remote-User', lastRemoteUser)
+            }
+          })
+        },
       },
     },
   },

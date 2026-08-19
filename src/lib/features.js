@@ -17,7 +17,6 @@ const BASE_SECTION_MIN_ROLE = {
   dashboards: ROLES.DEVELOPER,
   performance: ROLES.ADMIN,
   editor: ROLES.DEVELOPER,
-  docs: ROLES.DEVELOPER,
 }
 
 function resolveSectionAlias(section) {
@@ -37,6 +36,9 @@ function resolveSectionAlias(section) {
       // Schema Docs was folded into Company Knowledge → Schema Context tab.
       // Persisted nav state from older sessions still routes correctly.
       return 'company-knowledge'
+    case 'docs':
+      // The Docs sidebar tab was removed.
+      return 'agent-chat'
     case 'slow-queries':
     case 'workload-analysis':
       // Slow Queries and Workload Analysis were merged into Performance.
@@ -80,10 +82,9 @@ export function getDefaultHomeSection(role, connection = null) {
     'company-knowledge',
     'performance',
     'editor',
-    'docs',
   ]
   const firstVisible = orderedSections.find((section) => canAccessHomeSection(section, role, connection))
-  return firstVisible || 'docs'
+  return firstVisible || 'agent-chat'
 }
 
 export function normalizeHomeSection(section, role, connection = null) {

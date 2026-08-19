@@ -46,11 +46,11 @@ class ConnectionChatAccessPolicyServiceTest {
 
         SchemaMetadata schema = new SchemaMetadata();
         schema.setTables(List.of(
-            table("customer_profiles", "email", "phone_number", "full_name"),
-            table("payment_profiles", "credit_card_last4", "bank_account_masked"),
-            table("bookings", "booking_id", "status")
+            schemaTable(null, "customer_profiles", "email", "varchar", "phone_number", "varchar", "full_name", "varchar"),
+            schemaTable(null, "payment_profiles", "credit_card_last4", "varchar", "bank_account_masked", "varchar"),
+            schemaTable(null, "bookings", "booking_id", "varchar", "status", "varchar")
         ));
-        when(schemaScannerService.scanSchema("conn-1")).thenReturn(schema);
+        lenient().when(schemaScannerService.scanSchema("conn-1")).thenReturn(schema);
         lenient().when(tableClassificationRepository.findLatestByConnectionIdOrderByTableNameAsc(anyString()))
             .thenReturn(List.of(
                 classification(
@@ -87,6 +87,97 @@ class ConnectionChatAccessPolicyServiceTest {
     }
 
     @Test
+    void previewPolicy_scopesTypedColumnConstraintsToAllowedSchema() throws SQLException {
+        SchemaMetadata multiSchema = new SchemaMetadata();
+        multiSchema.setTables(List.of(
+            schemaTable("crm", "customers", "amount", "numeric", "name", "varchar"),
+            schemaTable("sales", "orders", "amount", "numeric", "currency", "varchar"),
+            schemaTable("marts", "fct_enrollment", "amount", "numeric", "currency", "varchar"),
+            schemaTable("marts", "dim_ott_subscription", "amount", "numeric", "currency", "varchar")
+        ));
+        when(schemaScannerService.scanSchema("conn-ms")).thenReturn(multiSchema);
+        lenient().when(tableClassificationRepository.findLatestByConnectionIdOrderByTableNameAsc("conn-ms"))
+            .thenReturn(List.of());
+
+        String policyText = """
+            This user should have access only to schema marts. In this table, the user cannot query \
+            integer or float amount columns but can query columns that are string and represent currency code. \
+            Strictly, The user cannot access any other schema other than marts
+            """;
+
+        PolicyPreviewResponse preview = service.previewPolicy("conn-ms", policyText);
+
+        assertThat(preview.getImpactedColumns())
+            .contains("marts.fct_enrollment.amount", "marts.dim_ott_subscription.amount")
+            .doesNotContain(
+                "crm.customers.amount",
+                "sales.orders.amount",
+                "marts.fct_enrollment.currency",
+                "marts.dim_ott_subscription.currency"
+            );
+    }
+
+    @Test
+    void previewPolicy_appliesTypedColumnConstraintsToAnyColumnName() throws SQLException {
+        SchemaMetadata schema = new SchemaMetadata();
+        schema.setTables(List.of(
+            schemaTable("hr", "employees", "salary", "numeric", "email", "varchar"),
+            schemaTable("finance", "ledger", "amount", "numeric", "account_code", "varchar")
+        ));
+        when(schemaScannerService.scanSchema("conn-hr")).thenReturn(schema);
+        lenient().when(tableClassificationRepository.findLatestByConnectionIdOrderByTableNameAsc("conn-hr"))
+            .thenReturn(List.of());
+
+        PolicyPreviewResponse preview = service.previewPolicy(
+            "conn-hr",
+            "This user should have access only to schema hr. The user cannot query numeric salary columns."
+        );
+
+        assertThat(preview.getImpactedColumns())
+            .contains("hr.employees.salary")
+            .doesNotContain("finance.ledger.amount", "hr.employees.email");
+    }
+
+    @Test
+    void previewPolicy_typeOnlyConstraintIsStillSchemaScoped() throws SQLException {
+        SchemaMetadata schema = new SchemaMetadata();
+        schema.setTables(List.of(
+            schemaTable("finance", "ledger", "amount", "numeric", "account_code", "varchar"),
+            schemaTable("sales", "orders", "amount", "numeric", "status", "varchar")
+        ));
+        when(schemaScannerService.scanSchema("conn-fin")).thenReturn(schema);
+        lenient().when(tableClassificationRepository.findLatestByConnectionIdOrderByTableNameAsc("conn-fin"))
+            .thenReturn(List.of());
+
+        PolicyPreviewResponse preview = service.previewPolicy(
+            "conn-fin",
+            "Access only to schema finance. Redact numeric columns."
+        );
+
+        assertThat(preview.getImpactedColumns())
+            .contains("finance.ledger.amount")
+            .doesNotContain("sales.orders.amount", "finance.ledger.account_code");
+    }
+
+    @Test
+    void previewPolicy_collapsesWhitespaceInDenyClauses() throws SQLException {
+        SchemaMetadata schema = new SchemaMetadata();
+        schema.setTables(List.of(
+            schemaTable("marts", "fct_enrollment", "amount", "numeric", "currency", "varchar")
+        ));
+        when(schemaScannerService.scanSchema("conn-ws")).thenReturn(schema);
+        lenient().when(tableClassificationRepository.findLatestByConnectionIdOrderByTableNameAsc("conn-ws"))
+            .thenReturn(List.of());
+
+        PolicyPreviewResponse preview = service.previewPolicy(
+            "conn-ws",
+            "Access only to schema marts. The user cannot    query    float   amount   columns."
+        );
+
+        assertThat(preview.getImpactedColumns()).contains("marts.fct_enrollment.amount");
+    }
+
+    @Test
     void previewPolicy_resolvesExplicitTableAndColumnMentions() {
         PolicyPreviewResponse preview = service.previewPolicy(
             "conn-1",
@@ -99,14 +190,17 @@ class ConnectionChatAccessPolicyServiceTest {
         assertThat(preview.getImpactedColumns()).contains("customer_profiles.email");
     }
 
-    private TableMetadata table(String name, String... columns) {
+    private TableMetadata schemaTable(String schema, String name, String... columnSpecs) {
         TableMetadata table = new TableMetadata();
+        table.setSchema(schema);
         table.setName(name);
-        table.setColumns(
-            java.util.Arrays.stream(columns)
-                .map(column -> new ColumnMetadata(column, "varchar", null, true, false, null, 0))
-                .toList()
-        );
+        java.util.List<ColumnMetadata> columnMetadata = new java.util.ArrayList<>();
+        for (int i = 0; i < columnSpecs.length; i += 2) {
+            String columnName = columnSpecs[i];
+            String dataType = i + 1 < columnSpecs.length ? columnSpecs[i + 1] : "varchar";
+            columnMetadata.add(new ColumnMetadata(columnName, dataType, null, true, false, null, 0));
+        }
+        table.setColumns(columnMetadata);
         return table;
     }
 

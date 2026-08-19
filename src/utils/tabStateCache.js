@@ -10,11 +10,11 @@ const TAB_STATE_VERSION = 1
 const SCHEMA_CACHE_PREFIX = 'schema-objects'
 const SCHEMA_CACHE_TTL_MS = 30 * 60 * 1000  // 30 minutes
 
-export function saveSchemaCache(connectionId, objects) {
+export function saveSchemaCache(connectionId, objects, username = '') {
     if (!connectionId || !Array.isArray(objects)) return
     try {
         localStorage.setItem(
-            `${SCHEMA_CACHE_PREFIX}-${connectionId}`,
+            schemaCacheKey(connectionId, username),
             JSON.stringify({ timestamp: Date.now(), objects })
         )
     } catch (e) {
@@ -22,10 +22,10 @@ export function saveSchemaCache(connectionId, objects) {
     }
 }
 
-export function loadSchemaCache(connectionId) {
+export function loadSchemaCache(connectionId, username = '') {
     if (!connectionId) return null
     try {
-        const raw = localStorage.getItem(`${SCHEMA_CACHE_PREFIX}-${connectionId}`)
+        const raw = localStorage.getItem(schemaCacheKey(connectionId, username))
         if (!raw) return null
         const { timestamp, objects } = JSON.parse(raw)
         if (Date.now() - timestamp > SCHEMA_CACHE_TTL_MS) return null  // stale
@@ -35,9 +35,13 @@ export function loadSchemaCache(connectionId) {
     }
 }
 
-export function clearSchemaCache(connectionId) {
+export function clearSchemaCache(connectionId, username = '') {
     if (!connectionId) return
-    localStorage.removeItem(`${SCHEMA_CACHE_PREFIX}-${connectionId}`)
+    localStorage.removeItem(schemaCacheKey(connectionId, username))
+}
+
+function schemaCacheKey(connectionId, username) {
+    return `${SCHEMA_CACHE_PREFIX}-${connectionId}-${username || 'anon'}`
 }
 
 /**
