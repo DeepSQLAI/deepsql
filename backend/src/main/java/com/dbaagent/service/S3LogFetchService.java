@@ -186,11 +186,27 @@ public class S3LogFetchService {
 
     private static final int MAX_PRESIGNED_REDIRECTS = 5;
 
+    private boolean isAllowedPresignedHost(String host) {
+        if (host == null || host.isBlank()) {
+            return false;
+        }
+        String normalized = host.toLowerCase(java.util.Locale.ROOT);
+        return normalized.equals("s3.amazonaws.com")
+            || normalized.endsWith(".s3.amazonaws.com")
+            || normalized.matches(".*\\.s3\\.[a-z0-9-]+\\.amazonaws\\.com")
+            || normalized.matches(".*\\.s3-[a-z0-9-]+\\.amazonaws\\.com")
+            || normalized.equals("s3.amazonaws.com.cn")
+            || normalized.endsWith(".s3.amazonaws.com.cn")
+            || normalized.matches(".*\\.s3\\.[a-z0-9-]+\\.amazonaws\\.com\\.cn")
+            || normalized.matches(".*\\.s3-[a-z0-9-]+\\.amazonaws\\.com\\.cn");
+    }
+
     /**
      * Validates and rebuilds a presigned fetch URL: https only, to a public
-     * address. Returns a URI reconstructed from checked components rather than
-     * the input, so no unvalidated part of the caller's string survives into
-     * the request (java/ssrf). The initial URL and every redirect hop pass here.
+     * address, and restricted to known S3 endpoint host patterns. Returns a URI
+     * reconstructed from checked components rather than the input, so no
+     * unvalidated part of the caller's string survives into the request
+     * (java/ssrf). The initial URL and every redirect hop pass here.
      */
     private URI assertFetchableUrl(URI uri) {
         String scheme = uri.getScheme();
@@ -201,6 +217,9 @@ public class S3LogFetchService {
         String host = uri.getHost();
         if (host == null || host.isBlank()) {
             throw new IllegalArgumentException("Presigned log URL has no host");
+        }
+        if (!isAllowedPresignedHost(host)) {
+            throw new IllegalArgumentException("Presigned log URL host is not an allowed S3 endpoint");
         }
         java.net.InetAddress blocked =
             OutboundHostGuard.findBlockedAddress(OutboundHostGuard.normalize(host));
