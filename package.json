@@ -20,7 +20,7 @@
     "axios": "^1.13.2",
     "docker": "^1.0.0",
     "html2canvas": "^1.4.1",
-    "jspdf": "^3.0.4",
+    "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.2",
     "lucide-react": "^0.562.0",
     "papaparse": "^5.5.3",
