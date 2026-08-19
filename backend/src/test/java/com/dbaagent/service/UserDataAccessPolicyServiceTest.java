@@ -140,6 +140,71 @@ class UserDataAccessPolicyServiceTest {
         assertThat(exception.getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
     }
 
+    private ConnectionChatAccessPolicyService.EffectivePolicy martsOnlyPolicy() {
+        return new ConnectionChatAccessPolicyService.EffectivePolicy(
+            true, "conn-1", "analyst",
+            Set.of(), Set.of(), Set.of(), Set.of("marts"),
+            true, true, "Only schema marts", List.of(), List.of()
+        );
+    }
+
+    private UserDataAccessPolicyException assertSchemaScopeBlocks(String sql) {
+        ConnectionChatAccessPolicyService.EffectivePolicy schemaPolicy = martsOnlyPolicy();
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(schemaPolicy);
+        lenient().when(policyService.buildProtectionDescriptors(schemaPolicy)).thenReturn(Map.of());
+        return assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest(sql, null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+            )
+        );
+    }
+
+    // The schema allowlist walked only FROM and JOIN, so a forbidden schema
+    // reached through any other syntax position was never enumerated and the
+    // allowlist silently permitted it.
+
+    @Test
+    void enforcePreExecution_blocksForbiddenSchemaInsideWhereSubquery() {
+        assertThat(assertSchemaScopeBlocks(
+            "SELECT id FROM marts.orders WHERE total = (SELECT MAX(salary) FROM hr.salaries)"
+        ).getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
+    }
+
+    @Test
+    void enforcePreExecution_blocksForbiddenSchemaInUnionBranch() {
+        assertThat(assertSchemaScopeBlocks(
+            "SELECT id FROM marts.orders UNION ALL SELECT ssn FROM hr.salaries"
+        ).getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
+    }
+
+    // The same fail-open gate skipped protected-column inspection entirely, so a
+    // UNION reached restricted columns even inside an allowed schema.
+    @Test
+    void enforcePreExecution_blocksProtectedColumnsInUnionBranch() {
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy());
+
+        UserDataAccessPolicyException exception = assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest("SELECT 1 AS x UNION ALL SELECT email FROM customer_profiles", null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo("POLICY_SQL_BLOCKED");
+    }
+
+    @Test
+    void enforcePreExecution_blocksForbiddenSchemaInsideCte() {
+        assertThat(assertSchemaScopeBlocks(
+            "WITH leaked AS (SELECT ssn FROM hr.salaries) SELECT * FROM leaked"
+        ).getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
+    }
+
     @Test
     void enforcePreExecution_allowsMartsQueriesWhenOtherSchemasHaveProtectedColumns() {
         ConnectionChatAccessPolicyService.EffectivePolicy schemaPolicy = new ConnectionChatAccessPolicyService.EffectivePolicy(

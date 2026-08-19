@@ -25,6 +25,9 @@ import net.sf.jsqlparser.statement.select.Join;
 import net.sf.jsqlparser.statement.select.ParenthesedSelect;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
+import net.sf.jsqlparser.statement.select.SetOperationList;
+import net.sf.jsqlparser.statement.select.WithItem;
+import net.sf.jsqlparser.util.TablesNamesFinder;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -117,9 +120,18 @@ public class UserDataAccessPolicyService {
 
         try {
             Statement parsed = CCJSqlParserUtil.parse(queryRequest.getQuery());
-            if (parsed instanceof Select select && select.getPlainSelect() != null) {
-                enforceAllowedSchemas(select.getPlainSelect(), policy.allowedSchemas());
-                QueryInspection inspection = inspectPlainSelect(select.getPlainSelect(), protectedObjects);
+            if (parsed instanceof Select select) {
+                // Enumerate over the WHOLE statement, not just FROM/JOIN of the
+                // outermost PlainSelect. An allowlist is only sound if the walk is
+                // total: any node left unvisited is implicitly permitted, which is
+                // how a subquery, UNION branch, or CTE body reached a schema
+                // outside the caller's scope.
+                enforceAllowedSchemas(parsed, policy.allowedSchemas());
+                // Likewise inspect every branch. Gating this on getPlainSelect()
+                // != null skipped protection entirely for a SetOperationList,
+                // because a UNION's body is not a PlainSelect.
+                for (PlainSelect branch : collectPlainSelects(select)) {
+                QueryInspection inspection = inspectPlainSelect(branch, protectedObjects);
                 if (inspection.selectsWildcardFromProtectedTable || inspection.rawProtectedColumnsSelected) {
                     logPolicyEvent(SecurityEventType.CHAT_ACCESS_POLICY_BLOCKED, executionContext.actorUsername(), connectionId, "sql_blocked", Map.of(
                         "query", truncate(queryRequest.getQuery()),
@@ -131,6 +143,7 @@ public class UserDataAccessPolicyService {
                         "This query would return restricted data for your account, so DeepSQL blocked it before execution.",
                         "POLICY_SQL_BLOCKED"
                     );
+                }
                 }
             }
         } catch (UserDataAccessPolicyException e) {
@@ -324,16 +337,67 @@ public class UserDataAccessPolicyService {
         return policy.impactedTables().stream().anyMatch(table -> normalized.contains(table.toLowerCase(Locale.ROOT)));
     }
 
-    private void enforceAllowedSchemas(PlainSelect select, Set<String> allowedSchemas) {
+    /**
+     * Collects every PlainSelect in a statement: the top level, each branch of a
+     * set operation (UNION/INTERSECT/EXCEPT), parenthesised selects, and every
+     * CTE body. Callers that inspect only the outermost select leave the rest
+     * unprotected.
+     */
+    private List<PlainSelect> collectPlainSelects(Select select) {
+        List<PlainSelect> found = new ArrayList<>();
+        collectPlainSelects(select, found);
+        return found;
+    }
+
+    private void collectPlainSelects(Select select, List<PlainSelect> found) {
+        if (select == null) {
+            return;
+        }
+        if (select.getWithItemsList() != null) {
+            for (WithItem<?> item : select.getWithItemsList()) {
+                if (item != null) {
+                    collectPlainSelects(item.getSelect(), found);
+                }
+            }
+        }
+        if (select instanceof PlainSelect plain) {
+            found.add(plain);
+        } else if (select instanceof SetOperationList setOps) {
+            if (setOps.getSelects() != null) {
+                for (Select branch : setOps.getSelects()) {
+                    collectPlainSelects(branch, found);
+                }
+            }
+        } else if (select instanceof ParenthesedSelect parenthesed) {
+            collectPlainSelects(parenthesed.getSelect(), found);
+        }
+    }
+
+    /**
+     * Enforces the schema allowlist over every table reference in the statement.
+     *
+     * Uses JSqlParser's TablesNamesFinder rather than a hand-rolled walk of
+     * FROM and JOIN. The distinction is the whole fix: enumeration has to be
+     * exhaustive by construction, because an allowlist implemented as a partial
+     * walk implicitly permits every syntax position the walker forgot -- here a
+     * subquery in WHERE/HAVING/SELECT, a UNION branch, and a CTE body.
+     *
+     * Bare (unqualified) names stay unchecked, exactly as before: they resolve
+     * through the session search_path, and CTE names are not tables at all.
+     */
+    private void enforceAllowedSchemas(Statement statement, Set<String> allowedSchemas) {
         if (allowedSchemas == null || allowedSchemas.isEmpty()) {
             return;
         }
-        Map<String, String> aliasToTable = buildAliasMap(select);
         Set<String> referencedSchemas = new LinkedHashSet<>();
-        collectReferencedSchemas(select.getFromItem(), aliasToTable, referencedSchemas);
-        if (select.getJoins() != null) {
-            for (Join join : select.getJoins()) {
-                collectReferencedSchemas(join.getRightItem(), aliasToTable, referencedSchemas);
+        for (String qualifiedName : new TablesNamesFinder<>().getTables(statement)) {
+            if (qualifiedName == null) {
+                continue;
+            }
+            String[] parts = qualifiedName.split("\\.");
+            if (parts.length >= 2) {
+                // db.schema.table and schema.table both put the schema second-to-last.
+                referencedSchemas.add(parts[parts.length - 2]);
             }
         }
         for (String schema : referencedSchemas) {
@@ -342,20 +406,6 @@ public class UserDataAccessPolicyService {
                     "This query references schema '" + schema + "' which is outside your allowed schema scope.",
                     "POLICY_SCHEMA_BLOCKED"
                 );
-            }
-        }
-    }
-
-    private void collectReferencedSchemas(FromItem fromItem, Map<String, String> aliasToTable, Set<String> schemas) {
-        if (fromItem instanceof Table table) {
-            String schema = table.getSchemaName();
-            if (schema != null && !schema.isBlank()) {
-                schemas.add(schema);
-                return;
-            }
-            String qualified = aliasToTable.get(normalizeName(table.getName()));
-            if (qualified != null && qualified.contains(".")) {
-                schemas.add(qualified.substring(0, qualified.indexOf('.')));
             }
         }
     }
