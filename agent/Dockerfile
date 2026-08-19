@@ -44,8 +44,24 @@ ARG AGENT_RUNTIME_REF=main
 ARG AGENT_API_REPO=https://github.com/nesquena/hermes-webui.git
 ARG AGENT_API_REF=master
 
-# Runtime engine (Python agent)
-RUN git clone --depth 1 --branch "${AGENT_RUNTIME_REF}" "${AGENT_RUNTIME_REPO}" runtime \
+# Runtime engine (Python agent).
+#
+# The clone retries with backoff. github.com rate-limits *unauthenticated*
+# requests per source IP, and CI runners share pooled egress addresses, so a
+# cold clone here intermittently returns HTTP 429 and took the whole image
+# build down with it (`fatal: unable to access ...: error: 429`, exit 128 --
+# 2 of 15 `docker compose build` runs). This is not CI-only defensiveness: a
+# self-host user behind a shared NAT hits the identical refusal. Retry is the
+# right layer precisely because the condition is transient; the loop still
+# exits non-zero and loudly on the last attempt rather than continuing with no
+# runtime cloned.
+RUN n=0; rm -rf runtime; \
+    until git clone --depth 1 --branch "${AGENT_RUNTIME_REF}" "${AGENT_RUNTIME_REPO}" runtime; do \
+      n=$((n+1)); \
+      if [ "$n" -ge 5 ]; then echo "FATAL: clone of ${AGENT_RUNTIME_REPO} failed after 5 attempts" >&2; exit 1; fi; \
+      echo "clone attempt $n failed (HTTP 429 / transient network); retrying in $((n*15))s" >&2; \
+      rm -rf runtime; sleep $((n*15)); \
+    done \
     && cd runtime \
     && UV_NO_CONFIG=1 uv sync \
     && if [ -d .venv ] && [ ! -d venv ]; then ln -sfn .venv venv; fi \
@@ -56,8 +72,18 @@ RUN git clone --depth 1 --branch "${AGENT_RUNTIME_REF}" "${AGENT_RUNTIME_REPO}" 
 
 # HTTP API surface the frontend / backend talk to (:8787).
 # Default branch is master (not main). Fall back to HEAD if the ref moves.
-RUN (git clone --depth 1 --branch "${AGENT_API_REF}" "${AGENT_API_REPO}" api \
-      || git clone --depth 1 "${AGENT_API_REPO}" api) \
+#
+# Same 429 retry as the runtime clone above. Note the inner `||` fallback
+# handles only a *moved ref*; on a rate-limit it just re-issues the same
+# refused request, so it needed the outer retry to be any use at all.
+RUN n=0; rm -rf api; \
+    until (git clone --depth 1 --branch "${AGENT_API_REF}" "${AGENT_API_REPO}" api \
+            || git clone --depth 1 "${AGENT_API_REPO}" api); do \
+      n=$((n+1)); \
+      if [ "$n" -ge 5 ]; then echo "FATAL: clone of ${AGENT_API_REPO} failed after 5 attempts" >&2; exit 1; fi; \
+      echo "clone attempt $n failed (HTTP 429 / transient network); retrying in $((n*15))s" >&2; \
+      rm -rf api; sleep $((n*15)); \
+    done \
     && cd api \
     && if [ -f requirements.txt ]; then \
          UV_NO_CONFIG=1 uv pip install --python /opt/deepsql-agent/runtime/venv/bin/python -r requirements.txt; \
