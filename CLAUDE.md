@@ -235,6 +235,21 @@ returns a number).
    `hermes_requires <0.20.0` on a "verified" 401 that came from a hand-rolled
    `hermes serve` run rather than `hermes webui`. 0.20.0 works. Verify against the
    real start path before writing a version constraint.
+5. **The agent image build clones two third-party repos over the public internet,
+   unauthenticated.** `agent/Dockerfile` fetches `NousResearch/hermes-agent` and
+   `nesquena/hermes-webui` at build time. GitHub rate-limits unauthenticated
+   requests *per source IP*, and Actions runners share pooled egress addresses, so
+   `docker compose build` intermittently died on `fatal: unable to access ...: The
+   requested URL returned error: 429` (exit 128) — 2 of 15 runs, always on branches
+   whose diff had nothing to do with the agent. Both clones now retry 5x with
+   backoff, and still print FATAL and exit 1 on exhaustion so a genuinely dead
+   upstream cannot yield an image with no runtime in it. Two lessons worth keeping:
+   a CI failure that is *intermittent and unrelated to the diff* is a network or
+   rate-limit signature, not a code defect — read the log before bisecting the
+   branch; and the webui clone's pre-existing `|| git clone` fallback looked like
+   resilience but only ever handled a *moved ref*, re-issuing the identical refused
+   request against a 429. A fallback that fails the same way as the thing it backs
+   up is not a fallback.
 
 ### Verification Anti-Patterns (do not repeat)
 
