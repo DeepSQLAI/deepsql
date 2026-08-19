@@ -40,14 +40,22 @@ public class ConnectionChatAccessPolicyService {
         "access\\s+only\\s+to\\s+(?:schema\\s+)?([a-z_][a-z0-9_]*)",
         Pattern.CASE_INSENSITIVE
     );
-    private static final Pattern DENY_CLAUSE_PATTERN = Pattern.compile(
-        "(?:cannot|can't|must not|do not|don't|never)\\s+(?:query|access|see|select|read|use|return|expose)\\s+(.+?)(?=\\s+(?:but|except|however|strictly)\\b|[.;]|$)"
-            + "|(?:redact|block|deny|hide)\\s+(.+?)(?=\\s+(?:but|except|however)\\b|[.;]|$)",
-        Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+    // Prefix-only: remainder is sliced linearly in extractConstraints so we never
+    // run `.+?` + `\s+` lookaheads on untrusted policy text (ReDoS / CodeQL).
+    private static final Pattern DENY_PREFIX_PATTERN = Pattern.compile(
+        "(?:cannot|can't|must not|do not|don't|never) (?:query|access|see|select|read|use|return|expose) "
+            + "|(?:redact|block|deny|hide) ",
+        Pattern.CASE_INSENSITIVE
     );
-    private static final Pattern ALLOW_CLAUSE_PATTERN = Pattern.compile(
-        "(?:but\\s+|except(?:\\s+that)?\\s+)?\\bcan\\s+(?:query|access|see|select|read|use|return)\\s+(.+?)(?=\\s+(?:strictly)\\b|[.;]|$)",
-        Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+    private static final Pattern ALLOW_PREFIX_PATTERN = Pattern.compile(
+        "(?:but |except(?: that)? )?\\bcan (?:query|access|see|select|read|use|return) ",
+        Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern DENY_STOP_PATTERN = Pattern.compile(
+        " (?:but|except|however|strictly)\\b|[.;]"
+    );
+    private static final Pattern ALLOW_STOP_PATTERN = Pattern.compile(
+        " (?:strictly)\\b|[.;]"
     );
     private static final List<TypeFamily> TYPE_FAMILIES = List.of(
         new TypeFamily("integer", Set.of("int", "integer", "bigint", "smallint", "tinyint", "serial", "bigserial", "int2", "int4", "int8")),
@@ -418,8 +426,8 @@ public class ConnectionChatAccessPolicyService {
         Set<String> deniedColumns
     ) {
         Set<String> knownColumnNames = collectColumnNames(schemaMetadata, allowedSchemas);
-        List<ColumnConstraint> denials = extractConstraints(normalized, DENY_CLAUSE_PATTERN, knownColumnNames);
-        List<ColumnConstraint> allowances = extractConstraints(normalized, ALLOW_CLAUSE_PATTERN, knownColumnNames);
+        List<ColumnConstraint> denials = extractConstraints(normalized, DENY_PREFIX_PATTERN, DENY_STOP_PATTERN, knownColumnNames);
+        List<ColumnConstraint> allowances = extractConstraints(normalized, ALLOW_PREFIX_PATTERN, ALLOW_STOP_PATTERN, knownColumnNames);
         if (denials.isEmpty()) {
             return;
         }
@@ -439,24 +447,31 @@ public class ConnectionChatAccessPolicyService {
         }
     }
 
-    private List<ColumnConstraint> extractConstraints(String normalized, Pattern clausePattern, Set<String> knownColumnNames) {
+    private List<ColumnConstraint> extractConstraints(
+        String normalized,
+        Pattern prefixPattern,
+        Pattern stopPattern,
+        Set<String> knownColumnNames
+    ) {
         List<ColumnConstraint> constraints = new ArrayList<>();
-        Matcher matcher = clausePattern.matcher(normalized);
+        String haystack = normalized == null ? "" : normalized.replaceAll("\\s+", " ").trim();
+        Matcher matcher = prefixPattern.matcher(haystack);
         while (matcher.find()) {
-            String snippet = firstNonBlank(matcher);
-            if (snippet == null) {
+            String snippet = sliceUntilStop(haystack, matcher.end(), stopPattern);
+            if (snippet == null || snippet.isBlank()) {
                 continue;
             }
+            String lowered = snippet.toLowerCase(Locale.ROOT);
             LinkedHashSet<String> typeKeys = new LinkedHashSet<>();
             for (TypeFamily family : TYPE_FAMILIES) {
-                if (family.mentionedIn(snippet)) {
+                if (family.mentionedIn(lowered)) {
                     typeKeys.add(family.key());
                 }
             }
             LinkedHashSet<String> nameTokens = new LinkedHashSet<>();
             knownColumnNames.stream()
                 .sorted((left, right) -> Integer.compare(right.length(), left.length()))
-                .filter(name -> containsWholeWord(snippet, name))
+                .filter(name -> containsWholeWord(lowered, name))
                 .forEach(nameTokens::add);
             if (!typeKeys.isEmpty() || !nameTokens.isEmpty()) {
                 constraints.add(new ColumnConstraint(typeKeys, nameTokens));
@@ -488,14 +503,15 @@ public class ConnectionChatAccessPolicyService {
         return TYPE_FAMILIES.stream().anyMatch(family -> family.aliases().contains(name) || family.key().equals(name));
     }
 
-    private String firstNonBlank(Matcher matcher) {
-        for (int i = 1; i <= matcher.groupCount(); i++) {
-            String group = matcher.group(i);
-            if (group != null && !group.isBlank()) {
-                return group.toLowerCase(Locale.ROOT);
-            }
+    private String sliceUntilStop(String haystack, int start, Pattern stopPattern) {
+        if (start >= haystack.length()) {
+            return "";
         }
-        return null;
+        Matcher stop = stopPattern.matcher(haystack);
+        if (stop.find(start)) {
+            return haystack.substring(start, stop.start()).trim();
+        }
+        return haystack.substring(start).trim();
     }
 
     private boolean containsWholeWord(String haystack, String needle) {

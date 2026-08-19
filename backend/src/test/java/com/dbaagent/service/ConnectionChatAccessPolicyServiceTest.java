@@ -160,6 +160,24 @@ class ConnectionChatAccessPolicyServiceTest {
     }
 
     @Test
+    void previewPolicy_collapsesWhitespaceInDenyClauses() throws SQLException {
+        SchemaMetadata schema = new SchemaMetadata();
+        schema.setTables(List.of(
+            schemaTable("marts", "fct_enrollment", "amount", "numeric", "currency", "varchar")
+        ));
+        when(schemaScannerService.scanSchema("conn-ws")).thenReturn(schema);
+        lenient().when(tableClassificationRepository.findLatestByConnectionIdOrderByTableNameAsc("conn-ws"))
+            .thenReturn(List.of());
+
+        PolicyPreviewResponse preview = service.previewPolicy(
+            "conn-ws",
+            "Access only to schema marts. The user cannot    query    float   amount   columns."
+        );
+
+        assertThat(preview.getImpactedColumns()).contains("marts.fct_enrollment.amount");
+    }
+
+    @Test
     void previewPolicy_resolvesExplicitTableAndColumnMentions() {
         PolicyPreviewResponse preview = service.previewPolicy(
             "conn-1",
