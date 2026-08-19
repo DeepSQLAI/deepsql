@@ -11,6 +11,9 @@ public class QueryRequest {
     private Integer timeoutSeconds; // Optional per-query timeout override (null = use server default)
     private QueryExecutionOrigin executionOrigin = QueryExecutionOrigin.INTERNAL;
     private Boolean mutationConfirmed = Boolean.FALSE;
+    // Client-generated id for this run, used to cancel the query if the caller
+    // gives up before it finishes.
+    private String executionId;
 
     public QueryRequest(String query, Integer limit, Integer timeoutSeconds) {
         this.query = query;

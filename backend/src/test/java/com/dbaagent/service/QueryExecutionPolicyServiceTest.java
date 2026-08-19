@@ -4,6 +4,7 @@ import com.dbaagent.model.QueryRequest;
 import com.dbaagent.provider.DatabaseProviderRegistry;
 import com.dbaagent.provider.api.DatabaseDialect;
 import com.dbaagent.provider.api.QueryExecutionProvider;
+import com.dbaagent.provider.mysql.MySQLQueryExecutionProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,16 +24,20 @@ class QueryExecutionPolicyServiceTest {
 
     @Mock private DatabaseProviderRegistry providerRegistry;
     @Mock private DatabaseDialect databaseDialect;
-    @Mock private QueryExecutionProvider queryExecutionProvider;
 
     private QueryExecutionPolicyService service;
 
     @BeforeEach
     void setUp() {
+        // The real provider, not a stub. A stubbed isReadOnlyQuery() that always
+        // answered "false" made these tests assert the opposite of production:
+        // MySQLQueryExecutionProvider reports anything starting with WITH as
+        // read-only, which is how `WITH x AS (DELETE ...) SELECT` reached the
+        // database classified as a read.
+        QueryExecutionProvider realProvider = new MySQLQueryExecutionProvider();
         when(providerRegistry.getDialect(anyString())).thenReturn(databaseDialect);
-        when(databaseDialect.queryExecution()).thenReturn(queryExecutionProvider);
+        when(databaseDialect.queryExecution()).thenReturn(realProvider);
         lenient().when(providerRegistry.getCanonicalName(anyString())).thenReturn("mysql");
-        lenient().when(queryExecutionProvider.isReadOnlyQuery(anyString())).thenReturn(false);
         service = new QueryExecutionPolicyService(providerRegistry);
     }
 
@@ -295,5 +300,159 @@ class QueryExecutionPolicyServiceTest {
 
         assertThat(decision.mutating()).isTrue();
         assertThat(decision.primaryQueryType()).isEqualTo("TRUNCATE");
+    }
+
+    // --- Writes hidden inside a statement that reads as a SELECT ---------------
+    // PostgreSQL executes data-modifying CTEs, and the parser models them as a
+    // Select. Each of these deleted or rewrote a whole table from a non-admin
+    // account before the classifier learned to look inside.
+
+    private QueryExecutionPolicyException assertBlockedForViewer(String sql) {
+        return assertThrows(
+            QueryExecutionPolicyException.class,
+            () -> service.enforce(
+                new QueryRequest(sql, null, null),
+                QueryExecutionContext.editor("viewer", false, false),
+                "postgresql"
+            )
+        );
+    }
+
+    @Test
+    void cteDelete_isBlockedForNonAdmin() {
+        QueryExecutionPolicyException e =
+            assertBlockedForViewer("WITH x AS (DELETE FROM orders RETURNING *) SELECT * FROM x");
+        assertThat(e.getErrorCode()).isEqualTo(QueryExecutionPolicyException.EDITOR_MUTATION_FORBIDDEN);
+    }
+
+    @Test
+    void cteUpdate_isBlockedForNonAdmin() {
+        assertBlockedForViewer("WITH u AS (UPDATE orders SET total = 0 RETURNING *) SELECT * FROM u");
+    }
+
+    @Test
+    void cteInsert_isBlockedForNonAdmin() {
+        assertBlockedForViewer("WITH i AS (INSERT INTO audit(id) VALUES (1) RETURNING *) SELECT * FROM i");
+    }
+
+    @Test
+    void cteWriteInLaterPosition_isBlockedForNonAdmin() {
+        assertBlockedForViewer(
+            "WITH a AS (SELECT 1), b AS (DELETE FROM orders RETURNING *) SELECT * FROM a");
+    }
+
+    @Test
+    void nestedCteWrite_isBlockedForNonAdmin() {
+        assertBlockedForViewer(
+            "WITH o AS (WITH i AS (DELETE FROM orders RETURNING *) SELECT * FROM i) SELECT * FROM o");
+    }
+
+    @Test
+    void selectInto_isBlockedForNonAdmin() {
+        assertBlockedForViewer("SELECT * INTO exfiltrated FROM customers");
+    }
+
+    @Test
+    void cteWrite_requiresConfirmationForAdmin() {
+        QueryExecutionPolicyException e = assertThrows(
+            QueryExecutionPolicyException.class,
+            () -> service.enforce(
+                new QueryRequest("WITH x AS (DELETE FROM orders RETURNING *) SELECT * FROM x", null, null),
+                QueryExecutionContext.editor("admin", true, false),
+                "postgresql"
+            )
+        );
+        assertThat(e.getErrorCode())
+            .isEqualTo(QueryExecutionPolicyException.EDITOR_MUTATION_CONFIRMATION_REQUIRED);
+    }
+
+    @Test
+    void cteWrite_isAllowedForConfirmedAdmin() {
+        QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
+            new QueryRequest("WITH x AS (DELETE FROM orders RETURNING *) SELECT * FROM x", null, null),
+            QueryExecutionContext.editor("admin", true, true),
+            "postgresql"
+        );
+        assertThat(decision.mutating()).isTrue();
+    }
+
+    // --- The guard must not swallow legitimate reads --------------------------
+
+    @Test
+    void readOnlyCte_remainsAllowedForNonAdmin() {
+        QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
+            new QueryRequest("WITH recent AS (SELECT * FROM orders LIMIT 10) SELECT * FROM recent", null, null),
+            QueryExecutionContext.editor("viewer", false, false),
+            "postgresql"
+        );
+        assertThat(decision.mutating()).isFalse();
+        assertThat(decision.primaryQueryType()).isEqualTo("SELECT");
+    }
+
+    @Test
+    void writeKeywordInsideStringLiteral_isStillAReadForNonAdmin() {
+        QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
+            new QueryRequest("SELECT 'WITH x AS (DELETE FROM t)' AS example", null, null),
+            QueryExecutionContext.editor("viewer", false, false),
+            "postgresql"
+        );
+        assertThat(decision.mutating()).isFalse();
+    }
+
+    @Test
+    void writeKeywordInsideComment_isStillAReadForNonAdmin() {
+        QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
+            new QueryRequest("SELECT 1 -- WITH x AS (DELETE FROM t)\n", null, null),
+            QueryExecutionContext.editor("viewer", false, false),
+            "postgresql"
+        );
+        assertThat(decision.mutating()).isFalse();
+    }
+
+    @Test
+    void hiddenWriteScan_staysLinearOnAdversarialInput() {
+        // The text backstop used a lazy wildcard (\bSELECT\b[\s\S]*?\bINTO)
+        // and a regex block-comment strip, both of which backtracked
+        // quadratically: 224KB of repeated "SELECT " burned ~44s of CPU inside
+        // the guard, before the query ever reached the database. Any
+        // authenticated Editor user could stall a request thread with it.
+        String repeatedSelect = "SELECT " + "SELECT ".repeat(32_000);
+        String unterminatedBlockComment = "SELECT 1 /*" + "a/*".repeat(32_000);
+
+        for (String hostile : List.of(repeatedSelect, unterminatedBlockComment)) {
+            long startedAt = System.currentTimeMillis();
+            service.enforce(
+                new QueryRequest(hostile, null, null),
+                QueryExecutionContext.editor("viewer", false, false),
+                "postgresql"
+            );
+            long elapsed = System.currentTimeMillis() - startedAt;
+            assertThat(elapsed)
+                .as("classification of a %d char statement must not backtrack", hostile.length())
+                .isLessThan(5_000L);
+        }
+    }
+
+    @Test
+    void insertIntoSelect_isNotMisreadAsSelectInto() {
+        // SELECT_INTO_PATTERN matches a bare INTO target now that the SELECT
+        // prefix is gone, so the caller must gate it on the statement actually
+        // reading as a SELECT.
+        QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
+            new QueryRequest("INSERT INTO archive SELECT * FROM orders", null, null),
+            QueryExecutionContext.editor("admin", true, true),
+            "postgresql"
+        );
+        assertThat(decision.primaryQueryType()).isEqualTo("INSERT");
+    }
+
+    @Test
+    void insertIntoSelect_isStillClassifiedAsInsert() {
+        QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
+            new QueryRequest("INSERT INTO archive SELECT * FROM orders", null, null),
+            QueryExecutionContext.editor("admin", true, true),
+            "postgresql"
+        );
+        assertThat(decision.primaryQueryType()).isEqualTo("INSERT");
     }
 }

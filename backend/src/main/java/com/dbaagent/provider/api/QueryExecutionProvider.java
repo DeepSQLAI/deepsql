@@ -51,4 +51,16 @@ public interface QueryExecutionProvider {
      * @return The query signature
      */
     String generateQuerySignature(String query);
+
+    /**
+     * SQL returning the server-side session id of the current connection, in the
+     * form accepted by this dialect's kill statement. Callers use it to cancel a
+     * still-running query after the client has gone away.
+     *
+     * @return a single-column, single-row query, or null when the dialect has no
+     *         session identifier we can act on
+     */
+    default String getSessionPidQuery() {
+        return null;
+    }
 }

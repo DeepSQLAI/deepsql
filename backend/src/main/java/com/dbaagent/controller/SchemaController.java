@@ -6,7 +6,9 @@ import com.dbaagent.service.ClientContext;
 import com.dbaagent.service.CredentialService;
 import com.dbaagent.service.QueryExecutionContext;
 import com.dbaagent.service.QueryExecutionPolicyException;
+import com.dbaagent.service.ActiveQueryService;
 import com.dbaagent.service.QueryExecutorService;
+import com.dbaagent.service.RunningQueryRegistry;
 import com.dbaagent.service.SqlExecutionAuditService;
 import com.dbaagent.service.UserDataAccessPolicyException;
 import com.dbaagent.service.UserDataAccessPolicyService;
@@ -38,6 +40,8 @@ public class SchemaController {
     private final AccessControlService accessControlService;
     private final SqlExecutionAuditService sqlExecutionAuditService;
     private final UserDataAccessPolicyService userDataAccessPolicyService;
+    private final RunningQueryRegistry runningQueryRegistry;
+    private final ActiveQueryService activeQueryService;
 
     @PostMapping("/scan")
     public ResponseEntity<Map<String, Object>> scanSchema(@PathVariable String connectionId) {
@@ -261,6 +265,63 @@ public class SchemaController {
                 .client(client));
             response.put("success", false);
             response.put("message", "Query execution failed: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+
+    /**
+     * Terminates a query this caller started but abandoned. Aborting the HTTP
+     * request only closes the socket — the statement keeps running and holds a
+     * pooled connection until it finishes, so the client must ask for it to stop.
+     */
+    @PostMapping("/query/{executionId}/cancel")
+    public ResponseEntity<Map<String, Object>> cancelQuery(
+            @PathVariable String connectionId,
+            @PathVariable String executionId) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            if (!credentialService.connectionExists(connectionId)) {
+                response.put("success", false);
+                response.put("message", "Connection not found");
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+            }
+            accessControlService.assertCanUseChatEditor(connectionId);
+
+            var running = runningQueryRegistry.find(executionId);
+            if (running.isEmpty()) {
+                // Already finished, or never started. Nothing to cancel.
+                response.put("success", true);
+                response.put("cancelled", false);
+                response.put("message", "Query is no longer running");
+                return ResponseEntity.ok(response);
+            }
+
+            RunningQueryRegistry.RunningQuery target = running.get();
+            // The execution id is a bearer token for a kill: scope it to this
+            // connection and to the user who started it, so one caller cannot
+            // terminate another's query by guessing an id.
+            String currentUser = accessControlService.getCurrentUsername();
+            if (!connectionId.equals(target.connectionId())
+                || (target.username() != null && currentUser != null && !target.username().equals(currentUser))) {
+                response.put("success", false);
+                response.put("message", "Query not found for this connection");
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+            }
+
+            activeQueryService.killQuery(connectionId, target.sessionPid());
+            runningQueryRegistry.unregister(executionId);
+            response.put("success", true);
+            response.put("cancelled", true);
+            response.put("message", "Query cancelled");
+            return ResponseEntity.ok(response);
+        } catch (ResponseStatusException e) {
+            response.put("success", false);
+            response.put("message", e.getReason());
+            return ResponseEntity.status(e.getStatusCode()).body(response);
+        } catch (Exception e) {
+            log.warn("Failed to cancel query {} on connection {}: {}", executionId, connectionId, e.getMessage());
+            response.put("success", false);
+            response.put("message", "Failed to cancel query: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
         }
     }
