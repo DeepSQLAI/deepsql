@@ -552,11 +552,13 @@ public class PlanPatternLibraryService {
         // Extract key parts of the query for pattern matching
         String signature = normalizedQuery;
 
-        // Remove column lists
-        signature = signature.replaceAll("select\\s+[^from]+\\s+from", "select ... from");
+        // Remove column lists. `[^from]+` was a character class ("not f/r/o/m"),
+        // so any column containing one of those letters (order_id, from_date)
+        // defeated it; a bounded lazy scan to the FROM keyword is what was meant.
+        signature = signature.replaceAll("select\\s++[^\\n]{0,500}?\\s++from", "select ... from");
 
         // Simplify WHERE clause
-        signature = signature.replaceAll("where\\s+.+?(\\s+order|\\s+group|\\s+limit|$)", "where ... $1");
+        signature = signature.replaceAll("where\\s++[^\\n]{0,500}?(\\s++order|\\s++group|\\s++limit|$)", "where ... $1");
 
         return signature.substring(0, Math.min(100, signature.length()));
     }

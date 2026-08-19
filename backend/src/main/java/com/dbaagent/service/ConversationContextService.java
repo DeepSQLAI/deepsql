@@ -8,6 +8,7 @@ import com.dbaagent.repository.ChatMessageRepository;
 import com.dbaagent.repository.ChatTurnContextRepository;
 import com.dbaagent.service.agent.AgentExecutionContext;
 import com.dbaagent.service.agent.AgentRunService;
+import com.dbaagent.util.PatternUtil;
 import com.dbaagent.util.QueryNormalizer;
 import com.dbaagent.util.PromptIntentSignals;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -1031,7 +1032,7 @@ public class ConversationContextService {
             || normalized.contains("first one")
             || normalized.contains("second one")
             || normalized.contains("third one")
-            || normalized.matches(".*\\bshow\\b.*\\b(query|sql)\\b.*");
+            || PatternUtil.containsPattern(normalized, "\\bshow\\b.*\\b(query|sql)\\b");
     }
 
     private boolean looksLikeClarificationAnswer(String question, ResolvedConversationContext context) {

@@ -16,15 +16,15 @@ final class PostgresSlowLogPatterns {
 
     /** Duration header with inline statement/execute/parse/bind SQL (group 3 = SQL). */
     static final Pattern LOG_STATEMENT = Pattern.compile(
-        "(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?).*?LOG:\\s+duration: ([\\d.]+) ms\\s+(?:statement|execute \\S*|parse \\S*|bind \\S*):\\s*(.*)");
+        "(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?)[^\\n]{0,200}?LOG:\\s+duration: ([\\d.]+) ms\\s+(?:statement|execute \\S*|parse \\S*|bind \\S*):\\s*(.*)");
 
     /** auto_explain header: "duration: N ms  plan:" (SQL on following Query Text line). */
     static final Pattern PLAN_HEADER = Pattern.compile(
-        "(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?).*?LOG:\\s+duration: ([\\d.]+) ms\\s+plan:\\s*$");
+        "(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?)[^\\n]{0,200}?LOG:\\s+duration: ([\\d.]+) ms\\s+plan:\\s*$");
 
     /** Duration-only header (statement keyword on the next line). */
     static final Pattern DURATION_ONLY = Pattern.compile(
-        "(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?).*?LOG:\\s+duration: ([\\d.]+) ms$");
+        "(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?)[^\\n]{0,200}?LOG:\\s+duration: ([\\d.]+) ms$");
 
     /** True if the line starts a new (timestamped) log entry. */
     static boolean isNewEntry(String line) {

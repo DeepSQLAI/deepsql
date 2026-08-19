@@ -27,8 +27,11 @@ public class QueryNormalizer {
     // this rule a Postgres literal "= true" never matches the digest's "= ?".
     private static final Pattern BOOLEAN_PATTERN = Pattern.compile("\\b(?:true|false)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern WHITESPACE_PATTERN = Pattern.compile("\\s+");
-    private static final Pattern IN_LIST_PATTERN = Pattern.compile("IN\\s*\\([^)]+\\)", Pattern.CASE_INSENSITIVE);
-    private static final Pattern VALUES_PATTERN = Pattern.compile("VALUES\\s*\\([^)]+\\)", Pattern.CASE_INSENSITIVE);
+    // Possessive \s*+ : without it the engine can split the run of whitespace
+    // between IN and "(" many ways on a non-matching line, which is the
+    // backtracking CodeQL flags (java/polynomial-redos). Same language matched.
+    private static final Pattern IN_LIST_PATTERN = Pattern.compile("IN\\s*+\\([^)]++\\)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern VALUES_PATTERN = Pattern.compile("VALUES\\s*+\\([^)]++\\)", Pattern.CASE_INSENSITIVE);
 
     // DML/DDL keywords that indicate the start of the actual query
     private static final String[] DML_KEYWORDS = {

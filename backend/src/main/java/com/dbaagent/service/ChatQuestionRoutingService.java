@@ -1,5 +1,6 @@
 package com.dbaagent.service;
 
+import com.dbaagent.util.PatternUtil;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -226,7 +227,7 @@ public class ChatQuestionRoutingService {
         if (normalized == null || normalized.isBlank() || !normalized.contains("performance")) {
             return false;
         }
-        return normalized.matches(".*\\b(payment|payments|gateway|refund|refunds|revenue|booking|bookings|customer|customers|customer|customers|account|accounts|billing|transaction|transactions)\\b.*");
+        return PatternUtil.containsPattern(normalized, "\\b(payment|payments|gateway|refund|refunds|revenue|booking|bookings|customer|customers|customer|customers|account|accounts|billing|transaction|transactions)\\b");
     }
 
     private boolean looksLikeExactSchemaQuestion(String normalized) {
@@ -238,20 +239,20 @@ public class ChatQuestionRoutingService {
             || SchemaQuestionUtil.looksLikeExactTableColumnQuestion(normalized)) {
             return true;
         }
-        if (!normalized.matches(".*\\b(table|tables|view|views|column|columns|fields|schema|structure|describe|definition)\\b.*")) {
+        if (!PatternUtil.containsPattern(normalized, "\\b(table|tables|view|views|column|columns|fields|schema|structure|describe|definition)\\b")) {
             return false;
         }
         // Superlatives and rankings are not exact-schema lookups; neither is design advice.
         // "Which tables should I use to build an accounts module?" names tables but wants
         // reasoning over the schema, not a listing of it — answering it from cached
         // metadata drops exactly the part the user asked for.
-        if (normalized.matches(".*\\b(least|most|best|worst|top|bottom|largest|smallest|used|unused|slow|growth|performance|fact|dimension|pattern|relationship|join)\\b.*")
-            || normalized.matches(".*\\b(should|build|design|model|recommend|suggest|architect)\\b.*")) {
+        if (PatternUtil.containsPattern(normalized, "\\b(least|most|best|worst|top|bottom|largest|smallest|used|unused|slow|growth|performance|fact|dimension|pattern|relationship|join)\\b")
+            || PatternUtil.containsPattern(normalized, "\\b(should|build|design|model|recommend|suggest|architect)\\b")) {
             return false;
         }
-        return normalized.matches(".*\\b(what|which|show|list|display|describe|structure|schema)\\b.*\\b(columns?|fields?|tables?|views?)\\b.*")
-            || normalized.matches(".*\\b(columns?|fields?)\\b.*\\b(in|for|of|on)\\b.*")
-            || normalized.matches(".*\\bdescribe\\b.*\\b(table|view)\\b.*")
-            || normalized.matches(".*\\b(schema|structure|definition)\\b.*\\b(of|for)\\b.*\\b(table|view)\\b.*");
+        return PatternUtil.containsPattern(normalized, "\\b(what|which|show|list|display|describe|structure|schema)\\b.*\\b(columns?|fields?|tables?|views?)\\b")
+            || PatternUtil.containsPattern(normalized, "\\b(columns?|fields?)\\b.*\\b(in|for|of|on)\\b")
+            || PatternUtil.containsPattern(normalized, "\\bdescribe\\b.*\\b(table|view)\\b")
+            || PatternUtil.containsPattern(normalized, "\\b(schema|structure|definition)\\b.*\\b(of|for)\\b.*\\b(table|view)\\b");
     }
 }

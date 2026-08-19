@@ -574,7 +574,7 @@ public class QueryPlanCacheService {
 
         // Replace literals with placeholders
         // Numbers
-        normalized = normalized.replaceAll("\\b\\d+\\.?\\d*\\b", "?");
+        normalized = normalized.replaceAll("\\b\\d++\\.?+\\d*+\\b", "?");
         // Quoted strings
         normalized = normalized.replaceAll("'[^']*'", "?");
         normalized = normalized.replaceAll("\"[^\"]*\"", "?");

@@ -46,6 +46,7 @@ import com.dbaagent.service.IndexAdvisorService;
 import com.dbaagent.service.PerformanceInsightsService;
 import com.dbaagent.service.PerformanceActionAggregatorService;
 import com.dbaagent.service.ResolvedConversationContext;
+import com.dbaagent.util.PatternUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
@@ -2477,7 +2478,7 @@ public class PerformanceExecutor {
             || normalized.contains("sql text")) {
             return true;
         }
-        if (normalized.matches(".*\\b(show|give|provide|return|share)\\b.*\\b(query|sql|statement|text)\\b.*")) {
+        if (PatternUtil.containsPattern(normalized, "\\b(show|give|provide|return|share)\\b.*\\b(query|sql|statement|text)\\b")) {
             return true;
         }
         return mentionsSlowQueryOrdinal(normalized)
@@ -2582,9 +2583,9 @@ public class PerformanceExecutor {
     private boolean looksLikePerformanceActionPrompt(String normalized, PromptIntent promptIntent) {
         return normalized.contains("roi")
             || normalized.contains("top performance actions")
-            || normalized.matches(".*\\b(top|best|highest)\\b.*\\b(actions?|recommendations?)\\b.*\\b(roi|impact|value)\\b.*")
-            || normalized.matches(".*\\b(actions?|recommendations?)\\b.*\\b(take|apply|prioritize)\\b.*\\b(now|first|right now)\\b.*")
-            || normalized.matches(".*\\b(actions?|recommendations?)\\b.*\\b(performance|latency|slow query|bottleneck)\\b.*");
+            || PatternUtil.containsPattern(normalized, "\\b(top|best|highest)\\b.*\\b(actions?|recommendations?)\\b.*\\b(roi|impact|value)\\b")
+            || PatternUtil.containsPattern(normalized, "\\b(actions?|recommendations?)\\b.*\\b(take|apply|prioritize)\\b.*\\b(now|first|right now)\\b")
+            || PatternUtil.containsPattern(normalized, "\\b(actions?|recommendations?)\\b.*\\b(performance|latency|slow query|bottleneck)\\b");
     }
 
     private boolean matchesRequestedTableScope(String tableName, String normalizedQuestion) {
@@ -2622,10 +2623,10 @@ public class PerformanceExecutor {
 
     private boolean looksLikeColumnImpactPrompt(String normalized, PromptIntent promptIntent) {
         boolean columnSignal = promptIntent.subjectTypes().contains(PromptIntent.SubjectType.COLUMN)
-            || normalized.matches(".*\\b(columns?|fields?)\\b.*");
+            || PatternUtil.containsPattern(normalized, "\\b(columns?|fields?)\\b");
         boolean queryPerformanceSignal = promptIntent.subjectTypes().contains(PromptIntent.SubjectType.QUERY)
-            || normalized.matches(".*\\b(query|queries|performance|latency|slow|slowness|bottleneck|impact|impacting|causing)\\b.*");
-        boolean notSchemaCatalog = !normalized.matches(".*\\b(what columns|list columns|show columns|columns are in)\\b.*");
+            || PatternUtil.containsPattern(normalized, "\\b(query|queries|performance|latency|slow|slowness|bottleneck|impact|impacting|causing)\\b");
+        boolean notSchemaCatalog = !PatternUtil.containsPattern(normalized, "\\b(what columns|list columns|show columns|columns are in)\\b");
         return columnSignal && queryPerformanceSignal && notSchemaCatalog && !looksLikeCardinalityPrompt(normalized);
     }
 
@@ -2635,8 +2636,8 @@ public class PerformanceExecutor {
             || normalized.contains("indexes")
             || normalized.contains("indices")
             || normalized.contains("indexing")
-            || normalized.matches(".*\\b(columns?|tables?)\\b.*\\b(need|needs|should|urgent|urgently|required|missing)\\b.*\\bindex.*")
-            || normalized.matches(".*\\bindex.*\\b(need|needs|should|recommend|urgent|urgently|required|missing|candidate)\\b.*");
+            || PatternUtil.containsPattern(normalized, "\\b(columns?|tables?)\\b.*\\b(need|needs|should|urgent|urgently|required|missing)\\b.*\\bindex")
+            || PatternUtil.containsPattern(normalized, "\\bindex.*\\b(need|needs|should|recommend|urgent|urgently|required|missing|candidate)\\b");
     }
 
     private boolean prefersWorkloadRankedIndexActions(String normalized) {
@@ -2656,10 +2657,10 @@ public class PerformanceExecutor {
     }
 
     private boolean looksLikePerformanceChangePrompt(String normalized, PromptIntent promptIntent) {
-        return normalized.matches(".*\\bwhat changed\\b.*\\b(performance|database)\\b.*")
-            || normalized.matches(".*\\b(performance|database)\\b.*\\b(last|past)\\b.*\\b(hours?|days?)\\b.*")
-            || normalized.matches(".*\\b(performance|health)\\b.*\\b(summary|status|trend|spike|spikes)\\b.*")
-            || normalized.matches(".*\\b(change|changes|changed|delta|trend|trending)\\b.*\\b(performance|latency|cpu|connections?|queries?)\\b.*");
+        return PatternUtil.containsPattern(normalized, "\\bwhat changed\\b.*\\b(performance|database)\\b")
+            || PatternUtil.containsPattern(normalized, "\\b(performance|database)\\b.*\\b(last|past)\\b.*\\b(hours?|days?)\\b")
+            || PatternUtil.containsPattern(normalized, "\\b(performance|health)\\b.*\\b(summary|status|trend|spike|spikes)\\b")
+            || PatternUtil.containsPattern(normalized, "\\b(change|changes|changed|delta|trend|trending)\\b.*\\b(performance|latency|cpu|connections?|queries?)\\b");
     }
 
     private boolean looksLikeRegressionPrompt(String normalized) {
@@ -2672,40 +2673,40 @@ public class PerformanceExecutor {
 
     private boolean looksLikeTuningPrompt(String normalized, PromptIntent promptIntent) {
         return promptIntent.subjectTypes().contains(PromptIntent.SubjectType.TUNING)
-            || normalized.matches(".*\\b(config|configuration|knob|knobs|setting|settings|buffer pool|shared buffers?)\\b.*")
-            || normalized.matches(".*\\b(reduc(e|ing)|lower|improv(e|ing))\\b.*\\b(latency|p99|response time)\\b.*");
+            || PatternUtil.containsPattern(normalized, "\\b(config|configuration|knob|knobs|setting|settings|buffer pool|shared buffers?)\\b")
+            || PatternUtil.containsPattern(normalized, "\\b(reduc(e|ing)|lower|improv(e|ing))\\b.*\\b(latency|p99|response time)\\b");
     }
 
     private boolean looksLikeWorkloadPrompt(String normalized, PromptIntent promptIntent) {
         return promptIntent.subjectTypes().contains(PromptIntent.SubjectType.WORKLOAD)
-            || normalized.matches(".*\\b(oltp|olap|mixed workload|mixed|workload type|workload profile|read-heavy|write-heavy)\\b.*");
+            || PatternUtil.containsPattern(normalized, "\\b(oltp|olap|mixed workload|mixed|workload type|workload profile|read-heavy|write-heavy)\\b");
     }
 
     private boolean looksLikeCardinalityPrompt(String normalized) {
-        return normalized.matches(".*\\b(cardinality|statistics|selectivity|estimated rows|actual rows|plan quality|plan cost)\\b.*");
+        return PatternUtil.containsPattern(normalized, "\\b(cardinality|statistics|selectivity|estimated rows|actual rows|plan quality|plan cost)\\b");
     }
 
     private boolean looksLikeActiveQueryPrompt(String normalized) {
-        return normalized.matches(".*\\b(active queries|active query|queries)\\b.*\\b(pressure|waiting|wait|blocked|blocking)\\b.*");
+        return PatternUtil.containsPattern(normalized, "\\b(active queries|active query|queries)\\b.*\\b(pressure|waiting|wait|blocked|blocking)\\b");
     }
 
     private boolean looksLikeHotTablePrompt(String normalized) {
-        return normalized.matches(".*\\b(hot|hottest|busy|busiest)\\b.*\\b(table|tables)\\b.*")
-            || normalized.matches(".*\\b(table|tables)\\b.*\\b(used|usage|pressure)\\b.*");
+        return PatternUtil.containsPattern(normalized, "\\b(hot|hottest|busy|busiest)\\b.*\\b(table|tables)\\b")
+            || PatternUtil.containsPattern(normalized, "\\b(table|tables)\\b.*\\b(used|usage|pressure)\\b");
     }
 
     private boolean looksLikeGrowthRiskPrompt(String normalized, PromptIntent promptIntent) {
         return promptIntent.subjectTypes().contains(PromptIntent.SubjectType.GROWTH)
-            || normalized.matches(".*\\b(growth|capacity|risk|run out|exhaust|forecast|bloat)\\b.*");
+            || PatternUtil.containsPattern(normalized, "\\b(growth|capacity|risk|run out|exhaust|forecast|bloat)\\b");
     }
 
     private boolean looksLikeSlowQueryPrompt(String normalized, PromptIntent promptIntent) {
         if (promptIntent.subjectTypes().contains(PromptIntent.SubjectType.TUNING)
             || promptIntent.subjectTypes().contains(PromptIntent.SubjectType.WORKLOAD)) {
-            return normalized.matches(".*\\b(slow query|slow queries|slowest|query health)\\b.*");
+            return PatternUtil.containsPattern(normalized, "\\b(slow query|slow queries|slowest|query health)\\b");
         }
-        return normalized.matches(".*\\b(slow query|slow queries|slowest|performance health|query health|bottleneck)\\b.*")
-            || normalized.matches(".*\\b(query|queries)\\b.*\\b(latency|slow|bottleneck|wait)\\b.*");
+        return PatternUtil.containsPattern(normalized, "\\b(slow query|slow queries|slowest|performance health|query health|bottleneck)\\b")
+            || PatternUtil.containsPattern(normalized, "\\b(query|queries)\\b.*\\b(latency|slow|bottleneck|wait)\\b");
     }
 
     private int extractMonitoringWindowHours(String normalized) {

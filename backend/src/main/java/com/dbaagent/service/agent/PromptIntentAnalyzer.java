@@ -1,5 +1,6 @@
 package com.dbaagent.service.agent;
 
+import com.dbaagent.util.PatternUtil;
 import com.dbaagent.service.ChatQuestionRoutingService;
 import com.dbaagent.service.ResolvedConversationContext;
 import org.springframework.stereotype.Service;
@@ -131,8 +132,8 @@ public class PromptIntentAnalyzer {
         if (!(normalized.contains("full query")
             || normalized.contains("full sql")
             || normalized.contains("query text")
-            || normalized.matches(".*\\bshow\\b.*\\b(query|sql)\\b.*")
-            || normalized.matches(".*\\bwhat\\b.*\\bquery\\b.*"))) {
+            || PatternUtil.containsPattern(normalized, "\\bshow\\b.*\\b(query|sql)\\b")
+            || PatternUtil.containsPattern(normalized, "\\bwhat\\b.*\\bquery\\b"))) {
             return false;
         }
         if (resolvedConversationContext.sourceSql() != null && !resolvedConversationContext.sourceSql().isBlank()) {
@@ -149,7 +150,7 @@ public class PromptIntentAnalyzer {
         return resolvedConversationContext.conversationHistory().stream()
             .filter(turn -> turn != null && "assistant".equalsIgnoreCase(turn.role()))
             .map(turn -> lower(turn.content()))
-            .anyMatch(content -> content.contains("```sql") || content.matches(".*\\bselect\\b.*\\bfrom\\b.*"));
+            .anyMatch(content -> content.contains("```sql") || PatternUtil.containsPattern(content, "\\bselect\\b.*\\bfrom\\b"));
     }
 
     private boolean looksLikePriorQueryDiagnosticFollowUp(String normalized) {
@@ -305,7 +306,7 @@ public class PromptIntentAnalyzer {
     }
 
     private boolean looksLikeFollowUp(String normalized) {
-        return normalized.matches(".*\\b(these|those|same|that|it|them|above|returned)\\b.*");
+        return PatternUtil.containsPattern(normalized, "\\b(these|those|same|that|it|them|above|returned)\\b");
     }
 
     private boolean looksLikeRecommendationPrompt(String normalized) {
@@ -331,36 +332,36 @@ public class PromptIntentAnalyzer {
             || normalized.contains("missing indexes")
             || normalized.contains("unused index")
             || normalized.contains("duplicate index")
-            || normalized.matches(".*\\b(which|what)\\b.*\\b(columns?|fields?|tables?)\\b.*\\b(index|indexes|indices|indexing|indexed)\\b.*")
-            || normalized.matches(".*\\b(index|indexes|indices|indexing|indexed)\\b.*\\b(need|needs|should|recommend|required|missing|urgent|urgently|candidate|prioritize|priority)\\b.*")
-            || normalized.matches(".*\\b(need|needs|should|recommend|required|missing|urgent|urgently|candidate|prioritize|priority)\\b.*\\b(index|indexes|indices|indexing|indexed)\\b.*");
+            || PatternUtil.containsPattern(normalized, "\\b(which|what)\\b.*\\b(columns?|fields?|tables?)\\b.*\\b(index|indexes|indices|indexing|indexed)\\b")
+            || PatternUtil.containsPattern(normalized, "\\b(index|indexes|indices|indexing|indexed)\\b.*\\b(need|needs|should|recommend|required|missing|urgent|urgently|candidate|prioritize|priority)\\b")
+            || PatternUtil.containsPattern(normalized, "\\b(need|needs|should|recommend|required|missing|urgent|urgently|candidate|prioritize|priority)\\b.*\\b(index|indexes|indices|indexing|indexed)\\b");
     }
 
     private boolean looksLikeIndexWorkloadRecommendationPrompt(String normalized) {
-        return normalized.matches(".*\\b(need|needs|should|recommend|required|missing|urgent|urgently|candidate|prioritize|priority)\\b.*")
+        return PatternUtil.containsPattern(normalized, "\\b(need|needs|should|recommend|required|missing|urgent|urgently|candidate|prioritize|priority)\\b")
             || normalized.contains("current workload")
             || normalized.contains("workload");
     }
 
     private boolean looksLikePerformancePrompt(String normalized) {
-        return normalized.matches(".*\\b(slow query|slow queries|latency|bottleneck|regress|regression|regressions|workload|tuning|health|execution plan|plan quality|performance|pressure|waiting|wait event|wait events|active queries|active query|hot|hottest|usage|used|config knobs?|cardinality|statistics|growth|capacity|risk|roi|cost benefit|performance actions?|fix suggestions?)\\b.*");
+        return PatternUtil.containsPattern(normalized, "\\b(slow query|slow queries|latency|bottleneck|regress|regression|regressions|workload|tuning|health|execution plan|plan quality|performance|pressure|waiting|wait event|wait events|active queries|active query|hot|hottest|usage|used|config knobs?|cardinality|statistics|growth|capacity|risk|roi|cost benefit|performance actions?|fix suggestions?)\\b");
     }
 
     private boolean looksLikeColumnImpactPrompt(String normalized, Set<PromptIntent.SubjectType> subjectTypes) {
         boolean columnSignal = subjectTypes.contains(PromptIntent.SubjectType.COLUMN)
-            || normalized.matches(".*\\b(columns?|fields?)\\b.*");
-        boolean impactSignal = normalized.matches(".*\\b(impact|impactful|impacting|important|critical|hot|hottest|used|usage|pressure|bottleneck)\\b.*");
-        boolean schemaCatalogSignal = normalized.matches(".*\\b(what columns|list columns|show columns|columns are in|has columns)\\b.*");
+            || PatternUtil.containsPattern(normalized, "\\b(columns?|fields?)\\b");
+        boolean impactSignal = PatternUtil.containsPattern(normalized, "\\b(impact|impactful|impacting|important|critical|hot|hottest|used|usage|pressure|bottleneck)\\b");
+        boolean schemaCatalogSignal = PatternUtil.containsPattern(normalized, "\\b(what columns|list columns|show columns|columns are in|has columns)\\b");
         return columnSignal && impactSignal && !schemaCatalogSignal;
     }
 
     private boolean looksLikeBiPrompt(String normalized) {
-        return normalized.matches(".*\\b(revenue|sales|gmv|arr|mrr|bookings?|orders?|customers?|payments?|transactions?|retention|churn|ltv|aov|inventory|pipeline|funnel|conversion)\\b.*")
-            || normalized.matches(".*\\b(show|list|get|count|how many|top|compare|trend|breakdown|summarize)\\b.*");
+        return PatternUtil.containsPattern(normalized, "\\b(revenue|sales|gmv|arr|mrr|bookings?|orders?|customers?|payments?|transactions?|retention|churn|ltv|aov|inventory|pipeline|funnel|conversion)\\b")
+            || PatternUtil.containsPattern(normalized, "\\b(show|list|get|count|how many|top|compare|trend|breakdown|summarize)\\b");
     }
 
     private boolean looksLikeSchemaPrompt(String normalized, Set<PromptIntent.SubjectType> subjectTypes) {
-        return normalized.matches(".*\\b(schema|table|tables|view|views|column|columns|fields|indexes?|structure|definition)\\b.*")
+        return PatternUtil.containsPattern(normalized, "\\b(schema|table|tables|view|views|column|columns|fields|indexes?|structure|definition)\\b")
             || subjectTypes.contains(PromptIntent.SubjectType.TABLE)
             || subjectTypes.contains(PromptIntent.SubjectType.COLUMN)
             || subjectTypes.contains(PromptIntent.SubjectType.RELATIONSHIP);

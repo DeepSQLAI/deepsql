@@ -66,6 +66,7 @@ import com.dbaagent.service.agent.AgentTaskResult;
 import com.dbaagent.service.agent.MetadataRequestScope;
 import com.dbaagent.service.agent.MetadataRequestScopeResolver;
 import com.dbaagent.service.agent.VerifiedAnswer;
+import com.dbaagent.util.PatternUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.dbaagent.util.QueryNormalizer;
 import com.dbaagent.service.security.AccessControlService;
@@ -461,7 +462,7 @@ public class ChatService {
         }
 
         // "How many tables do I have?" or similar (simple, unscoped questions only)
-        if (lowerMessage.matches(".*(how many|count|number of).*(tables?).*") &&
+        if (PatternUtil.containsPattern(lowerMessage, "(how many|count|number of).*(tables?)") &&
             !lowerMessage.contains("rows") && !lowerMessage.contains("record")) {
             long tableCount = resolveTableCount(schema);
             return String.format("You have **%d tables** in the `%s` database.",
@@ -469,15 +470,15 @@ public class ChatService {
         }
 
         // "How many views do I have?"
-        if (lowerMessage.matches(".*(how many|count|number of).*(views?).*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "(how many|count|number of).*(views?)")) {
             long viewCount = resolveViewCount(schema);
             return String.format("You have **%d views** in the `%s` database.",
                 viewCount, schemaDisplayName(schema));
         }
 
         // "What's the database size?" or "How big is the database?"
-        if (lowerMessage.matches(".*(database|total|overall).*(size|big|large).*") ||
-            lowerMessage.matches(".*(how (big|large)|size of).*(database).*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "(database|total|overall).*(size|big|large)") ||
+            PatternUtil.containsPattern(lowerMessage, "(how (big|large)|size of).*(database)")) {
             long sizeBytes = schema.getTotalSizeBytes() != null ? schema.getTotalSizeBytes() : 0;
             String formattedSize = contextAssembler.formatBytes(sizeBytes);
             return String.format("The total database size is **%s** (%d bytes).",
@@ -506,8 +507,8 @@ public class ChatService {
         }
 
         // "What are my largest tables?" or "Biggest tables" or "Tables by size"
-        if (lowerMessage.matches(".*(largest|biggest|heaviest|top).*tables?.*") ||
-            lowerMessage.matches(".*tables?.*(by size|sorted by size|largest|biggest).*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "(largest|biggest|heaviest|top).*tables?") ||
+            PatternUtil.containsPattern(lowerMessage, "tables?.*(by size|sorted by size|largest|biggest)")) {
             if (schema.getTables() == null || schema.getTables().isEmpty()) {
                 return "No tables found in the database.";
             }
@@ -551,7 +552,7 @@ public class ChatService {
         }
 
         // "How many indexes?" or "Index count"
-        if (lowerMessage.matches(".*(how many|count|number of).*(indexes?|indices).*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "(how many|count|number of).*(indexes?|indices)")) {
             long indexCount = schema.getTables() != null ?
                 schema.getTables().stream()
                     .filter(t -> t.getIndexes() != null)
@@ -563,8 +564,8 @@ public class ChatService {
 
         // "What database type?" or "Database info" (NOT version - that needs SQL)
         // Version questions should fall back to LLM since we don't have version in schema metadata
-        if ((lowerMessage.matches(".*(what|which).*(database|db).*(type|engine).*") ||
-             lowerMessage.matches(".*(database|db).*(info|information|details).*")) &&
+        if ((PatternUtil.containsPattern(lowerMessage, "(what|which).*(database|db).*(type|engine)") ||
+             PatternUtil.containsPattern(lowerMessage, "(database|db).*(info|information|details)")) &&
             !lowerMessage.contains("version")) {
             StringBuilder sb = new StringBuilder();
             sb.append("### Database Information\n\n");
@@ -578,7 +579,7 @@ public class ChatService {
         }
 
         // "Show schema summary" or "Database overview"
-        if (lowerMessage.matches(".*(schema|database).*(summary|overview|stats|statistics).*") ||
+        if (PatternUtil.containsPattern(lowerMessage, "(schema|database).*(summary|overview|stats|statistics)") ||
             lowerMessage.equals("overview") || lowerMessage.equals("summary")) {
             StringBuilder sb = new StringBuilder();
             sb.append(String.format("### Database Overview: `%s`\n\n", schemaDisplayName(schema)));
@@ -660,13 +661,13 @@ public class ChatService {
         String lowerMessage = actualQuestion.toLowerCase().trim();
 
         // Detect question type
-        boolean isSlowQueryQuestion = lowerMessage.matches(".*(slowest|slow|worst|heaviest|most expensive)\\s+(query|queries).*") ||
-            lowerMessage.matches(".*slow\\s+query.*");
-        boolean isTopNQuestion = lowerMessage.matches(".*(top|show|list)\\s+\\d*\\s*(slow|worst|expensive).*") ||
-            lowerMessage.matches(".*\\d+\\s+(slow|worst|expensive)\\s+(query|queries).*");
-        boolean isHealthQuestion = lowerMessage.matches(".*(performance|query|database)\\s+(health|status|summary).*") ||
-            lowerMessage.matches(".*(how.*perform|health\\s+check|health\\s+status).*");
-        boolean isStatsQuestion = lowerMessage.matches(".*(slow\\s+query|performance)\\s+(stats|statistics|metrics|numbers).*");
+        boolean isSlowQueryQuestion = PatternUtil.containsPattern(lowerMessage, "(slowest|slow|worst|heaviest|most expensive)\\s+(query|queries)") ||
+            PatternUtil.containsPattern(lowerMessage, "slow\\s+query");
+        boolean isTopNQuestion = PatternUtil.containsPattern(lowerMessage, "(top|show|list)\\s+\\d*\\s*(slow|worst|expensive)") ||
+            PatternUtil.containsPattern(lowerMessage, "\\d+\\s+(slow|worst|expensive)\\s+(query|queries)");
+        boolean isHealthQuestion = PatternUtil.containsPattern(lowerMessage, "(performance|query|database)\\s+(health|status|summary)") ||
+            PatternUtil.containsPattern(lowerMessage, "(how.*perform|health\\s+check|health\\s+status)");
+        boolean isStatsQuestion = PatternUtil.containsPattern(lowerMessage, "(slow\\s+query|performance)\\s+(stats|statistics|metrics|numbers)");
 
         if (!isSlowQueryQuestion && !isTopNQuestion && !isHealthQuestion && !isStatsQuestion) {
             return null;
@@ -883,11 +884,11 @@ public class ChatService {
         String lowerMessage = actualQuestion.toLowerCase().trim();
 
         // Match index recommendation questions
-        boolean isIndexQuestion = lowerMessage.matches(".*(index|indexes|indices).*(recommend|suggestion|missing|should|need|add|create).*") ||
-            lowerMessage.matches(".*(recommend|suggest|missing|need).*(index|indexes|indices).*") ||
-            lowerMessage.matches(".*(what|which).*(index|indexes|indices).*(should|need|add|create).*") ||
-            lowerMessage.matches(".*missing\\s+index.*") ||
-            lowerMessage.matches(".*index\\s+recommendation.*");
+        boolean isIndexQuestion = PatternUtil.containsPattern(lowerMessage, "(index|indexes|indices).*(recommend|suggestion|missing|should|need|add|create)") ||
+            PatternUtil.containsPattern(lowerMessage, "(recommend|suggest|missing|need).*(index|indexes|indices)") ||
+            PatternUtil.containsPattern(lowerMessage, "(what|which).*(index|indexes|indices).*(should|need|add|create)") ||
+            PatternUtil.containsPattern(lowerMessage, "missing\\s+index") ||
+            PatternUtil.containsPattern(lowerMessage, "index\\s+recommendation");
 
         if (!isIndexQuestion) {
             return null;
@@ -1092,27 +1093,27 @@ public class ChatService {
         String q = question.toLowerCase();
 
         // Ranking / top-N / bottom-N patterns
-        if (q.matches(".*(top|bottom|least|most|highest|lowest|worst|best|slowest|fastest)\\s+\\d+.*")) return true;
-        if (q.matches(".*(top|bottom|least|most|highest|lowest|worst|best)\\s+(\\d+\\s+)?(accounts?|users?|customers?|orders?|records?|rows?|queries?|tables?|sessions?|transactions?|products?|bookings?|customers?|properties?|tenants?|clients?).*")) return true;
+        if (PatternUtil.containsPattern(q, "(top|bottom|least|most|highest|lowest|worst|best|slowest|fastest)\\s+\\d+")) return true;
+        if (PatternUtil.containsPattern(q, "(top|bottom|least|most|highest|lowest|worst|best)\\s+(\\d+\\s+)?(accounts?|users?|customers?|orders?|records?|rows?|queries?|tables?|sessions?|transactions?|products?|bookings?|customers?|properties?|tenants?|clients?)")) return true;
 
         // "Show me / list / give me / find" entity requests
-        if (q.matches(".*(show me|list|give me|find|fetch|retrieve|get me|display|return)\\s+.*\\b(accounts?|users?|customers?|orders?|records?|rows?|entries?|data|results?|transactions?|bookings?|customers?|properties?).*")) return true;
+        if (PatternUtil.containsPattern(q, "(show me|list|give me|find|fetch|retrieve|get me|display|return)\\s+.*\\b(accounts?|users?|customers?|orders?|records?|rows?|entries?|data|results?|transactions?|bookings?|customers?|properties?)")) return true;
 
         // "Which X are / have / do" questions — expect data rows as answer
-        if (q.matches(".*which\\s+\\w+\\s+(are|have|do|did|has|were|is).*")) return true;
+        if (PatternUtil.containsPattern(q, "which\\s+\\w+\\s+(are|have|do|did|has|were|is)")) return true;
 
         // Row/record count questions (business data, not schema metadata)
-        if (q.matches(".*(how many|count of|number of)\\s+.*(rows?|records?|accounts?|users?|customers?|orders?|bookings?|sessions?|transactions?).*")) return true;
+        if (PatternUtil.containsPattern(q, "(how many|count of|number of)\\s+.*(rows?|records?|accounts?|users?|customers?|orders?|bookings?|sessions?|transactions?)")) return true;
 
         // Engagement, activity, churn, usage patterns
-        if (q.matches(".*(least|most|zero|no|without|never|active|inactive|engaged|churned|dormant|unused)\\s+.*(accounts?|users?|customers?|sessions?|logins?|activity|usage|engagement).*")) return true;
+        if (PatternUtil.containsPattern(q, "(least|most|zero|no|without|never|active|inactive|engaged|churned|dormant|unused)\\s+.*(accounts?|users?|customers?|sessions?|logins?|activity|usage|engagement)")) return true;
 
         // Explicit data/report requests
-        if (q.matches(".*(report|summary|breakdown|overview|analysis)\\s+(of|on|for).*\\b(last|past|since|in the).*\\b(days?|weeks?|months?|years?).*")) return true;
+        if (PatternUtil.containsPattern(q, "(report|summary|breakdown|overview|analysis)\\s+(of|on|for).*\\b(last|past|since|in the).*\\b(days?|weeks?|months?|years?)")) return true;
 
         // Time-bounded data questions
-        if (q.matches(".*in the (last|past)\\s+\\d+\\s+(days?|weeks?|months?).*") &&
-            q.matches(".*(accounts?|users?|customers?|orders?|bookings?|queries?|transactions?|sessions?).*")) return true;
+        if (PatternUtil.containsPattern(q, "in the (last|past)\\s+\\d+\\s+(days?|weeks?|months?)") &&
+            PatternUtil.containsPattern(q, "(accounts?|users?|customers?|orders?|bookings?|queries?|transactions?|sessions?)")) return true;
 
         return false;
     }
@@ -1206,7 +1207,7 @@ public class ChatService {
         List<ExactSchemaKeyColumnUtil.KeyColumnDescriptor> keyColumns,
         String lowerQuestion
     ) {
-        boolean countQuestion = lowerQuestion.matches(".*(how many|count|number of).*(key columns?|primary keys?|foreign keys?|join columns?).*");
+        boolean countQuestion = PatternUtil.containsPattern(lowerQuestion, "(how many|count|number of).*(key columns?|primary keys?|foreign keys?|join columns?)");
         if (countQuestion) {
             return String.format(
                 "Table `%s` has **%d key columns**: %s.",
@@ -1626,7 +1627,7 @@ public class ChatService {
             .filter(this::isMeaningfulKeyColumn)
             .toList();
 
-        boolean countQuestion = lowerMessage.matches(".*(how many|count|number of).*(key columns?|primary keys?|foreign keys?).*");
+        boolean countQuestion = PatternUtil.containsPattern(lowerMessage, "(how many|count|number of).*(key columns?|primary keys?|foreign keys?)");
         if (!meaningfulColumns.isEmpty()) {
             List<KeyColumnAnalysis> topColumns = meaningfulColumns.stream().limit(8).toList();
             long distinctTables = meaningfulColumns.stream()
@@ -1882,7 +1883,7 @@ public class ChatService {
             return "I have schema classification metadata, but no table role details are stored yet for this connection.";
         }
 
-        boolean largestQuestion = lowerMessage.matches(".*\\b(largest|biggest|top|heaviest)\\b.*");
+        boolean largestQuestion = PatternUtil.containsPattern(lowerMessage, "\\b(largest|biggest|top|heaviest)\\b");
         boolean asksPatternSummary = lowerMessage.contains("pattern")
             || (lowerMessage.contains("fact") && lowerMessage.contains("dimension"));
         if (largestQuestion) {
@@ -2193,12 +2194,12 @@ public class ChatService {
         String lowerMessage = actualQuestion.toLowerCase().trim();
 
         // Match workload type questions
-        boolean isWorkloadQuestion = lowerMessage.matches(".*(workload|work load).*(type|kind|pattern|characteristic|profile).*") ||
-            lowerMessage.matches(".*(what|which).*(type|kind).*(workload|database|db).*") ||
-            lowerMessage.matches(".*(is this|is it|am i running).*(oltp|olap|mixed|read|write).*") ||
-            lowerMessage.matches(".*(oltp|olap).*(or|vs|versus).*") ||
-            lowerMessage.matches(".*(read|write).*(heavy|intensive|dominant).*") ||
-            lowerMessage.matches(".*workload\\s+(analysis|summary|overview).*");
+        boolean isWorkloadQuestion = PatternUtil.containsPattern(lowerMessage, "(workload|work load).*(type|kind|pattern|characteristic|profile)") ||
+            PatternUtil.containsPattern(lowerMessage, "(what|which).*(type|kind).*(workload|database|db)") ||
+            PatternUtil.containsPattern(lowerMessage, "(is this|is it|am i running).*(oltp|olap|mixed|read|write)") ||
+            PatternUtil.containsPattern(lowerMessage, "(oltp|olap).*(or|vs|versus)") ||
+            PatternUtil.containsPattern(lowerMessage, "(read|write).*(heavy|intensive|dominant)") ||
+            PatternUtil.containsPattern(lowerMessage, "workload\\s+(analysis|summary|overview)");
 
         if (!isWorkloadQuestion) {
             return null;
@@ -2505,29 +2506,29 @@ public class ChatService {
      */
     private boolean hasScopedOrTemporalQualifiers(String lowerMessage) {
         // Schema qualifiers
-        if (lowerMessage.matches(".*\\b(in schema|in the .* schema|schema\\s+\\w+)\\b.*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "\\b(in schema|in the .* schema|schema\\s+\\w+)\\b")) {
             return true;
         }
 
         // Table-scoped qualifiers (e.g., "indexes on users", "columns in orders", "for table X")
-        if (lowerMessage.matches(".*\\b(on|in|for|of)\\s+(the\\s+)?\\w+\\s*(table)?\\b.*") &&
+        if (PatternUtil.containsPattern(lowerMessage, "\\b(on|in|for|of)\\s+(the\\s+)?\\w+\\s*(table)?\\b") &&
             (lowerMessage.contains("index") || lowerMessage.contains("column") ||
              lowerMessage.contains("constraint") || lowerMessage.contains("foreign key"))) {
             return true;
         }
 
         // Temporal qualifiers
-        if (lowerMessage.matches(".*\\b(today|yesterday|last week|last month|this week|this month|since|after|before|created|added|modified|updated|recent|new)\\b.*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "\\b(today|yesterday|last week|last month|this week|this month|since|after|before|created|added|modified|updated|recent|new)\\b")) {
             return true;
         }
 
         // Conditional qualifiers
-        if (lowerMessage.matches(".*\\b(where|with|that have|that are|containing|larger than|smaller than|more than|less than|greater|empty|non-empty)\\b.*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "\\b(where|with|that have|that are|containing|larger than|smaller than|more than|less than|greater|empty|non-empty)\\b")) {
             return true;
         }
 
         // Specific object references (e.g., "tables like X", "tables starting with")
-        if (lowerMessage.matches(".*\\b(like|starting with|ending with|matching|named|called)\\b.*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "\\b(like|starting with|ending with|matching|named|called)\\b")) {
             return true;
         }
 
@@ -2553,10 +2554,10 @@ public class ChatService {
             return false;
         }
 
-        return lower.matches(".*(how many|count|number of).*(tables?|views?).*") ||
+        return PatternUtil.containsPattern(lower, "(how many|count|number of).*(tables?|views?)") ||
                lower.matches("^(list|show|what are).*tables?$") ||
                lower.equals("tables") || lower.equals("show tables") ||
-               lower.matches(".*(database|total).*(size|big).*");
+               PatternUtil.containsPattern(lower, "(database|total).*(size|big)");
     }
 
     public ChatResponse processMessage(String connectionId, String message, String threadId) {

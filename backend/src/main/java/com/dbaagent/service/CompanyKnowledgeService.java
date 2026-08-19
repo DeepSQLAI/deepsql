@@ -570,7 +570,7 @@ public class CompanyKnowledgeService {
         if (!notBlank(token)) {
             return "";
         }
-        return token.trim().replaceAll("[,.;:]+$", "");
+        return token.trim().replaceAll("[,.;:]++$", "");
     }
 
     public String canonicalColumnReference(String reference) {

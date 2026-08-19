@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -50,22 +51,28 @@ public class MySQLPrivilegeCheckProvider implements PrivilegeCheckProvider {
         Connection connection,
         String database
     ) {
-        try (Statement stmt = connection.createStatement()) {
+        boolean scopedToDatabase = database != null && !database.isEmpty();
+        String listTablesQuery = scopedToDatabase
+            ? "SELECT table_name FROM information_schema.tables "
+                + "WHERE table_schema = ? AND table_type = 'BASE TABLE' LIMIT 5"
+            : "SELECT table_name FROM information_schema.tables "
+                + "WHERE table_type = 'BASE TABLE' LIMIT 5";
+
+        // Bound rather than concatenated: a database name containing an
+        // apostrophe closed the literal and appended arbitrary SQL
+        // (java/sql-injection).
+        try (PreparedStatement stmt = connection.prepareStatement(listTablesQuery)) {
             stmt.setQueryTimeout(10);
-
-            String listTablesQuery = database != null && !database.isEmpty()
-                ? "SELECT table_name FROM information_schema.tables " +
-                    "WHERE table_schema = '" + database + "' " +
-                    "AND table_type = 'BASE TABLE' LIMIT 5"
-                : "SELECT table_name FROM information_schema.tables " +
-                    "WHERE table_type = 'BASE TABLE' LIMIT 5";
-
-            ResultSet tablesRs = stmt.executeQuery(listTablesQuery);
-            List<String> tables = new ArrayList<>();
-            while (tablesRs.next()) {
-                tables.add(tablesRs.getString(1));
+            if (scopedToDatabase) {
+                stmt.setString(1, database);
             }
-            tablesRs.close();
+
+            List<String> tables = new ArrayList<>();
+            try (ResultSet tablesRs = stmt.executeQuery()) {
+                while (tablesRs.next()) {
+                    tables.add(tablesRs.getString(1));
+                }
+            }
 
             if (tables.isEmpty()) {
                 return ConnectionTestResult.PrivilegeCheck.builder()

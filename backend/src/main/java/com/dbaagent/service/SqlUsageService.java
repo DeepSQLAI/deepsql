@@ -23,7 +23,10 @@ public class SqlUsageService {
     private static final Pattern TABLE_REF_PATTERN =
         Pattern.compile("(?i)\\b(from|join)\\s+([`\"\\w\\.]+)(?:\\s+(?:as\\s+)?([`\"\\w]+))?");
     private static final Pattern QUALIFIED_COLUMN_PATTERN =
-        Pattern.compile("([`\"\\w\\.]+)\\s*\\.\\s*([`\"\\w]+)");
+        // The qualifier class excludes '.' so it cannot also consume the
+        // separator — that overlap is the backtracking source, not a feature;
+        // a dotted qualifier (db.schema.table) still matches via the last dot.
+        Pattern.compile("([`\"\\w]++(?:\\s*+\\.\\s*+[`\"\\w]++)*+)\\s*+\\.\\s*+([`\"\\w]++)");
 
     private final SchemaScannerService schemaScannerService;
 

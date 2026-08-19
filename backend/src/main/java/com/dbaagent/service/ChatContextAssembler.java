@@ -35,6 +35,7 @@ import com.dbaagent.repository.IndexRecommendationRepository;
 import com.dbaagent.repository.ColumnValueCacheRepository;
 import com.dbaagent.repository.SchemaDocumentationRepository;
 import com.dbaagent.service.brain.classification.SchemaClassificationService;
+import com.dbaagent.util.PatternUtil;
 import com.dbaagent.util.TokenEstimator;
 import com.dbaagent.service.SchemaObjectNameUtil;
 import com.dbaagent.service.SchemaTableMatchUtil;
@@ -146,10 +147,10 @@ public class ChatContextAssembler {
         needed.add(ContextType.RELATIONSHIPS);
 
         // Simple schema/structure questions - minimal context needed
-        boolean isSimpleSchemaQuestion = lowerMessage.matches(".*(show|list|what).*(tables?|columns?|schema|views?).*") ||
-            lowerMessage.matches(".*(how many|count).*(tables?|rows?|records?).*") ||
-            lowerMessage.matches(".*(describe|structure|definition).*") ||
-            lowerMessage.matches(".*(largest|biggest|smallest|size).*table.*");
+        boolean isSimpleSchemaQuestion = PatternUtil.containsPattern(lowerMessage, "(show|list|what).*(tables?|columns?|schema|views?)") ||
+            PatternUtil.containsPattern(lowerMessage, "(how many|count).*(tables?|rows?|records?)") ||
+            PatternUtil.containsPattern(lowerMessage, "(describe|structure|definition)") ||
+            PatternUtil.containsPattern(lowerMessage, "(largest|biggest|smallest|size).*table");
 
         if (isSimpleSchemaQuestion) {
             // For simple questions, only add relationships (minimal context)
@@ -160,9 +161,9 @@ public class ChatContextAssembler {
         needed.add(ContextType.SEMANTIC_MODEL);
 
         // Performance-related questions (tight patterns to avoid false positives on data queries)
-        if (lowerMessage.matches(".*(slow quer|performance|optimize|speed up|latency|execution time|response time).*") ||
-            lowerMessage.matches(".*(why.{0,20}(slow|taking|long)|taking too long|how long.{0,10}(quer|execut)).*") ||
-            lowerMessage.matches(".*(query.{0,10}(slow|fast|quick|seconds|minutes)|timeout|timed? out).*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "(slow quer|performance|optimize|speed up|latency|execution time|response time)") ||
+            PatternUtil.containsPattern(lowerMessage, "(why.{0,20}(slow|taking|long)|taking too long|how long.{0,10}(quer|execut))") ||
+            PatternUtil.containsPattern(lowerMessage, "(query.{0,10}(slow|fast|quick|seconds|minutes)|timeout|timed? out)")) {
             needed.add(ContextType.SLOW_QUERIES);
             needed.add(ContextType.REGRESSIONS);
             needed.add(ContextType.INDEX_RECOMMENDATIONS);
@@ -171,46 +172,46 @@ public class ChatContextAssembler {
         }
 
         // Tuning/configuration questions - Brain ML insights
-        if (lowerMessage.matches(".*(tun(e|ing)|config|parameter|knob|setting|memory|buffer|cache).*") ||
-            lowerMessage.matches(".*(workload|oltp|olap|batch|throughput|qps).*") ||
-            lowerMessage.matches(".*(cardinality|selectivity|statistic|estimate|plan|cost).*") ||
-            lowerMessage.matches(".*(recommend|suggestion|improve|better).*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "(tun(e|ing)|config|parameter|knob|setting|memory|buffer|cache)") ||
+            PatternUtil.containsPattern(lowerMessage, "(workload|oltp|olap|batch|throughput|qps)") ||
+            PatternUtil.containsPattern(lowerMessage, "(cardinality|selectivity|statistic|estimate|plan|cost)") ||
+            PatternUtil.containsPattern(lowerMessage, "(recommend|suggestion|improve|better)")) {
             needed.add(ContextType.BRAIN_INSIGHTS);
         }
 
         // Index-related questions
-        if (lowerMessage.matches(".*(index|indexes|indexed|indexing).*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "(index|indexes|indexed|indexing)")) {
             needed.add(ContextType.INDEX_RECOMMENDATIONS);
             needed.add(ContextType.KEY_COLUMNS);
         }
 
         // Value dictionary / enum / filter-value questions
-        if (lowerMessage.matches(".*(valid values|allowed values|possible values|status values|enum|picklist|dropdown).*") ||
-            lowerMessage.matches(".*(what values|which values|acceptable values).*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "(valid values|allowed values|possible values|status values|enum|picklist|dropdown)") ||
+            PatternUtil.containsPattern(lowerMessage, "(what values|which values|acceptable values)")) {
             needed.add(ContextType.KEY_COLUMNS);
             needed.add(ContextType.CLASSIFICATION);
         }
 
         // Join-specific questions also get classification context
-        if (lowerMessage.matches(".*(join|relationship|foreign key|fk|reference|connect|link).*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "(join|relationship|foreign key|fk|reference|connect|link)")) {
             needed.add(ContextType.CLASSIFICATION);
         }
 
         // Growth/scaling questions
-        if (lowerMessage.matches(".*(grow|growth|scale|scaling|storage|disk|bloat|archive).*") ||
-            lowerMessage.matches(".*(partition|shard).*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "(grow|growth|scale|scaling|storage|disk|bloat|archive)") ||
+            PatternUtil.containsPattern(lowerMessage, "(partition|shard)")) {
             needed.add(ContextType.GROWTH);
             needed.add(ContextType.CLASSIFICATION);
         }
 
         // Analysis/review/audit questions - full context
-        if (lowerMessage.matches(".*(analyze|analysis|review|audit|health|diagnose|assessment).*") ||
-            lowerMessage.matches(".*(what.*wrong|issue|problem|bottleneck).*")) {
+        if (PatternUtil.containsPattern(lowerMessage, "(analyze|analysis|review|audit|health|diagnose|assessment)") ||
+            PatternUtil.containsPattern(lowerMessage, "(what.*wrong|issue|problem|bottleneck)")) {
             needed.addAll(EnumSet.allOf(ContextType.class));
         }
 
         // Complex SQL generation - add helpful context
-        if (lowerMessage.matches(".*(select|insert|update|delete|query).*") && lowerMessage.length() > 50) {
+        if (PatternUtil.containsPattern(lowerMessage, "(select|insert|update|delete|query)") && lowerMessage.length() > 50) {
             needed.add(ContextType.KEY_COLUMNS);
             needed.add(ContextType.RELATIONSHIPS);
             needed.add(ContextType.CLASSIFICATION);

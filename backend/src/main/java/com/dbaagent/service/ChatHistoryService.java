@@ -254,7 +254,7 @@ public class ChatHistoryService {
             return "New chat";
         }
 
-        String punctuationTrimmed = normalized.replaceAll("[\\s?.!,;:]+$", "");
+        String punctuationTrimmed = normalized.replaceAll("[\\s?.!,;:]++$", "");
         String candidate = punctuationTrimmed.isBlank() ? normalized : punctuationTrimmed;
         if (candidate.length() <= AUTO_TITLE_MAX_LENGTH) {
             return candidate;

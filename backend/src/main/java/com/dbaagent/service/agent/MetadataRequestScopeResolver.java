@@ -1,5 +1,6 @@
 package com.dbaagent.service.agent;
 
+import com.dbaagent.util.PatternUtil;
 import com.dbaagent.model.SchemaMetadata;
 import com.dbaagent.service.ChatQuestionRoutingService;
 import com.dbaagent.service.SchemaQuestionUtil;
@@ -86,8 +87,8 @@ public class MetadataRequestScopeResolver {
             return false;
         }
         boolean columnSignal = promptIntent.subjectTypes().contains(PromptIntent.SubjectType.COLUMN)
-            || lowerQuestion.matches(".*\\b(columns?|fields?)\\b.*");
-        boolean performanceSignal = lowerQuestion.matches(".*\\b(performance|slow|slowness|latency|query|queries|bottleneck|impact|impacting|impactful|important|critical|hot|hottest|usage|used|pressure)\\b.*");
+            || PatternUtil.containsPattern(lowerQuestion, "\\b(columns?|fields?)\\b");
+        boolean performanceSignal = PatternUtil.containsPattern(lowerQuestion, "\\b(performance|slow|slowness|latency|query|queries|bottleneck|impact|impacting|impactful|important|critical|hot|hottest|usage|used|pressure)\\b");
         return columnSignal && performanceSignal;
     }
 

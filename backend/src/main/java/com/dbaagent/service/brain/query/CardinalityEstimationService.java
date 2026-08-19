@@ -114,6 +114,13 @@ public class CardinalityEstimationService {
             String dataType) {
 
         try {
+            // Resolve both names against information_schema before any of the
+            // collect* helpers interpolate them into SQL. Every interpolated
+            // identifier below is therefore a value the catalog returned, not
+            // caller input (java/sql-injection).
+            String safeTable = requireKnownIdentifier(jdbc, dbType, tableName, null);
+            String safeColumn = requireKnownIdentifier(jdbc, dbType, tableName, columnName);
+
             // Find or create statistics record
             ColumnStatistics stats = statisticsRepository
                 .findByConnectionIdAndTableNameAndColumnName(connectionId, tableName, columnName)
@@ -128,19 +135,19 @@ public class CardinalityEstimationService {
             stats.setCollectionMethod(ColumnStatistics.CollectionMethod.SAMPLE);
 
             // Collect basic statistics
-            collectBasicStats(jdbc, dbType, tableName, columnName, stats);
+            collectBasicStats(jdbc, dbType, safeTable, safeColumn, stats);
 
             // Collect MCV (Most Common Values)
-            collectMCVStats(jdbc, dbType, tableName, columnName, stats);
+            collectMCVStats(jdbc, dbType, safeTable, safeColumn, stats);
 
             // Collect histogram for numeric columns
             if (isNumericType(dataType)) {
-                collectHistogramStats(jdbc, dbType, tableName, columnName, stats);
+                collectHistogramStats(jdbc, dbType, safeTable, safeColumn, stats);
             }
 
             // Collect string length stats for text columns
             if (isTextType(dataType)) {
-                collectStringStats(jdbc, dbType, tableName, columnName, stats);
+                collectStringStats(jdbc, dbType, safeTable, safeColumn, stats);
             }
 
             stats.setCollectedAt(LocalDateTime.now());
@@ -498,12 +505,39 @@ public class CardinalityEstimationService {
         }
     }
 
+    // Delegates to the dialect's SamplingProvider: it doubles an embedded quote
+    // character, which this method previously did not do at all — a table named
+    // `x" ; DROP TABLE users; --` escaped the quoting entirely (java/sql-injection).
+    // The if/else on dbType it replaced also violated the provider-registry rule.
     private String quoteIdentifier(String dbType, String identifier) {
-        if ("postgres".equals(dbType)) {
-            return "\"" + identifier + "\"";
-        } else {
-            return "`" + identifier + "`";
+        return providerRegistry.getDialect(dbType).sampling().quoteIdentifier(identifier);
+    }
+
+    /**
+     * Resolves an identifier to the spelling recorded in information_schema.
+     * Quoting alone makes injection inert; this makes the value non-arbitrary,
+     * so a name that is not a real table/column never reaches interpolated SQL.
+     */
+    private String requireKnownIdentifier(JdbcTemplate jdbc, String dbType,
+                                          String tableName, String columnName) {
+        boolean isColumn = columnName != null;
+        String sql = isColumn
+            ? "SELECT column_name FROM information_schema.columns "
+              + "WHERE table_name = ? AND column_name = ? LIMIT 1"
+            : "SELECT table_name FROM information_schema.tables WHERE table_name = ? LIMIT 1";
+
+        boolean lower = "postgres".equals(dbType);
+        List<String> found = isColumn
+            ? jdbc.queryForList(sql, String.class,
+                  lower ? tableName.toLowerCase() : tableName,
+                  lower ? columnName.toLowerCase() : columnName)
+            : jdbc.queryForList(sql, String.class, lower ? tableName.toLowerCase() : tableName);
+
+        if (found.isEmpty()) {
+            throw new IllegalArgumentException(
+                "Unknown " + (isColumn ? "column " + tableName + "." + columnName : "table " + tableName));
         }
+        return found.get(0);
     }
 
     private boolean isNumericType(String dataType) {

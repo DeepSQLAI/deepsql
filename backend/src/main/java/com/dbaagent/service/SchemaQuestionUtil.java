@@ -1,5 +1,6 @@
 package com.dbaagent.service;
 
+import com.dbaagent.util.PatternUtil;
 import com.dbaagent.model.SchemaMetadata;
 import com.dbaagent.model.TableMetadata;
 
@@ -28,7 +29,7 @@ public final class SchemaQuestionUtil {
             return false;
         }
         String lower = question.toLowerCase(Locale.ROOT);
-        return lower.matches(".*\\b(how many|count|number of)\\b.*\\bcolumns?\\b.*");
+        return PatternUtil.containsPattern(lower, "\\b(how many|count|number of)\\b.*\\bcolumns?\\b");
     }
 
     public static boolean looksLikeExactTableColumnQuestion(String question) {
@@ -44,9 +45,9 @@ public final class SchemaQuestionUtil {
         if (!(lower.contains("row") || lower.contains("record"))) {
             return false;
         }
-        return lower.matches(".*\\b(how many|count|number of)\\b.*\\b(rows?|records?)\\b.*")
-            || lower.matches(".*\\b(rows?|records?)\\b.*\\b(in|for|of|on)\\b.*")
-            || lower.matches(".*\\brow count\\b.*");
+        return PatternUtil.containsPattern(lower, "\\b(how many|count|number of)\\b.*\\b(rows?|records?)\\b")
+            || PatternUtil.containsPattern(lower, "\\b(rows?|records?)\\b.*\\b(in|for|of|on)\\b")
+            || PatternUtil.containsPattern(lower, "\\brow count\\b");
     }
 
     public static boolean looksLikeExactTableIndexQuestion(String question) {
@@ -62,7 +63,7 @@ public final class SchemaQuestionUtil {
         if (!(lower.contains("index") || lower.contains("indices"))) {
             return false;
         }
-        return lower.matches(".*\\b(how many|count|number of)\\b.*\\b(indexes?|indices)\\b.*");
+        return PatternUtil.containsPattern(lower, "\\b(how many|count|number of)\\b.*\\b(indexes?|indices)\\b");
     }
 
     public static boolean looksLikeExactTableIndexListQuestion(String question) {
@@ -73,8 +74,8 @@ public final class SchemaQuestionUtil {
         if (!(lower.contains("index") || lower.contains("indices"))) {
             return false;
         }
-        return lower.matches(".*\\b(what|which|show|list|display|describe)\\b.*\\b(indexes?|indices)\\b.*")
-            || lower.matches(".*\\b(indexes?|indices)\\b.*\\b(in|for|of|on)\\b.*");
+        return PatternUtil.containsPattern(lower, "\\b(what|which|show|list|display|describe)\\b.*\\b(indexes?|indices)\\b")
+            || PatternUtil.containsPattern(lower, "\\b(indexes?|indices)\\b.*\\b(in|for|of|on)\\b");
     }
 
     public static boolean looksLikeExactTableColumnListQuestion(String question) {
@@ -91,9 +92,9 @@ public final class SchemaQuestionUtil {
         if (!lower.contains("column")) {
             return false;
         }
-        return lower.matches(".*\\b(what|which|show|list|display|describe|schema|structure)\\b.*\\bcolumns?\\b.*")
-            || lower.matches(".*\\bcolumns?\\b.*\\b(in|for|of|on)\\b.*")
-            || lower.matches(".*\\bdescribe\\b.*\\btable\\b.*");
+        return PatternUtil.containsPattern(lower, "\\b(what|which|show|list|display|describe|schema|structure)\\b.*\\bcolumns?\\b")
+            || PatternUtil.containsPattern(lower, "\\bcolumns?\\b.*\\b(in|for|of|on)\\b")
+            || PatternUtil.containsPattern(lower, "\\bdescribe\\b.*\\btable\\b");
     }
 
     public static boolean looksLikeExactTableKeyColumnQuestion(String question) {
@@ -107,9 +108,9 @@ public final class SchemaQuestionUtil {
         if (!(lower.contains("key") || lower.contains("primary") || lower.contains("foreign") || lower.contains("join column"))) {
             return false;
         }
-        return lower.matches(".*\\b(how many|count|number of)\\b.*\\b(inferred keys?|key columns?|primary keys?|foreign keys?|join columns?)\\b.*")
-            || lower.matches(".*\\b(what|which|show|list|display|describe)\\b.*\\b(inferred keys?|key columns?|primary keys?|foreign keys?|join columns?)\\b.*")
-            || lower.matches(".*\\b(inferred keys?|key columns?|primary keys?|foreign keys?|join columns?)\\b.*\\b(in|for|of|on)\\b.*");
+        return PatternUtil.containsPattern(lower, "\\b(how many|count|number of)\\b.*\\b(inferred keys?|key columns?|primary keys?|foreign keys?|join columns?)\\b")
+            || PatternUtil.containsPattern(lower, "\\b(what|which|show|list|display|describe)\\b.*\\b(inferred keys?|key columns?|primary keys?|foreign keys?|join columns?)\\b")
+            || PatternUtil.containsPattern(lower, "\\b(inferred keys?|key columns?|primary keys?|foreign keys?|join columns?)\\b.*\\b(in|for|of|on)\\b");
     }
 
     public static boolean looksLikePairScopedJoinColumnQuestion(String question) {

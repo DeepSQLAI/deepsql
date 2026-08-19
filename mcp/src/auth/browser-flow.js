@@ -72,12 +72,24 @@ function startLoopbackServer() {
 }
 
 function openInBrowser(url) {
+  // The URL arrives in a server response, so it is not ours to trust. Args are
+  // passed as an array (no shell), but the win32 branch goes through cmd, where
+  // a non-http scheme could still be read as something other than a URL.
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
+
+  const safeUrl = parsed.toString();
   const opener =
     process.platform === "darwin"
-      ? ["open", [url]]
+      ? ["open", [safeUrl]]
       : process.platform === "win32"
-        ? ["cmd", ["/c", "start", '""', url]]
-        : ["xdg-open", [url]];
+        ? ["cmd", ["/c", "start", '""', safeUrl]]
+        : ["xdg-open", [safeUrl]];
   try {
     const child = spawn(opener[0], opener[1], { stdio: "ignore", detached: true });
     child.on("error", () => {});

@@ -58,6 +58,11 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                // Deliberate, not an oversight (CodeQL java/spring-disabled-csrf-protection):
+                // every authenticated route is SessionCreationPolicy.STATELESS and carries
+                // its credential in an Authorization / MCP token header, which a browser
+                // does not attach automatically. With no ambient cookie session there is no
+                // CSRF to forge. Re-enable the moment any cookie-based auth is introduced.
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()));
 

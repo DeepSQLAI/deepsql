@@ -16,6 +16,7 @@ import com.dbaagent.repository.brain.ColumnStatisticsRepository;
 import com.dbaagent.model.brain.ColumnStatistics;
 import com.dbaagent.model.KeyColumnAnalysis;
 import com.dbaagent.service.optd.OptdOptimizationService;
+import com.dbaagent.util.PatternUtil;
 import com.dbaagent.util.QueryNormalizer;
 import static com.dbaagent.service.QueryFingerprintService.computeCanonicalFingerprint;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -2301,8 +2302,8 @@ public class QueryOptimizationService {
         String desc = s.getDescription() != null ? s.getDescription().toLowerCase().trim() : "";
 
         // Skip metadata titles (estimated impact, improvement percentages)
-        if (title.matches(".*estimated\\s+(impact|improvement|performance).*")) return false;
-        if (title.matches(".*overall\\s+estimated.*")) return false;
+        if (PatternUtil.containsPattern(title, "estimated\\s+(impact|improvement|performance)")) return false;
+        if (PatternUtil.containsPattern(title, "overall\\s+estimated")) return false;
         if (title.matches("^\\d+[\\-–]\\d+\\s*%.*")) return false;
         // Improvement percentage as title ("80% overall performance improvement", "65% faster")
         if (title.matches("^\\d+%\\s+(overall|performance|improvement|faster|better|reduction).*")) return false;
@@ -2957,7 +2958,7 @@ public class QueryOptimizationService {
                 String sampleQuery = query.getSampleQuery();
                 if (sampleQuery == null || sampleQuery.isBlank()) {
                     boolean hasPlaceholders = queryText != null &&
-                        (queryText.contains("?") || queryText.matches(".*\\$\\d+.*"));
+                        (queryText.contains("?") || PatternUtil.containsPattern(queryText, "\\$\\d+"));
                     sampleQuery = !hasPlaceholders ? queryText : null;
                 }
                 OptimizationResult result = optimizeQuery(connectionId, queryText, sampleQuery, query);
@@ -3111,7 +3112,7 @@ public class QueryOptimizationService {
         }
 
         if ((sampleQuery == null || sampleQuery.isBlank()) && originalQuery != null && !originalQuery.isBlank()) {
-            boolean hasPlaceholders = originalQuery.contains("?") || originalQuery.matches(".*\\$\\d+.*");
+            boolean hasPlaceholders = originalQuery.contains("?") || PatternUtil.containsPattern(originalQuery, "\\$\\d+");
             if (!hasPlaceholders) {
                 sampleQuery = originalQuery;
             }

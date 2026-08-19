@@ -197,7 +197,7 @@ returns a number).
 ### Backend Rules
 1. **Database Provider Registry**: Use `DatabaseProviderRegistry` for all DB-specific operations. Do NOT add if/else or switch for database types.
 2. **LLM Provider Registry**: Use `LlmProviderRegistry` for all provider-specific LLM behavior. Do NOT add if/else or switch on provider type. Chat and embedding providers are registered and resolved independently — some providers offer only one. Providers are *factories* over credentials, not `ChatModel`s, so credentials stay resolvable per call and key rotation needs no restart.
-3. **SSH-Aware Access**: Always use `ConnectionService.getJdbcTemplate(connectionId, request)` — handles SSH tunneling transparently.
+3. **SSH-Aware Access**: Always use `ConnectionService.getJdbcTemplate(connectionId, request)` — handles SSH tunneling transparently. The bastion host is screened by `SshHostGuard` before any session is created (see SSRF guard below).
 4. **SQL Rule**: All generated SQL MUST use table-qualified column names (`table.column_name`).
 5. **RAG Caching**: Three-tier cache (memory → Redis → Azure Search). Redis failure is graceful (app continues without caching).
 6. **Virtual Threads**: Enabled for concurrency (JDK 25).
@@ -338,6 +338,111 @@ it against a real database — not a theoretical hardening pass.
   and `withInsert_isTreatedAsMutation` passed *because* of the stub. It now
   constructs a real `MySQLQueryExecutionProvider`. Do not reintroduce a stubbed
   dialect here; the mock is what let the blocker ship.
+
+### SSH Tunnel SSRF Guard
+
+`SshHostGuard` screens `request.getSshHost()` before `jsch.getSession(...)` in
+`SshTunnelService.createSession`, closing CodeQL `java/ssrf` alert #138. Both entry
+points are covered by that single call site (`establishTunnel` and
+`testSshConnection`).
+
+- **It resolves the host and checks every returned address**, not just the literal
+  string. A public hostname whose A record points at `169.254.169.254` or `10.x` is
+  still refused — a string-only check is defeated by one DNS record.
+- Blocked: loopback, wildcard, link-local (cloud metadata), RFC1918, CGNAT
+  (`100.64/10`), multicast, IPv6 ULA (`fc00::/7`), and IPv4-mapped/compatible IPv6
+  forms that smuggle a blocked v4 address through a v6 literal.
+- **`testSshConnection` calls the guard *outside* its try block.** That method catches
+  broad `Exception` and returns `false`, so a guard rejection inside it would render a
+  blocked host as an ordinary auth failure — the silent-failure anti-pattern above.
+  It propagates `IllegalArgumentException` instead, matching how a missing SSH password
+  already surfaces.
+- **It ships disabled** (`deepsql.ssh.host-guard.enabled=false`). Bastions legitimately
+  live on RFC1918 networks, so enabling it by default would break existing self-hosted
+  installs on upgrade. The trade-off is explicit: **on a default install the SSRF
+  surface is open** — an authenticated user who can create connections can still point
+  the tunnel at `169.254.169.254` or internal hosts. The CodeQL alert closes either way
+  (the sanitizer is on the call path regardless of the flag), so a closed alert here
+  does **not** mean deployments are protected. Do not read #138 going green as
+  "SSRF handled".
+- Operators who want the protection set `enabled=true` and allowlist their own bastion
+  via `deepsql.ssh.host-guard.allowed-hosts` (exact host, or a leading-dot suffix like
+  `.corp.internal`).
+- **Two sibling guards cover the other two `java/ssrf` alerts.** Address
+  classification is shared in `OutboundHostGuard` (resolve the host, check every
+  returned address, block loopback/link-local/RFC1918/CGNAT/ULA/IPv4-mapped-IPv6);
+  the three call sites differ only in policy and message.
+  - `DatabaseHostGuard` (alert #136, `ConnectionService`) screens the **JDBC** host.
+    The SSH guard never covered this — a direct, non-tunnelled connection does not
+    pass through `SshTunnelService` at all. Applied in `buildJdbcUrl` *and* the
+    Hikari pool path, and skipped when `tunnelPort != null` since a tunnelled
+    connection targets the local forwarded port. Also ships disabled
+    (`deepsql.database.host-guard.enabled`) — databases sit on RFC1918 even more
+    often than bastions do.
+  - `S3LogFetchService.assertFetchableUrl` (alert #137) screens the presigned log
+    URL. The real hazard was `setInstanceFollowRedirects(true)`: the JDK chases a
+    302 with no chance to inspect the target, so a presigned URL on a public host
+    could hand off to the metadata endpoint. Redirects are now followed manually
+    (max 5), with **every hop** re-checked for https + a public address. Unlike the
+    other two this is always on — there is no legitimate reason to fetch a slow
+    query log from a private address.
+
+### CodeQL Remediation (code scanning, 138 alerts on main)
+
+The 138 open alerts were only **5 rules**, and the counter badly overstates the
+work: 118 were one mechanical pattern. What was fixed and what was not:
+
+- **`java/polynomial-redos` (118).** Nearly all were `s.matches(".*RE.*")`.
+  `String.matches` anchors the whole input, so the wrapping `.*` exists only to
+  undo that anchoring — and `.*` + alternation is the backtracking. Rewritten to
+  `PatternUtil.containsPattern(s, "RE")` (`find()` over a cached compiled
+  Pattern) at **174 sites in 17 files** — more than the 118 flagged, since
+  CodeQL only reports where taint reaches. Equivalence was verified by
+  differential test over all 175 literals, not by inspection.
+  - **This is a behavior change on multi-line input.** `.` does not cross a
+    newline, so the old form *failed* to match a keyword after a line break;
+    `find()` matches it. That is a bug fix for intent classifiers, and it only
+    affects callers that do not pre-normalize — `PromptIntentSignals.normalize`
+    already collapses newlines, `ChatContextAssembler` does not.
+  - The remainder were compiled `Pattern` constants with genuinely ambiguous
+    quantifiers, fixed individually with possessive quantifiers / bounded gaps
+    (`PostgresSlowLogPatterns`, `QueryNormalizer`, `OptdOptimizationService`,
+    `SqlUsageService`, `QueryPlanCacheService`, `ChatHistoryService`,
+    `CompanyKnowledgeService`, `QueryExecutionPolicyService`).
+  - `PlanPatternLibraryService` also carried a real latent bug: `[^from]+` is a
+    character class ("not f/r/o/m"), so any column containing those letters
+    (`order_id`, `from_date`) defeated the collapse. Now a bounded lazy scan.
+- **`java/sql-injection` (15).** Not one bug — three distinct cases:
+  - `CardinalityEstimationService` (6) was a **real vulnerability**:
+    `quoteIdentifier` wrapped in quotes but never doubled an embedded quote, so
+    a table named `x" ; DROP TABLE users; --` escaped the quoting. Four of the
+    other five `quoteIdentifier` implementations in this repo already escape
+    correctly — this one was the outlier. It now delegates to the dialect's
+    `SamplingProvider` (also removing an if/else on `dbType`), and both
+    identifiers are resolved against `information_schema` first, so only
+    catalog-returned names ever reach interpolated SQL.
+  - `MySQLPrivilegeCheckProvider` (1) concatenated a database name into a
+    string literal; now a bind parameter.
+  - `QueryExecutorService` (3) and the EXPLAIN providers (4) execute
+    user-authored SQL **by design** — that is the Editor feature. They are not
+    parameterizable; their protection is the guard layer in the SQL Editor Guard
+    Rules above. Do not "fix" these by mangling the SQL.
+- **`java/spring-disabled-csrf-protection` (1).** Correct as-is and documented
+  in `SecurityConfig`: every route is `STATELESS` with header-carried JWT/MCP
+  tokens, so there is no ambient cookie session to forge. Re-enable CSRF the
+  moment any cookie-based auth appears.
+- **`js/command-line-injection` (1).** `spawn` already used array args (no
+  shell), but `authorize_url` comes from a server response and the win32 branch
+  routes through `cmd`. Now scheme-validated to http/https before opening.
+
+**Scan-flapping, confirmed.** Analyses on `main` report 137 results
+consistently — except commit `8b47c67`, which reported **3**. That is the commit
+GitHub labelled "Fixed in branch main"; the next healthy scan re-found
+everything and it showed as "Reappeared". Nothing was fixed or reverted. Before
+concluding an alert is resolved, check `results_count` on the analysis
+(`gh api repos/.../code-scanning/analyses?ref=...`) — a partial scan reads as a
+clean one. Note also that PR-triggered scans are diff-scoped and legitimately
+report 0 for untouched files.
 
 ### Data Model Rules
 

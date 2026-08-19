@@ -101,9 +101,9 @@ public final class PromptIntentSignals {
         if (normalized.isBlank()) {
             return false;
         }
-        return normalized.matches(".*\\b(last|past|previous|current|this|today|yesterday|tomorrow)\\b.*")
-            || normalized.matches(".*\\b\\d+\\s+(day|days|week|weeks|month|months|year|years|hour|hours)\\b.*")
-            || normalized.matches(".*\\b(january|february|march|april|may|june|july|august|september|october|november|december)\\b.*")
+        return PatternUtil.containsPattern(normalized, "\\b(last|past|previous|current|this|today|yesterday|tomorrow)\\b")
+            || PatternUtil.containsPattern(normalized, "\\b\\d+\\s+(day|days|week|weeks|month|months|year|years|hour|hours)\\b")
+            || PatternUtil.containsPattern(normalized, "\\b(january|february|march|april|may|june|july|august|september|october|november|december)\\b")
             || normalized.contains(" between ")
             || normalized.contains(" from ")
             || normalized.contains(" since ")

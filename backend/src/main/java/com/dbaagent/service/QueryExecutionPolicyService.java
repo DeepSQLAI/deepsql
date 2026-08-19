@@ -461,9 +461,14 @@ public class QueryExecutionPolicyService {
     }
 
     private String stripQuotedLiterals(String sql) {
+        // The alternations are ordered so no input has two parses: '' must be
+        // tried before the single-char branch, and the char class excludes both
+        // quote and backslash. Without that the ('' | [^'\\])* form is ambiguous
+        // and backtracks exponentially (java/polynomial-redos) on a long
+        // run of quotes — reachable from Editor SQL, so this is on a hot path.
         return sql
-            .replaceAll("'([^'\\\\]|\\\\.|'')*'", "''")
-            .replaceAll("\"([^\"\\\\]|\\\\.)*\"", "\"\"");
+            .replaceAll("'(?:''|\\\\.|[^'\\\\])*+'", "''")
+            .replaceAll("\"(?:\\\\.|[^\"\\\\])*+\"", "\"\"");
     }
 
     private boolean containsWhereClause(String sql) {
