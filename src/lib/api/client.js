@@ -390,6 +390,21 @@ export const adminAPI = {
     return response.data
   },
 
+  startImpersonation: async (userId) => {
+    const response = await apiClient.post('/api/admin/impersonate', { userId })
+    return response.data
+  },
+
+  stopImpersonation: async () => {
+    const response = await apiClient.delete('/api/admin/impersonate')
+    return response.data
+  },
+
+  getImpersonationStatus: async () => {
+    const response = await apiClient.get('/api/admin/impersonate')
+    return response.data
+  },
+
   /**
    * Get all roles with their permissions (ADMIN only)
    */
@@ -1386,6 +1401,11 @@ export const queryAPI = {
     if (requestOptions.mutationConfirmed != null) {
       payload.mutationConfirmed = requestOptions.mutationConfirmed;
     }
+    // Lets the caller cancel this run server-side; aborting the request alone
+    // leaves the query running on the database.
+    if (requestOptions.executionId) {
+      payload.executionId = requestOptions.executionId;
+    }
     // Use a longer axios timeout for queries with extended timeouts
     const axiosTimeout =
       timeoutSeconds != null
@@ -1402,16 +1422,26 @@ export const queryAPI = {
     return response.data;
   },
 
+  cancelQuery: async (connectionId, executionId) => {
+    const response = await apiClient.post(
+      `/api/connections/${connectionId}/query/${encodeURIComponent(executionId)}/cancel`,
+    );
+    return response.data;
+  },
+
   getTableIndexes: async (connectionId, tableName) => {
+    // Encode so schema-qualified ids (`crm.orders`) survive the path segment.
+    const tableId = encodeURIComponent(String(tableName || ""));
     const response = await apiClient.get(
-      `/api/connections/${connectionId}/tables/${tableName}/indexes`,
+      `/api/connections/${connectionId}/tables/${tableId}/indexes`,
     );
     return response.data;
   },
 
   getTableStats: async (connectionId, tableName) => {
+    const tableId = encodeURIComponent(String(tableName || ""));
     const response = await apiClient.get(
-      `/api/connections/${connectionId}/tables/${tableName}/stats`,
+      `/api/connections/${connectionId}/tables/${tableId}/stats`,
     );
     return response.data;
   },
@@ -2691,7 +2721,7 @@ export const dashboardGenAPI = {
   //   onStep({ type, message }) · onDone({ success, dashboardConfig }) · onError(Error)
   // Returns an abort fn.
   generateStream: (connectionId, prompt, currentConfig, dashboardId, handlers = {}) => {
-    const { onStep, onDone, onError, onCreated } = handlers;
+    const { onStep, onChunk, onDone, onError, onCreated } = handlers;
     const controller = new AbortController();
     const body = JSON.stringify({ connectionId, prompt, currentConfig: currentConfig || null, dashboardId: dashboardId || null });
     const doFetch = () =>
@@ -2757,6 +2787,7 @@ export const dashboardGenAPI = {
           // right away rather than waiting for the whole generation to finish.
           if (event === "created") onCreated && onCreated(data);
           else if (event === "step") onStep && onStep(data);
+          else if (event === "chunk") onChunk && onChunk(data);
           // `chat` = out-of-context reply (hi/thanks); must not fall through to `done`
           // or the workspace appends the canned "Done — built…" save message.
           else if (event === "chat") { finished = true; onDone && onDone(data); }
@@ -2897,6 +2928,44 @@ export const savedDashboardsAPI = {
     const response = await apiClient.get(
       `/api/saved-dashboards/connection/${connectionId}/folders`,
     );
+    return response.data;
+  },
+
+  // Duplicate a dashboard as a new, independent draft
+  cloneDashboard: async (id) => {
+    const response = await apiClient.post(`/api/saved-dashboards/${id}/clone`);
+    return response.data;
+  },
+
+  // Version history, most recent first
+  getVersionHistory: async (id) => {
+    const response = await apiClient.get(`/api/saved-dashboards/${id}/versions`);
+    return response.data;
+  },
+
+  // Restore a prior version as the current config
+  restoreVersion: async (id, versionId) => {
+    const response = await apiClient.post(
+      `/api/saved-dashboards/${id}/versions/${versionId}/restore`,
+    );
+    return response.data;
+  },
+
+  // Natural-language alerts, evaluated on a schedule by the DeepSQL agent
+  getAlerts: async (id) => {
+    const response = await apiClient.get(`/api/saved-dashboards/${id}/alerts`);
+    return response.data;
+  },
+  createAlert: async (id, alert) => {
+    const response = await apiClient.post(`/api/saved-dashboards/${id}/alerts`, alert);
+    return response.data;
+  },
+  updateAlert: async (id, alertId, updates) => {
+    const response = await apiClient.put(`/api/saved-dashboards/${id}/alerts/${alertId}`, updates);
+    return response.data;
+  },
+  deleteAlert: async (id, alertId) => {
+    const response = await apiClient.delete(`/api/saved-dashboards/${id}/alerts/${alertId}`);
     return response.data;
   },
 };

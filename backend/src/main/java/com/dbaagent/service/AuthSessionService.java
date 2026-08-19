@@ -38,6 +38,9 @@ public class AuthSessionService {
     @Value("${security.cookie.refresh-name:refresh_token}")
     private String refreshCookieName;
 
+    @Value("${security.cookie.impersonate-name:impersonate_user}")
+    private String impersonateCookieName;
+
     @Value("${security.cookie.secure:false}")
     private boolean cookieSecure;
 
@@ -152,9 +155,29 @@ public class AuthSessionService {
         response.addHeader(HttpHeaders.SET_COOKIE, buildRefreshCookie(sessionAuthentication.refreshToken()).toString());
     }
 
+    public void writeImpersonationCookie(HttpServletResponse response, String cookieName, long targetUserId) {
+        response.addHeader(HttpHeaders.SET_COOKIE, ResponseCookie.from(cookieName, Long.toString(targetUserId))
+            .httpOnly(true)
+            .secure(cookieSecure)
+            .sameSite(cookieSameSite)
+            .path("/")
+            .maxAge(Duration.ofDays(refreshDays))
+            .build()
+            .toString());
+    }
+
+    public void clearImpersonationCookie(HttpServletResponse response, String cookieName) {
+        response.addHeader(HttpHeaders.SET_COOKIE, clearCookie(cookieName).toString());
+    }
+
+    public void clearImpersonationCookie(HttpServletResponse response) {
+        clearImpersonationCookie(response, impersonateCookieName);
+    }
+
     public void clearSessionCookies(HttpServletResponse response) {
         response.addHeader(HttpHeaders.SET_COOKIE, clearCookie(accessCookieName).toString());
         response.addHeader(HttpHeaders.SET_COOKIE, clearCookie(refreshCookieName).toString());
+        response.addHeader(HttpHeaders.SET_COOKIE, clearCookie(impersonateCookieName).toString());
     }
 
     private SessionAuthentication rotateSession(

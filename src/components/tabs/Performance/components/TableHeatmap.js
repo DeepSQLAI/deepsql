@@ -107,7 +107,7 @@ export default function TableHeatmap({ data = [], caption = 'Based on scan frequ
                 {data.slice(0, 10).map((item, idx) => {
                     const widthPercent = Math.max((item.usageScore / maxScore) * 100, 8)
                     const opacity = 0.3 + (item.usageScore / 100) * 0.7
-                    const displayName = item.tableName?.split('.').pop() || item.tableName
+                    const displayName = item.tableName || ''
                     const tooltipContent = getTableTooltipContent(displayName, item.usageScore)
 
                     return (

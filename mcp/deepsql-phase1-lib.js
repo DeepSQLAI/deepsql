@@ -27,6 +27,15 @@ const FORBIDDEN_SQL_KEYWORDS = [
   "COMMENT",
 ];
 
+const FORBIDDEN_SQL_KEYWORD_SET = new Set(FORBIDDEN_SQL_KEYWORDS);
+const FORBIDDEN_ALTERNATION = FORBIDDEN_SQL_KEYWORDS.join("|");
+const CTE_MUTATION_PATTERN = new RegExp(
+  `\\bAS(?:\\s+NOT)?(?:\\s+MATERIALIZED)?\\s*\\(\\s*(${FORBIDDEN_ALTERNATION})\\b`,
+);
+const FOR_UPDATE_PATTERN = /\bFOR\s+(?:NO\s+KEY\s+)?UPDATE\b/;
+const TRAILING_DML_PATTERN = new RegExp(`\\)\\s*(${FORBIDDEN_ALTERNATION})\\b`);
+const EXPLAIN_PREFIX_PATTERN = /^EXPLAIN(?:\s*\([^)]*\))?/;
+
 const TOOL_DEFINITIONS = [
   {
     name: "list_connections",
@@ -966,11 +975,171 @@ function stripTrailingSemicolons(sql) {
     .replace(/;+\s*$/, "");
 }
 
+function firstWord(sql) {
+  const match = String(sql || "").trim().match(/^([A-Za-z]+)/);
+  return match ? match[1].toUpperCase() : null;
+}
+
+function isIdentChar(ch) {
+  return /[A-Za-z0-9_]/.test(ch);
+}
+
+function skipWhitespace(sql, i) {
+  while (i < sql.length && /\s/.test(sql[i])) {
+    i += 1;
+  }
+  return i;
+}
+
+function regionMatches(sql, offset, token) {
+  if (offset < 0 || offset + token.length > sql.length) {
+    return false;
+  }
+  if (!sql.startsWith(token, offset)) {
+    return false;
+  }
+  const next = offset + token.length;
+  return next === sql.length || !isIdentChar(sql[next]);
+}
+
+function skipIdent(sql, i) {
+  if (i >= sql.length) {
+    return -1;
+  }
+  const c = sql[i];
+  if (c === '"' || c === "`" || c === "'") {
+    const quote = c;
+    i += 1;
+    while (i < sql.length && sql[i] !== quote) {
+      i += 1;
+    }
+    return i >= sql.length ? -1 : i + 1;
+  }
+  if (!/[A-Za-z_]/.test(c)) {
+    return -1;
+  }
+  i += 1;
+  while (i < sql.length && isIdentChar(sql[i])) {
+    i += 1;
+  }
+  return i;
+}
+
+function skipBalancedParens(sql, openAt) {
+  if (sql[openAt] !== "(") {
+    return -1;
+  }
+  let depth = 0;
+  for (let i = openAt; i < sql.length; i += 1) {
+    if (sql[i] === "(") {
+      depth += 1;
+    } else if (sql[i] === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        return i + 1;
+      }
+    }
+  }
+  return -1;
+}
+
+function remainderAfterWithClause(sql) {
+  if (!sql || !sql.startsWith("WITH")) {
+    return null;
+  }
+  let i = skipWhitespace(sql, 4);
+  if (regionMatches(sql, i, "RECURSIVE")) {
+    i = skipWhitespace(sql, i + 9);
+  }
+  while (i < sql.length) {
+    const next = skipIdent(sql, i);
+    if (next < 0) {
+      return null;
+    }
+    i = skipWhitespace(sql, next);
+    if (sql[i] === "(") {
+      i = skipBalancedParens(sql, i);
+      if (i < 0) {
+        return null;
+      }
+      i = skipWhitespace(sql, i);
+    }
+    if (!regionMatches(sql, i, "AS")) {
+      return null;
+    }
+    i = skipWhitespace(sql, i + 2);
+    if (regionMatches(sql, i, "NOT")) {
+      i = skipWhitespace(sql, i + 3);
+    }
+    if (regionMatches(sql, i, "MATERIALIZED")) {
+      i = skipWhitespace(sql, i + 12);
+    }
+    if (sql[i] !== "(") {
+      return null;
+    }
+    i = skipBalancedParens(sql, i);
+    if (i < 0) {
+      return null;
+    }
+    i = skipWhitespace(sql, i);
+    if (sql[i] === ",") {
+      i = skipWhitespace(sql, i + 1);
+      continue;
+    }
+    return i < sql.length ? sql.slice(i) : "";
+  }
+  return null;
+}
+
+function findForbiddenMutation(sql) {
+  if (FOR_UPDATE_PATTERN.test(sql)) {
+    return "UPDATE";
+  }
+
+  const cteMutation = sql.match(CTE_MUTATION_PATTERN);
+  if (cteMutation) {
+    return cteMutation[1];
+  }
+
+  const first = firstWord(sql);
+  if (first === "EXPLAIN") {
+    const inner = sql.replace(EXPLAIN_PREFIX_PATTERN, "").trim();
+    const innerFirst = firstWord(inner);
+    if (!innerFirst) {
+      return null;
+    }
+    if (!ALLOWED_READ_ONLY_KEYWORDS.has(innerFirst)) {
+      return innerFirst;
+    }
+    return findForbiddenMutation(inner);
+  }
+
+  if (first === "WITH") {
+    const main = remainderAfterWithClause(sql);
+    if (main != null) {
+      const mainFirst = firstWord(main);
+      if (mainFirst && FORBIDDEN_SQL_KEYWORD_SET.has(mainFirst)) {
+        return mainFirst;
+      }
+    } else {
+      const trailing = sql.match(TRAILING_DML_PATTERN);
+      if (trailing) {
+        return trailing[1];
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Detect mutating statements nested inside an otherwise read-only wrapper.
+ * Do not scan bare \bKEYWORD\b — COMMENT/CALL are common table names
+ * (`SELECT * FROM comment`) and REPLACE() is a function.
+ */
 function containsForbiddenKeyword(sql) {
-  const normalized = normalizeSqlForInspection(sql);
-  return FORBIDDEN_SQL_KEYWORDS.find((keyword) =>
-    new RegExp(`\\b${keyword}\\b`, "i").test(normalized),
-  );
+  const inspect = normalizeSqlForInspection(sql).toUpperCase();
+  return findForbiddenMutation(inspect);
 }
 
 function validateReadOnlySql(sql, { allowExplain = true } = {}) {

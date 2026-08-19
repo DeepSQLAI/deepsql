@@ -71,6 +71,45 @@
   white-space: nowrap;
   max-width: 320px;
 }
+
+.crumbEditable {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  padding: 4px 6px;
+  margin: 0 -6px;
+  border-radius: 7px;
+  cursor: text;
+  min-width: 0;
+  transition: background 120ms ease-out;
+}
+.crumbEditable:hover { background: #f2f2f2; }
+
+.crumbEditIcon {
+  flex-shrink: 0;
+  color: #b0b0b0;
+  transition: color 120ms ease-out;
+}
+.crumbEditable:hover .crumbEditIcon { color: #777; }
+
+.crumbInput {
+  font-size: 14px;
+  font-weight: 590;
+  color: #111;
+  letter-spacing: -0.006em;
+  border: 1px solid #cfcaf0;
+  border-radius: 7px;
+  background: #fff;
+  padding: 3px 7px;
+  margin: 0 -7px;
+  width: 220px;
+  max-width: 320px;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(83, 74, 183, 0.12);
+}
+
 .spacer { flex: 1; }
 
 .pillLive,
@@ -123,6 +162,137 @@
   flex-direction: column;
   gap: 10px;
 }
+
+/* v0.dev-style intro: before the first message, the composer sits centered in
+   an otherwise-empty workspace. The instant the user sends, this whole column
+   collapses from full-width to the 340px docked panel and its centered content
+   becomes top-aligned — both genuinely animatable (width, margin, transform),
+   so the dock reads as one continuous motion rather than a cut. The canvas
+   mounts a beat later (it isn't rendered at all during intro), sliding the
+   docked panel's border-right into place as it appears. */
+.bodyIntro {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background:
+    radial-gradient(ellipse 700px 420px at 50% 38%, rgba(83, 74, 183, 0.06), transparent 70%),
+    #fff;
+}
+
+.agentIntro {
+  width: 100%;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  background: transparent;
+  padding: 32px 24px;
+  overflow-y: auto;
+  transition: width 420ms cubic-bezier(0.2, 0.8, 0.2, 1), background 420ms ease-out;
+}
+
+.agentIntro::before,
+.agentIntro::after {
+  content: '';
+  flex: 1;
+  transition: flex-basis 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Fired the instant the first message is sent: collapse the centered hero
+   down to the docked panel's width. The heading/example grid have already
+   unmounted (see the JSX's `!docking` guards) so only the composer is left
+   to glide from a wide centered card into the narrow docked composer. */
+.agentDocking {
+  width: 340px;
+  background: #fafafa;
+}
+.agentDocking::before { flex: 0 1 0%; }
+.agentDocking::after { flex: 1 1 auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .agent, .agentIntro, .agentDocking { transition: none; animation: none; }
+}
+
+.introHead {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  width: 100%;
+  max-width: 640px;
+  margin-bottom: 22px;
+  animation: introFade 380ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes introFade {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .introHead, .exampleGridIntro { animation: none; }
+}
+
+.agentScrollIntro { display: none; }
+
+.composerIntro {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  width: 100%;
+  max-width: 640px;
+  padding: 10px;
+  border: 1px solid #e2e2e2;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 12px 32px -14px rgba(83, 74, 183, 0.22), 0 2px 8px rgba(0, 0, 0, 0.04);
+  animation: introFade 380ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: max-width 420ms cubic-bezier(0.2, 0.8, 0.2, 1), border-radius 420ms ease-out,
+    box-shadow 420ms ease-out, margin 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.composerDocking {
+  max-width: 100%;
+  margin: 0 -12px -12px;
+  width: calc(100% + 24px);
+  border-radius: 0;
+  box-shadow: none;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+}
+
+.exampleGridIntro {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  max-width: 640px;
+  margin: 16px 0 20px;
+  animation: introFade 380ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (max-width: 620px) {
+  .exampleGridIntro { grid-template-columns: 1fr; }
+}
+
+.backLinkIntro {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 20px;
+  border: 1px solid #e2e2e2;
+  background: #fff;
+  border-radius: 9px;
+  padding: 7px 12px;
+  font-size: 13px;
+  color: #555;
+  cursor: pointer;
+  transition: background 120ms ease-out;
+}
+.backLinkIntro:hover { background: #f3f3f3; }
 
 .bubbleAgent {
   background: #fff;
@@ -257,6 +427,12 @@
   align-items: flex-start;
   gap: 9px;
   min-height: 26px;
+  animation: traceRowIn 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes traceRowIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .traceRail {
@@ -316,6 +492,7 @@
 @media (prefers-reduced-motion: reduce) {
   .traceDotOuter::before { animation: none; opacity: 0.35; }
   .traceIconActive { animation: none; }
+  .traceRow { animation: none; }
 }
 
 .saveBtn {
@@ -379,7 +556,7 @@
   flex: 1;
   min-width: 0;
   min-height: 38px;
-  max-height: 140px;
+  max-height: 280px;
   padding: 9px 12px;
   border: 1px solid #e2e2e2;
   border-radius: 10px;
@@ -458,10 +635,42 @@
   background: #fff;
 }
 
+.canvasToolbarLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .canvasToolbarRight {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.buildingBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #534AB7;
+}
+
+.buildingDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #534AB7;
+  animation: buildingDotPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes buildingDotPulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .buildingDot { animation: none; opacity: 0.9; }
 }
 
 .viewToggle {
@@ -505,6 +714,17 @@
   cursor: pointer;
   transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
 }
+/* Tailwind's Preflight makes SVG sizing CSS-driven, not attribute-driven — an
+   icon's default flex-shrink:1 + min-width:auto then lets it collapse below
+   its intrinsic size inside these toolbar buttons. */
+.ghostBtn svg,
+.primaryBtnSm svg,
+.queriesBtn svg,
+.queriesBtnActive svg,
+.refreshMenuBtn svg,
+.refreshMenuBtnActive svg {
+  flex-shrink: 0;
+}
 
 .ghostBtn,
 .queriesBtn {
@@ -534,6 +754,86 @@
   background: #f5f3ff;
   color: #463c9f;
 }
+
+.refreshGroup {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+/* Refresh + the auto-refresh chevron read as one split button — square off the
+   touching edges so the 1px gap between them looks intentional, not like two
+   unrelated controls that happen to be adjacent. */
+.refreshGroup .ghostBtn {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.refreshMenuBtn,
+.refreshMenuBtnActive {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  min-width: 28px;
+  padding: 0 8px;
+  border: 1px solid #e2e2e2;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-top-right-radius: 7px;
+  border-bottom-right-radius: 7px;
+  border-left: none;
+  background: #fff;
+  color: #555;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+.refreshMenuBtn:hover { background: #f6f6f6; }
+
+.refreshMenuBtnActive {
+  border-color: #cfcaf0;
+  background: #f5f3ff;
+  color: #463c9f;
+}
+.refreshMenuBtnActive:hover { background: #ece8fc; }
+
+.refreshMenuPop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 100px;
+  padding: 4px;
+  border: 1px solid #ececec;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 28px -10px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.06);
+  animation: dsqlRefreshPopIn 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes dsqlRefreshPopIn { from { opacity: 0; transform: translateY(-4px) scale(0.97); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .refreshMenuPop { animation: none; } }
+
+.refreshMenuItem,
+.refreshMenuItemActive {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  padding: 6px 9px;
+  font-size: 12.5px;
+  color: #333;
+  text-align: left;
+  cursor: pointer;
+}
+.refreshMenuItem:hover { background: #f5f5f5; }
+.refreshMenuItemActive { color: #463c9f; font-weight: 600; background: #f5f3ff; }
 
 .canvasBody {
   flex: 1;
@@ -675,6 +975,241 @@
   color: #9c2b2b;
 }
 
+.versionCard {
+  border: 1px solid #ececec;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.versionMeta { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+
+.versionName {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #222;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.versionSub { font-size: 11px; color: #999; }
+
+.versionDiff {
+  font-size: 11.5px;
+  color: #463c9f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.versionActions { flex-shrink: 0; display: flex; align-items: center; gap: 6px; }
+
+.versionPreviewBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid #e2e2e2;
+  border-radius: 7px;
+  background: #fff;
+  color: #555;
+  cursor: pointer;
+}
+.versionPreviewBtn:hover:not(:disabled) { background: #f5f3ff; border-color: #cfcaf0; color: #463c9f; }
+.versionPreviewBtn:disabled { opacity: 0.5; cursor: default; }
+.versionPreviewBtn svg { flex-shrink: 0; }
+
+.versionRestoreBtn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid #e2e2e2;
+  border-radius: 7px;
+  background: #fff;
+  color: #555;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.versionRestoreBtn:hover:not(:disabled) { background: #f5f3ff; border-color: #cfcaf0; color: #463c9f; }
+.versionRestoreBtn:disabled { opacity: 0.5; cursor: default; }
+.versionRestoreBtn svg { flex-shrink: 0; }
+
+.versionCurrentBadge {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #0F6E56;
+  background: #E1F5EE;
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.alertComposer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 11px;
+  border: 1px solid #ececec;
+  border-radius: 10px;
+  background: #fafafa;
+  margin-bottom: 4px;
+}
+
+.alertComposerInput {
+  resize: vertical;
+  min-height: 44px;
+  padding: 8px 9px;
+  border: 1px solid #e2e2e2;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12.5px;
+  font-family: inherit;
+  color: #222;
+  outline: none;
+}
+.alertComposerInput:focus { border-color: #b8aeee; }
+
+.alertComposerEmail {
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid #e2e2e2;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12.5px;
+  color: #222;
+  outline: none;
+}
+.alertComposerEmail:focus { border-color: #b8aeee; }
+
+.alertCard {
+  border: 1px solid #ececec;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.alertCardHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.alertCardActions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.alertTextBtn {
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+.alertTextBtn:hover { background: #f0f0f0; color: #333; }
+
+.alertBadgeOn,
+.alertBadgeOff {
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 2px 9px;
+  flex-shrink: 0;
+}
+.alertBadgeOn { color: #0F6E56; background: #E1F5EE; }
+.alertBadgeOff { color: #6b7280; background: #f1f0f5; }
+
+.alertInterval { font-size: 11px; color: #999; }
+
+.alertCondition { font-size: 12.5px; color: #333; line-height: 1.5; }
+
+.alertLastOk,
+.alertLastFired,
+.alertLastError {
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.alertLastOk { color: #6b7280; }
+.alertLastFired { color: #b45309; font-weight: 500; }
+.alertLastError { color: #9c2b2b; }
+
+.previewOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 15, 20, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 32px;
+}
+
+.previewModal {
+  width: min(960px, 100%);
+  height: min(720px, 100%);
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.previewModalHead {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #ececec;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #333;
+}
+.previewModalHead button {
+  display: inline-flex;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #999;
+  padding: 2px;
+  border-radius: 5px;
+}
+.previewModalHead button:hover { background: #ececec; color: #555; }
+
+.previewModalBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: #fafafa;
+}
+
+.previewModalFoot {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 16px;
+  border-top: 1px solid #ececec;
+}
+
 .newCanvas {
   height: 100%;
   display: flex;
@@ -708,8 +1243,57 @@
   box-shadow: 0 1px 2px rgba(83, 74, 183, 0.08);
 }
 
+/* Same shape as .newIcon, but alive while a build is in flight — a static
+   sparkle here reads as frozen given the sidebar's own trace is animating. */
+.newIconPulse {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: #EEEDFE;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+  box-shadow: 0 1px 2px rgba(83, 74, 183, 0.08);
+  animation: dsqlBuildPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes dsqlBuildPulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 1px 2px rgba(83, 74, 183, 0.08), 0 0 0 0 rgba(83, 74, 183, 0.18); }
+  50% { transform: scale(1.06); box-shadow: 0 1px 2px rgba(83, 74, 183, 0.08), 0 0 0 10px rgba(83, 74, 183, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .newIconPulse { animation: none; }
+}
+
 .newTitle { font-size: 19px; font-weight: 650; letter-spacing: -0.014em; color: #111; margin: 0; }
 .newSub { font-size: 13px; color: #777; max-width: 380px; line-height: 1.6; margin: 0; }
+
+.buildElapsed { color: #a3a3a3; font-variant-numeric: tabular-nums; }
+
+/* Rotates every few seconds (see BUILD_TIPS) — the `key={tipIndex}` on the
+   element itself retriggers this fade-in each time the tip text changes. */
+.buildTip {
+  margin: 18px 0 0;
+  padding: 10px 16px;
+  max-width: 420px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #534AB7;
+  background: #F5F3FF;
+  border-radius: 10px;
+  animation: dsqlTipIn 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes dsqlTipIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .buildTip { animation: none; }
+}
 
 .exampleGrid {
   display: grid;

@@ -203,8 +203,15 @@ public class ActiveQueryService {
                 String dbType = providerRegistry.getCanonicalName(connRequest.getDbType());
 
                 if ("postgres".equals(dbType)) {
+                    // pg_terminate_backend takes an integer; binding a long makes
+                    // the driver send bigint and PostgreSQL then finds no matching
+                    // overload ("function pg_terminate_backend(bigint) does not
+                    // exist"), so every kill failed.
+                    if (backendPid > Integer.MAX_VALUE || backendPid < Integer.MIN_VALUE) {
+                        throw new IllegalArgumentException("Not a valid PostgreSQL backend pid: " + backendPid);
+                    }
                     try (PreparedStatement ps = conn.prepareStatement("SELECT pg_terminate_backend(?)")) {
-                        ps.setLong(1, backendPid);
+                        ps.setInt(1, (int) backendPid);
                         ps.execute();
                     }
                 } else if ("mysql".equals(dbType)) {

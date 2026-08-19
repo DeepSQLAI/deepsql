@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { ArrowUp, Plus, Square, Loader2, Database } from 'lucide-react'
+import { ArrowUp, Plus, Square, Loader2, Database, Sparkles, Hash, Table2, Clock, AlertCircle } from 'lucide-react'
 import { agentChatAPI, withConnectionContext } from '@/lib/api/agentClient'
 import { agentConversationAPI } from '@/lib/api/client'
 import AgentMarkdown from './AgentMarkdown'
@@ -35,9 +35,9 @@ function deriveTitle(messages) {
 // a domain-specific table/column name here (see the chat guardrail in
 // AGENTS.md); AgentChatPanel has no idea what tables the active connection has.
 const SUGGESTIONS = [
-  'How many tables are there?',
-  'Show the largest tables',
-  'What are the top slow queries?',
+  { icon: Hash, text: 'How many tables are there?' },
+  { icon: Table2, text: 'Show the largest tables' },
+  { icon: Clock, text: 'What are the top slow queries?' },
 ]
 
 export default function AgentChatPanel({ connectionId, connectionName }) {
@@ -197,15 +197,36 @@ export default function AgentChatPanel({ connectionId, connectionName }) {
       </header>
 
       <div className={styles.messages} ref={listRef}>
-        {booting && <div className={styles.notice}><Loader2 size={14} className={styles.spin} /> Starting your agent…</div>}
-        {bootError && <div className={styles.error}>{bootError} <button onClick={() => boot()} className={styles.retry}>Retry</button></div>}
+        {booting && (
+          <div className={styles.bootState}>
+            <span className={styles.bootIcon}><Loader2 size={18} className={styles.spin} /></span>
+            <span className={styles.bootText}>Starting your agent…</span>
+          </div>
+        )}
+        {bootError && (
+          <div className={styles.errorState}>
+            <span className={styles.errorIcon}><AlertCircle size={18} /></span>
+            <span className={styles.errorText}>{bootError}</span>
+            <button onClick={() => boot()} className={styles.retry}>Retry</button>
+          </div>
+        )}
 
         {!booting && !bootError && messages.length === 0 && (
           <div className={styles.empty}>
-            <div className={styles.emptyTitle}>Ask about your database</div>
+            <span className={styles.emptyIcon}><Sparkles size={22} color="#534AB7" /></span>
+            <h2 className={styles.emptyTitle}>Ask about your database</h2>
+            <p className={styles.emptySub}>Get instant answers grounded on your schema, live data, and query history.</p>
             <div className={styles.suggestions}>
-              {SUGGESTIONS.map((s) => (
-                <button key={s} className={styles.suggestion} onClick={() => send(s)}>{s}</button>
+              {SUGGESTIONS.map(({ icon: Icon, text }, i) => (
+                <button
+                  key={text}
+                  className={styles.suggestion}
+                  style={{ '--stagger': i }}
+                  onClick={() => send(text)}
+                >
+                  <span className={styles.suggestionIcon}><Icon size={14} /></span>
+                  {text}
+                </button>
               ))}
             </div>
           </div>
@@ -234,20 +255,22 @@ export default function AgentChatPanel({ connectionId, connectionName }) {
       </div>
 
       <div className={styles.composer}>
-        <textarea
-          className={styles.textarea}
-          placeholder={authBlocked ? 'Agent unavailable — reconnect above' : sessionId ? 'Message the DeepSQL Agent…' : 'Starting…'}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onKeyDown}
-          rows={1}
-          disabled={!sessionId || booting || authBlocked}
-        />
-        {sending ? (
-          <button className={styles.stopBtn} onClick={stop} title="Stop"><Square size={15} /></button>
-        ) : (
-          <button className={styles.sendBtn} onClick={() => send()} disabled={!input.trim() || !sessionId || authBlocked} title="Send"><ArrowUp size={16} /></button>
-        )}
+        <div className={styles.composerInner}>
+          <textarea
+            className={styles.textarea}
+            placeholder={authBlocked ? 'Agent unavailable — reconnect above' : sessionId ? 'Message the DeepSQL Agent…' : 'Starting…'}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            rows={1}
+            disabled={!sessionId || booting || authBlocked}
+          />
+          {sending ? (
+            <button className={styles.stopBtn} onClick={stop} title="Stop"><Square size={15} /></button>
+          ) : (
+            <button className={styles.sendBtn} onClick={() => send()} disabled={!input.trim() || !sessionId || authBlocked} title="Send"><ArrowUp size={16} /></button>
+          )}
+        </div>
       </div>
     </div>
   )

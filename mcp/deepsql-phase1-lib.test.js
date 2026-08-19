@@ -107,6 +107,53 @@ test("validateReadOnlySql rejects mutating CTEs", () => {
   assert.match(result.reason, /DELETE/i);
 });
 
+test("validateReadOnlySql rejects mutating CTE bodies", () => {
+  const result = validateReadOnlySql(`
+    WITH doomed AS (
+      DELETE FROM users RETURNING id
+    )
+    SELECT * FROM doomed
+  `);
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /DELETE/i);
+});
+
+test("validateReadOnlySql accepts COMMENT and CALL as table names", () => {
+  assert.equal(validateReadOnlySql("SELECT * FROM comment").ok, true);
+  assert.equal(validateReadOnlySql("SELECT * FROM call").ok, true);
+  assert.equal(
+    validateReadOnlySql(
+      "SELECT comment.id FROM public.comment JOIN call ON call.id = comment.call_id",
+    ).ok,
+    true,
+  );
+});
+
+test("validateReadOnlySql accepts COMMENT columns and REPLACE()", () => {
+  assert.equal(validateReadOnlySql("SELECT comment FROM posts").ok, true);
+  assert.equal(validateReadOnlySql("SELECT COALESCE(comment, '') FROM posts").ok, true);
+  assert.equal(validateReadOnlySql("SELECT REPLACE(name, 'a', 'b') FROM users").ok, true);
+});
+
+test("validateReadOnlySql still rejects top-level CALL/COMMENT/DELETE", () => {
+  assert.equal(validateReadOnlySql("DELETE FROM comment").ok, false);
+  assert.equal(validateReadOnlySql("CALL do_thing()").ok, false);
+  assert.equal(validateReadOnlySql("COMMENT ON TABLE posts IS 'x'").ok, false);
+});
+
+test("validateReadOnlySql rejects FOR UPDATE but allows EXPLAIN of comment tables", () => {
+  const locked = validateReadOnlySql("SELECT * FROM orders FOR UPDATE");
+  assert.equal(locked.ok, false);
+  assert.match(locked.reason, /UPDATE/i);
+
+  const explainedDelete = validateReadOnlySql("EXPLAIN DELETE FROM users");
+  assert.equal(explainedDelete.ok, false);
+
+  const explainedComment = validateReadOnlySql("EXPLAIN SELECT * FROM comment");
+  assert.equal(explainedComment.ok, true);
+});
+
 test("validateReadOnlySql rejects EXPLAIN ANALYZE", () => {
   const result = validateReadOnlySql("EXPLAIN ANALYZE SELECT * FROM orders");
   assert.equal(result.ok, false);

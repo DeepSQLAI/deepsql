@@ -43,6 +43,31 @@ const emptySession = () => ({
   savedId: null,
   dirty: false,
   abort: null,
+  // Progressive build: liveShell is the dashboard-shell chunk for the turn
+  // currently in flight — a separate slot from `config` (the last COMPLETED
+  // build) so a live build renders its own in-progress canvas without
+  // clobbering (or being clobbered by) whatever was there before. Cleared
+  // the instant the turn resolves (onDone/onChat/onError), since `config`
+  // takes over as the source of truth from then on.
+  liveShell: null,
+  liveWidget: null,
+  // Every widget chunk seen this turn (id -> html), so onDone can check whether
+  // the final assembled document is identical to what's already live-rendered
+  // (see submitPrompt's onDone) — if so, the iframe is left alone instead of
+  // reloading and re-running every widget's query a second time.
+  liveWidgets: null,
+  // What DashboardWorkspace actually feeds DashboardArtifact's `html` prop once
+  // a build finishes — see onDone. null while a session has never finished a
+  // build (falls back to config?.html), or after a build that DID need a real
+  // reload (self-review changed something), in which case it's just config.html.
+  renderHtml: null,
+  // A user-set name from the breadcrumb title editor, taking precedence over
+  // both the saved dashboard's name and the HTML-derived config.title (see
+  // titleFromHtml in DashboardWorkspace) until the next agent build re-derives
+  // one — same rationale as titleFromHtml's own comment: without this, a
+  // rename would only "stick" until the next chat turn overwrites the title
+  // from the regenerated HTML's <title>.
+  titleOverride: null,
 })
 
 // A single stable reference for "no session yet" reads. useDashboardSession's
@@ -58,6 +83,29 @@ const EMPTY_SESSION = Object.freeze(emptySession())
 // forever.
 const MAX_POLL_WAIT_MS = 20 * 60 * 1000
 const POLL_INTERVAL_MS = 3000
+
+// Mirrors DashboardAgentService.substituteWidgetSlot (same regex shape) so we
+// can reconstruct, on the frontend, what the fully-assembled document would
+// look like from the shell + widget chunks already streamed — purely to
+// compare against the backend's own final assembly and decide whether the
+// iframe needs to reload at all (see onDone below).
+function substituteWidgetSlot(shellHtml, widgetId, widgetHtml) {
+  const escapedId = widgetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const slot = new RegExp(`(<[a-zA-Z0-9]+[^>]*data-widget="${escapedId}"[^>]*>)([\\s\\S]*?)(</[a-zA-Z0-9]+>)`)
+  if (slot.test(shellHtml)) return shellHtml.replace(slot, (_m, open, _inner, close) => open + widgetHtml + close)
+  const selfClosing = new RegExp(`<[a-zA-Z0-9]+[^>]*data-widget="${escapedId}"[^>]*/>`)
+  if (selfClosing.test(shellHtml)) return shellHtml.replace(selfClosing, `<div data-widget="${widgetId}">${widgetHtml}</div>`)
+  return shellHtml
+}
+
+function assembleLiveHtml(liveShell, liveWidgets) {
+  if (!liveShell) return null
+  let html = liveShell
+  for (const [id, widgetHtml] of Object.entries(liveWidgets || {})) {
+    html = substituteWidgetSlot(html, id, widgetHtml)
+  }
+  return html
+}
 
 function resolveKeyIn(state, key) {
   let k = key
@@ -142,6 +190,17 @@ export const useDashboardChatStore = create((set, get) => ({
       steps: [],
       thinking: true,
       startedAt: Date.now(),
+      liveShell: null,
+      liveWidget: null,
+      liveWidgets: null,
+      // renderHtml is DELIBERATELY left as-is here (not reset to null): while
+      // this new turn is grounding/verifying (liveShell not set yet), the html
+      // prop still falls back to renderHtml || config.html — resetting it here
+      // would jump the fallback to config.html (the fully-assembled string,
+      // different from whatever bare-shell string is actually still in the
+      // iframe's srcDoc from the LAST turn's no-reload path) and force a
+      // spurious reload + duplicate queries the moment a new prompt is
+      // submitted, before the new build has even started streaming.
     }))
 
     const currentConfig = get().getSession(key).config
@@ -155,10 +214,27 @@ export const useDashboardChatStore = create((set, get) => ({
         if (data?.dashboardId) get().adoptRealId(key, String(data.dashboardId))
       },
       onStep: (s) => get().patchSession(key, (cur) => ({ steps: [...cur.steps, s] })),
+      // Progressive build — a dashboard-shell or dashboard-widget chunk landed
+      // well before the turn finishes. The shell sets up the live canvas once;
+      // each widget after that is a one-shot mount (DashboardWorkspace posts it
+      // into the already-loaded iframe via DashboardArtifact's ref, then this
+      // slot's job is done — liveWidget is "last arrived", not an accumulating
+      // list, since the iframe itself is what now holds that DOM).
+      onChunk: (chunk) => get().patchSession(key, (cur) => (
+        chunk?.kind === 'shell'
+          ? { liveShell: chunk.html }
+          : {
+              liveWidget: { id: chunk.id, html: chunk.html, seq: (cur.liveWidget?.seq || 0) + 1 },
+              liveWidgets: { ...cur.liveWidgets, [chunk.id]: chunk.html },
+            }
+      )),
       onChat: (reply) => get().patchSession(key, (cur) => ({
         thinking: false,
         steps: [],
         abort: null,
+        liveShell: null,
+        liveWidget: null,
+        liveWidgets: null,
         messages: [...cur.messages, { role: 'agent', text: reply || '…' }],
       })),
       onDone: (next) => {
@@ -170,6 +246,9 @@ export const useDashboardChatStore = create((set, get) => ({
             thinking: false,
             steps: [],
             abort: null,
+            liveShell: null,
+            liveWidget: null,
+            liveWidgets: null,
             messages: [...cur.messages, { role: 'agent', text: next?.reply || '…' }],
           }))
           return
@@ -180,18 +259,48 @@ export const useDashboardChatStore = create((set, get) => ({
         // patch is just so the UI updates instantly without waiting on a
         // round-trip. Keep this message textually identical to the one
         // completeBuildTurn appends server-side.
-        get().patchSession(key, (cur) => ({
-          thinking: false,
-          steps: [],
-          abort: null,
-          config: next,
-          messages: [...cur.messages, { role: 'agent', text: 'Done — built and verified against your data. Saved as a draft — tell me what to change.' }],
-        }))
+        get().patchSession(key, (cur) => {
+          // config.html is always the backend's real final document (persisted,
+          // shown in Source, shared) — never rewritten. Separately, renderHtml is
+          // what DashboardWorkspace actually feeds DashboardArtifact's `html` prop:
+          // if self-review didn't touch anything, the reconstruction from chunks
+          // already streamed to this tab is byte-identical to next.html, so
+          // renderHtml keeps the SAME string reference the iframe is already
+          // showing (the live shell + injected widgets) — the srcDoc attribute
+          // never changes, so the browser never reloads the iframe and no
+          // widget's query re-runs a second time. If self-review DID change
+          // something, the strings differ and renderHtml becomes next.html,
+          // which legitimately needs a fresh iframe load to show the fix.
+          const reconstructed = assembleLiveHtml(cur.liveShell, cur.liveWidgets)
+          const noReloadNeeded = reconstructed === next.html
+          return {
+            thinking: false,
+            steps: [],
+            abort: null,
+            config: next,
+            renderHtml: noReloadNeeded ? cur.liveShell : next.html,
+            liveShell: null,
+            liveWidget: null,
+            liveWidgets: null,
+            messages: [...cur.messages, { role: 'agent', text: 'Done — built and verified against your data. Saved as a draft — tell me what to change.' }],
+          }
+        })
+        // completeBuildTurn (the backend's own persistence for this turn) just
+        // wrote its own HTML-derived name over whatever was there — a rename
+        // made before/during this turn needs re-applying now, or it would only
+        // ever have been true in this tab's UI, never in the saved row.
+        const { titleOverride, savedId } = get().getSession(key)
+        if (titleOverride && savedId) {
+          savedDashboardsAPI.updateDashboard(savedId, { name: titleOverride }).catch(() => {})
+        }
       },
       onError: (e) => get().patchSession(key, (cur) => ({
         thinking: false,
         steps: [],
         abort: null,
+        liveShell: null,
+        liveWidget: null,
+        liveWidgets: null,
         messages: [...cur.messages, { role: 'agent', text: `⚠ ${e?.message || 'Generation failed.'}`, error: true }],
       })),
     })
@@ -261,7 +370,7 @@ export const useDashboardChatStore = create((set, get) => ({
     const session = state.sessions[k] || emptySession()
     const body = {
       connectionId,
-      name: cfg.title || 'Untitled dashboard',
+      name: session.titleOverride || cfg.title || 'Untitled dashboard',
       description: cfg.description || '',
       dashboardConfig: JSON.stringify(cfg),
       chatMessages: JSON.stringify(msgs || session.messages),
@@ -280,6 +389,23 @@ export const useDashboardChatStore = create((set, get) => ({
     } catch (e) {
       get().patchSession(key, { dirty: true })
       throw e
+    }
+  },
+
+  // Breadcrumb title editor. A saved dashboard renames immediately via a
+  // lightweight partial update (SavedDashboardService.updateDashboard only
+  // touches fields that are non-null, so this can't clobber the config/chat
+  // history). A not-yet-saved dashboard has no row to PUT — titleOverride
+  // alone is enough, since persistDraft reads it as the name on first save.
+  renameDashboard: async (key, name) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    get().patchSession(key, { titleOverride: trimmed })
+    const state = get()
+    const k = resolveKeyIn(state, key)
+    const session = state.sessions[k] || emptySession()
+    if (session.savedId) {
+      await savedDashboardsAPI.updateDashboard(session.savedId, { name: trimmed })
     }
   },
 }))
@@ -302,4 +428,5 @@ export const useDashboardChatActions = () =>
     submitPrompt: state.submitPrompt,
     resumeIfRunning: state.resumeIfRunning,
     persistDraft: state.persistDraft,
+    renameDashboard: state.renameDashboard,
   })))

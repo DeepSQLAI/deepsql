@@ -196,7 +196,7 @@ export default function DatabaseAdvisorTab({ connectionId }) {
                                                 <span>{rec.priority}</span>
                                             </div>
                                             <div className={styles.issueTitle}>
-                                                {rec.tableName ? `Table: ${rec.tableName}` : rec.title}
+                                                {rec.tableName ? `Table: ${rec.schemaName ? `${rec.schemaName}.${rec.tableName}` : rec.tableName}` : rec.title}
                                             </div>
                                         </div>
                                         <div className={styles.issueReasoning}>

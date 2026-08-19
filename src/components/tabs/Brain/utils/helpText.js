@@ -738,7 +738,7 @@ export const QUERY_INTELLIGENCE = {
   panel: {
     title: 'Query Intelligence',
     description: 'ML-based learning system that builds pattern knowledge over time for smarter query optimization.',
-    differentiation: 'Unlike the Slow Queries tab (operational monitoring for immediate issues), Query Intelligence focuses on long-term pattern recognition and cardinality accuracy learning.',
+    differentiation: 'Unlike the Performance tab (operational monitoring for immediate issues), Query Intelligence focuses on long-term pattern recognition and cardinality accuracy learning.',
   },
 
   // Buttons
@@ -795,7 +795,7 @@ export const QUERY_INTELLIGENCE = {
     recommendations: {
       title: 'Recommendations',
       description: 'Actionable database maintenance commands to improve cardinality estimation accuracy.',
-      differentiation: 'These focus on optimizer statistics maintenance (ANALYZE TABLE, histograms). Query rewrites and index suggestions are in Database Advisor → Slow Queries.',
+      differentiation: 'These focus on optimizer statistics maintenance (ANALYZE TABLE, histograms). Query rewrites and index suggestions are in Performance → Workload.',
       impact: 'Accurate cardinality estimates lead to better query plans, reducing execution time for complex queries.',
     },
     analyzeTable: {

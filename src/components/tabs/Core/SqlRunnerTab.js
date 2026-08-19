@@ -37,13 +37,22 @@ import {
   queryPerformanceAPI,
   explainAPI,
   brainAPI,
-  activeQueryAPI,
 } from "@/lib/api/client";
 import ExplainAnalysisPanel from "./ExplainAnalysisPanel";
 import QueryOptimizePanel from "./QueryOptimizePanel";
 import { useAuth } from "@/hooks/useAuth";
 import { useConnections } from "@/lib/hooks/queries/useConnections";
 import { HelpTooltip } from "../Brain/components";
+import {
+  canonicalTableReference,
+  objectKey,
+  qualifyForSql,
+  connectionHasMultipleSchemas,
+} from "@/lib/schemaNames";
+
+// Kept below the 300s proxy_read_timeout in docker/nginx/default.conf so a slow
+// query fails with a real message rather than an opaque 504.
+const QUERY_TIMEOUT_SECONDS = 240;
 
 // Constants for diagram layout
 const DIAGRAM_NODE_WIDTH = 240;
@@ -208,7 +217,7 @@ function looksLikeSingleLineDashComment(sql) {
 }
 
 export default function SqlRunnerTab({ connectionId }) {
-  const { isAdmin } = useAuth();
+  const { isAdmin, username } = useAuth();
   const { data: connectionsData } = useConnections();
   const currentConnection = (Array.isArray(connectionsData) ? connectionsData : []).find(
     (c) => c?.id === connectionId
@@ -254,7 +263,7 @@ export default function SqlRunnerTab({ connectionId }) {
   // Format-related notices (warning/info) live in their own state so a formatter parse error
   // never bleeds into the Results panel as a giant BNF trace.
   const [formatNotice, setFormatNotice] = useState(null);
-  const [databaseObjects, setDatabaseObjects] = useState(() => loadSchemaCache(connectionId) || []);
+  const [databaseObjects, setDatabaseObjects] = useState(() => loadSchemaCache(connectionId, username) || []);
   const [loadingObjects, setLoadingObjects] = useState(false);
   const [refreshingSchema, setRefreshingSchema] = useState(false);
   const [expandedNodes, setExpandedNodes] = useState(
@@ -288,6 +297,7 @@ export default function SqlRunnerTab({ connectionId }) {
   const autocompleteRegisteredRef = useRef(false);
   const dbObjectsRef = useRef([]);
   const abortControllerRef = useRef(null);
+  const executionIdRef = useRef(null);
   // Note: savedQueriesPanelRef kept for potential future use, but panel UI is now in modal
   const savedQueriesPanelRef = useRef(null);
   const hasRowCount = (value) => value !== null && value !== undefined;
@@ -320,7 +330,7 @@ export default function SqlRunnerTab({ connectionId }) {
       // Restore schema from localStorage cache for instant display, then
       // refresh in background. Only show the loading spinner on a cold start
       // (no cached objects at all).
-      const cachedSchema = loadSchemaCache(connectionId);
+      const cachedSchema = loadSchemaCache(connectionId, username);
       if (cachedSchema && cachedSchema.length > 0) {
         dbObjectsRef.current = cachedSchema;
         setDatabaseObjects(cachedSchema);
@@ -332,7 +342,7 @@ export default function SqlRunnerTab({ connectionId }) {
         fetchDatabaseObjects({ showSpinner: true });
       }
     }
-  }, [connectionId]);
+  }, [connectionId, username]);
 
   // Save state to cache whenever important state changes
   useEffect(() => {
@@ -392,7 +402,7 @@ export default function SqlRunnerTab({ connectionId }) {
       const response = await queryAPI.getDatabaseObjects(connectionId);
       if (response.success) {
         setDatabaseObjects(response.objects);
-        saveSchemaCache(connectionId, response.objects);
+        saveSchemaCache(connectionId, response.objects, username);
       }
     } catch (err) {
       console.error("Failed to fetch database objects:", err);
@@ -410,7 +420,7 @@ export default function SqlRunnerTab({ connectionId }) {
     brainAPI
       .rescanSchema(connectionId)
       .then(async () => {
-        clearSchemaCache(connectionId);
+        clearSchemaCache(connectionId, username);
         await fetchDatabaseObjects({ showSpinner: false });
       })
       .catch((err) => {
@@ -586,23 +596,25 @@ export default function SqlRunnerTab({ connectionId }) {
           // Get all table names with fuzzy matching
           const tables = dbObjects.filter((obj) => obj.type === "table");
           tables.forEach((table) => {
-            const fuzzyResult = fuzzyMatch(currentWord, table.name);
+            const tableRef = canonicalTableReference(table);
+            const matchRef = fuzzyMatch(currentWord, tableRef);
+            const matchBare = fuzzyMatch(currentWord, table.name);
+            const fuzzyResult = matchRef.matches ? matchRef : matchBare;
             if (fuzzyResult.matches) {
-              // Use fuzzy score to boost sortText (100 - score to make higher scores sort first)
               const fuzzyBoost = String(100 - fuzzyResult.score).padStart(
                 3,
                 "0",
               );
               suggestions.push({
-                label: table.name,
+                label: tableRef,
                 kind: monaco.languages.CompletionItemKind.Class,
-                insertText: table.name,
+                insertText: qualifyForSql(table),
                 range: range,
-                detail: "Table",
+                detail: table.schema && table.schema !== "public" ? `Table · ${table.schema}` : "Table",
                 documentation: table.columns
                   ? `${table.columns.length} columns`
                   : "Table",
-                sortText: getPriority("table") + fuzzyBoost + table.name,
+                sortText: getPriority("table") + fuzzyBoost + tableRef,
               });
             }
           });
@@ -610,27 +622,30 @@ export default function SqlRunnerTab({ connectionId }) {
           // Get all view names with fuzzy matching
           const views = dbObjects.filter((obj) => obj.type === "view");
           views.forEach((view) => {
-            const fuzzyResult = fuzzyMatch(currentWord, view.name);
+            const viewRef = canonicalTableReference(view);
+            const matchRef = fuzzyMatch(currentWord, viewRef);
+            const matchBare = fuzzyMatch(currentWord, view.name);
+            const fuzzyResult = matchRef.matches ? matchRef : matchBare;
             if (fuzzyResult.matches) {
               const fuzzyBoost = String(100 - fuzzyResult.score).padStart(
                 3,
                 "0",
               );
               suggestions.push({
-                label: view.name,
+                label: viewRef,
                 kind: monaco.languages.CompletionItemKind.View,
-                insertText: view.name,
+                insertText: qualifyForSql(view),
                 range: range,
-                detail: "View",
+                detail: view.schema && view.schema !== "public" ? `View · ${view.schema}` : "View",
                 documentation: "Database view",
-                sortText: getPriority("view") + fuzzyBoost + view.name,
+                sortText: getPriority("view") + fuzzyBoost + viewRef,
               });
             }
           });
 
           // Detect table aliases (e.g., "FROM users u", "FROM users AS u")
           const aliasPattern =
-            /(?:FROM|JOIN)\s+(\w+)(?:\s+AS\s+(\w+)|\s+(\w+)(?=\s|,|WHERE|JOIN|GROUP|ORDER|LIMIT|$))/gi;
+            /(?:FROM|JOIN)\s+((?:\w+\.)?\w+)(?:\s+AS\s+(\w+)|\s+(\w+)(?=\s|,|WHERE|JOIN|GROUP|ORDER|LIMIT|$))/gi;
           const aliases = {};
           let aliasMatch;
 
@@ -657,9 +672,12 @@ export default function SqlRunnerTab({ connectionId }) {
 
             if (actualTableName) {
               // User typed an alias - suggest columns from that table
-              const table = tables.find(
-                (t) => t.name.toLowerCase() === actualTableName.toLowerCase(),
-              );
+              const table = tables.find((t) => {
+                const ref = canonicalTableReference(t).toLowerCase();
+                const bare = (t.name || "").toLowerCase();
+                const wanted = actualTableName.toLowerCase();
+                return ref === wanted || bare === wanted || qualifyForSql(t).toLowerCase() === wanted;
+              });
               if (table && table.columns) {
                 table.columns.forEach((column) => {
                   const fuzzyResult = fuzzyMatch(currentWord, column.name);
@@ -675,7 +693,7 @@ export default function SqlRunnerTab({ connectionId }) {
                         : monaco.languages.CompletionItemKind.Field,
                       insertText: column.name,
                       range: range,
-                      detail: `${possibleAlias}.${column.name} (${table.name})`,
+                      detail: `${possibleAlias}.${column.name} (${canonicalTableReference(table)})`,
                       documentation: `${column.dataType}${column.nullable ? " (nullable)" : " (not null)"}${column.primaryKey ? " [PK]" : ""}`,
                       sortText:
                         getPriority("column") + fuzzyBoost + column.name,
@@ -684,10 +702,13 @@ export default function SqlRunnerTab({ connectionId }) {
                 });
               }
             } else {
-              // Not an alias - check if it's a direct table name
-              const table = tables.find(
-                (t) => t.name.toLowerCase() === possibleAlias.toLowerCase(),
-              );
+              // Not an alias - check if it's a direct table / schema.table name
+              const table = tables.find((t) => {
+                const ref = canonicalTableReference(t).toLowerCase();
+                const bare = (t.name || "").toLowerCase();
+                const wanted = possibleAlias.toLowerCase();
+                return ref === wanted || bare === wanted;
+              });
               if (table && table.columns) {
                 table.columns.forEach((column) => {
                   const fuzzyResult = fuzzyMatch(currentWord, column.name);
@@ -703,7 +724,7 @@ export default function SqlRunnerTab({ connectionId }) {
                         : monaco.languages.CompletionItemKind.Field,
                       insertText: column.name,
                       range: range,
-                      detail: `${table.name}.${column.name}`,
+                      detail: `${canonicalTableReference(table)}.${column.name}`,
                       documentation: `${column.dataType}${column.nullable ? " (nullable)" : " (not null)"}${column.primaryKey ? " [PK]" : ""}`,
                       sortText:
                         getPriority("column") + fuzzyBoost + column.name,
@@ -717,7 +738,7 @@ export default function SqlRunnerTab({ connectionId }) {
             tables.forEach((table) => {
               if (table.columns) {
                 table.columns.forEach((column) => {
-                  const fullName = `${table.name}.${column.name}`;
+                  const fullName = `${canonicalTableReference(table)}.${column.name}`;
                   const fuzzyResult = fuzzyMatch(currentWord, fullName);
                   if (fuzzyResult.matches) {
                     const fuzzyBoost = String(100 - fuzzyResult.score).padStart(
@@ -1239,19 +1260,27 @@ export default function SqlRunnerTab({ connectionId }) {
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+    // Identifies this run so cancelling can terminate it on the database.
+    const executionId =
+      globalThis.crypto?.randomUUID?.() ??
+      `exec-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    executionIdRef.current = executionId;
 
     try {
-      // Use extended timeout (10 min) for SQL editor queries to support long-running queries.
-      // The server default is 30s which is too short for analytical queries.
+      // The server default of 30s is too short for analytical queries, but the
+      // nginx proxy in front of the API gives up at 300s (docker/nginx/default.conf).
+      // Staying under that means a slow query surfaces as a real error here
+      // instead of an opaque gateway timeout.
       const response = await queryAPI.executeQuery(
         connectionId,
         trimmedQuery,
         1000,
-        600,
+        QUERY_TIMEOUT_SECONDS,
         abortController.signal,
         {
           executionOrigin: "EDITOR",
           mutationConfirmed,
+          executionId,
         },
       );
 
@@ -1327,29 +1356,25 @@ export default function SqlRunnerTab({ connectionId }) {
       }
     } finally {
       abortControllerRef.current = null;
+      executionIdRef.current = null;
       setIsRunning(false);
     }
   };
 
   const handleStopQuery = () => {
+    const executionId = executionIdRef.current;
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
     setIsRunning(false);
     setError(null);
-    // Best-effort: capture active queries and kill any running ones on the DB side.
-    // Fire-and-forget — don't block the UI on this.
-    if (connectionId) {
-      activeQueryAPI.capture(connectionId)
-        .then((queries) => {
-          const running = queries.filter((q) => q.state === "active" || q.state === "running");
-          running.forEach((q) => {
-            if (q.pid) {
-              activeQueryAPI.kill(connectionId, q.pid).catch(() => {});
-            }
-          });
-        })
-        .catch(() => {});
+    // Aborting above only drops the HTTP response; the statement keeps running
+    // and holds a pooled connection. Ask the server to terminate this specific
+    // execution. Previously this killed every active query on the connection,
+    // which could take out other users' work and DeepSQL's own background jobs.
+    if (connectionId && executionId) {
+      executionIdRef.current = null;
+      queryAPI.cancelQuery(connectionId, executionId).catch(() => {});
     }
   };
 
@@ -1492,7 +1517,8 @@ export default function SqlRunnerTab({ connectionId }) {
   const handleTableClick = (table) => {
     setSelectedTable(table);
     const columnList = table.columns?.map((col) => col.name).join(", ") || "*";
-    const sql = `SELECT ${columnList}\nFROM ${table.name}\nLIMIT 10;`;
+    const from = qualifyForSql(table);
+    const sql = `SELECT ${columnList}\nFROM ${from}\nLIMIT 10;`;
     if (editorRef.current) editorRef.current.setValue(sql);
     setQuery(sql);
   };
@@ -1501,13 +1527,17 @@ export default function SqlRunnerTab({ connectionId }) {
     // Just select the table without overwriting the query
     setSelectedTable(table);
     // Expand the table to show columns
-    toggleNode(`table-${table.name}`);
+    toggleNode(`table-${objectKey(table)}`);
   };
 
-  const handleColumnInsert = (tableName, columnName) => {
+  const handleColumnInsert = (tableOrName, columnName) => {
     // Get current value directly from the editor (not from stale React state)
     const current = editorRef.current ? editorRef.current.getValue() : query;
-    const newValue = current + (current ? "\n" : "") + `${tableName}.${columnName}`;
+    const tableRef =
+      typeof tableOrName === "string"
+        ? tableOrName
+        : canonicalTableReference(tableOrName);
+    const newValue = current + (current ? "\n" : "") + `${tableRef}.${columnName}`;
     if (editorRef.current) editorRef.current.setValue(newValue);
     setQuery(newValue);
   };
@@ -1524,7 +1554,7 @@ export default function SqlRunnerTab({ connectionId }) {
 
   const handlePreviewData = () => {
     if (contextMenu.table) {
-      const previewQuery = `SELECT *\nFROM ${contextMenu.table.name}\nLIMIT 100;`;
+      const previewQuery = `SELECT *\nFROM ${qualifyForSql(contextMenu.table)}\nLIMIT 100;`;
       if (editorRef.current) editorRef.current.setValue(previewQuery);
       setQuery(previewQuery);
       setContextMenu({ visible: false, x: 0, y: 0, table: null });
@@ -1545,7 +1575,7 @@ export default function SqlRunnerTab({ connectionId }) {
       try {
         const response = await queryAPI.getTableIndexes(
           connectionId,
-          contextMenu.table.name,
+          objectKey(contextMenu.table),
         );
         if (response.success) {
           setTableIndexes(response.indexes || []);
@@ -1573,7 +1603,7 @@ export default function SqlRunnerTab({ connectionId }) {
 
   const handleCopyName = () => {
     if (contextMenu.table) {
-      copyToClipboard(contextMenu.table.name);
+      copyToClipboard(canonicalTableReference(contextMenu.table));
     }
   };
 
@@ -1589,7 +1619,7 @@ export default function SqlRunnerTab({ connectionId }) {
   const handleGenerateSQL = (type) => {
     if (!contextMenu.table) return;
 
-    const tableName = contextMenu.table.name;
+    const tableName = qualifyForSql(contextMenu.table);
     const columns = contextMenu.table.columns || [];
     const columnList = columns.map((col) => col.name).join(",\n    ");
 
@@ -1633,7 +1663,7 @@ export default function SqlRunnerTab({ connectionId }) {
     }
 
     const columns = contextMenu.table.columns;
-    const tableName = contextMenu.table.name;
+    const tableName = canonicalTableReference(contextMenu.table);
 
     // Create schema text with table name header
     let schemaText = `-- Schema for table: ${tableName}\n`;
@@ -1662,7 +1692,7 @@ export default function SqlRunnerTab({ connectionId }) {
 
   const handleCopyURL = () => {
     if (contextMenu.table) {
-      const url = `${window.location.origin}/tables/${contextMenu.table.name}`;
+      const url = `${window.location.origin}/tables/${objectKey(contextMenu.table)}`;
       copyToClipboard(url);
     }
   };
@@ -1713,11 +1743,19 @@ export default function SqlRunnerTab({ connectionId }) {
   };
 
   // Filter objects based on search (includes table names and column names)
+  const multiSchema = connectionHasMultipleSchemas(databaseObjects);
+
   const filteredObjects = searchTerm
     ? databaseObjects.filter((obj) => {
         const searchLower = searchTerm.toLowerCase();
-        // Match table/view/function/procedure name
-        if (obj.name.toLowerCase().includes(searchLower)) {
+        const ref = canonicalTableReference(obj).toLowerCase();
+        const schema = (obj.schema || obj.schemaName || "").toLowerCase();
+        // Match table/view/function/procedure name or schema
+        if (
+          obj.name.toLowerCase().includes(searchLower) ||
+          ref.includes(searchLower) ||
+          schema.includes(searchLower)
+        ) {
           return true;
         }
         // Match columns if it's a table or view
@@ -1830,19 +1868,19 @@ export default function SqlRunnerTab({ connectionId }) {
                         {filteredObjects.length !== 1 ? "s" : ""}
                       </div>
                       {filteredObjects.map((obj) => (
-                        <div key={obj.name}>
+                        <div key={objectKey(obj)}>
                           <div
-                            className={`${styles.objectItem} ${selectedTable?.name === obj.name ? styles.selected : ""}`}
+                            className={`${styles.objectItem} ${objectKey(selectedTable) === objectKey(obj) ? styles.selected : ""}`}
                             onClick={() => handleTableSelect(obj)}
                           >
                             <div
                               className={styles.objectName}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                toggleNode(`table-${obj.name}`);
+                                toggleNode(`table-${objectKey(obj)}`);
                               }}
                             >
-                              {expandedNodes[`table-${obj.name}`] ? (
+                              {expandedNodes[`table-${objectKey(obj)}`] ? (
                                 <ChevronDown size={14} />
                               ) : (
                                 <ChevronRight size={14} />
@@ -1855,7 +1893,7 @@ export default function SqlRunnerTab({ connectionId }) {
                               {obj.type === "procedure" && (
                                 <FileCode size={14} />
                               )}
-                              <span>{obj.name}</span>
+                              <span>{canonicalTableReference(obj)}</span>
                             </div>
                             {hasRowCount(obj.rowCount) && (
                               <span className={styles.rowCount}>
@@ -1863,7 +1901,7 @@ export default function SqlRunnerTab({ connectionId }) {
                               </span>
                             )}
                           </div>
-                          {expandedNodes[`table-${obj.name}`] &&
+                          {expandedNodes[`table-${objectKey(obj)}`] &&
                             obj.columns && (
                               <div className={styles.columnList}>
                                 {obj.columns.map((column) => {
@@ -1874,12 +1912,12 @@ export default function SqlRunnerTab({ connectionId }) {
                                       .includes(searchTerm.toLowerCase());
                                   return (
                                     <div
-                                      key={column.name}
+                                      key={`${objectKey(obj)}.${column.name}`}
                                       className={`${styles.columnItem} ${columnMatches ? styles.highlighted : ""}`}
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         handleColumnInsert(
-                                          obj.name,
+                                          obj,
                                           column.name,
                                         );
                                       }}
@@ -1926,27 +1964,46 @@ export default function SqlRunnerTab({ connectionId }) {
                         {expandedNodes.tables && (
                           <div className={styles.objectList}>
                             {groupedObjects.tables.map((table) => (
-                              <div key={table.name}>
+                              <div key={objectKey(table)}>
                                 <div
-                                  className={`${styles.objectItem} ${selectedTable?.name === table.name ? styles.selected : ""}`}
+                                  className={`${styles.objectItem} ${objectKey(selectedTable) === objectKey(table) ? styles.selected : ""}`}
                                   onClick={() => handleTableClick(table)}
                                   onContextMenu={(e) =>
                                     handleTableContextMenu(e, table)
                                   }
                                 >
-                                  <div
-                                    className={styles.objectName}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      toggleNode(`table-${table.name}`);
-                                    }}
-                                  >
-                                    {expandedNodes[`table-${table.name}`] ? (
-                                      <ChevronDown size={14} />
-                                    ) : (
-                                      <ChevronRight size={14} />
-                                    )}
-                                    <span>{table.name}</span>
+                                  <div className={styles.objectName}>
+                                    <button
+                                      type="button"
+                                      className={styles.expandToggle || undefined}
+                                      style={{
+                                        background: "transparent",
+                                        border: "none",
+                                        padding: 0,
+                                        display: "inline-flex",
+                                        cursor: "pointer",
+                                      }}
+                                      aria-label={
+                                        expandedNodes[`table-${objectKey(table)}`]
+                                          ? "Collapse columns"
+                                          : "Expand columns"
+                                      }
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleNode(`table-${objectKey(table)}`);
+                                      }}
+                                    >
+                                      {expandedNodes[`table-${objectKey(table)}`] ? (
+                                        <ChevronDown size={14} />
+                                      ) : (
+                                        <ChevronRight size={14} />
+                                      )}
+                                    </button>
+                                    <span title={canonicalTableReference(table)}>
+                                      {multiSchema && table.schema && table.schema !== 'public'
+                                        ? <><span style={{opacity:0.55}}>{table.schema}.</span>{table.name}</>
+                                        : table.name}
+                                    </span>
                                   </div>
                                   {hasRowCount(table.rowCount) && (
                                     <span className={styles.rowCount}>
@@ -1954,7 +2011,7 @@ export default function SqlRunnerTab({ connectionId }) {
                                     </span>
                                   )}
                                 </div>
-                                {expandedNodes[`table-${table.name}`] &&
+                                {expandedNodes[`table-${objectKey(table)}`] &&
                                   table.columns && (
                                     <div className={styles.columnList}>
                                       {table.columns.map((column) => {
@@ -1974,12 +2031,12 @@ export default function SqlRunnerTab({ connectionId }) {
                                           : null;
                                         return (
                                           <div
-                                            key={column.name}
+                                            key={`${objectKey(table)}.${column.name}`}
                                             className={styles.columnItem}
                                             onClick={(e) => {
                                               e.stopPropagation();
                                               handleColumnInsert(
-                                                table.name,
+                                                table,
                                                 column.name,
                                               );
                                             }}
@@ -2057,11 +2114,11 @@ export default function SqlRunnerTab({ connectionId }) {
                             <div className={styles.objectList}>
                               {groupedObjects.views.map((view) => (
                                 <div
-                                  key={view.name}
+                                  key={objectKey(view)}
                                   className={styles.objectItem}
                                   onClick={() => handleTableClick(view)}
                                 >
-                                  <span>{view.name}</span>
+                                  <span>{canonicalTableReference(view)}</span>
                                 </div>
                               ))}
                             </div>
@@ -2091,10 +2148,10 @@ export default function SqlRunnerTab({ connectionId }) {
                             <div className={styles.objectList}>
                               {groupedObjects.functions.map((func) => (
                                 <div
-                                  key={func.name}
+                                  key={objectKey(func)}
                                   className={styles.objectItem}
                                 >
-                                  <span>{func.name}</span>
+                                  <span>{canonicalTableReference(func)}</span>
                                 </div>
                               ))}
                             </div>
@@ -2124,10 +2181,10 @@ export default function SqlRunnerTab({ connectionId }) {
                             <div className={styles.objectList}>
                               {groupedObjects.procedures.map((proc) => (
                                 <div
-                                  key={proc.name}
+                                  key={objectKey(proc)}
                                   className={styles.objectItem}
                                 >
-                                  <span>{proc.name}</span>
+                                  <span>{canonicalTableReference(proc)}</span>
                                 </div>
                               ))}
                             </div>
@@ -2159,14 +2216,14 @@ export default function SqlRunnerTab({ connectionId }) {
                     ) : (
                       groupedObjects.views.map((view) => (
                         <div
-                          key={view.name}
+                          key={objectKey(view)}
                           className={styles.listItem}
                           onClick={() => handleTableClick(view)}
                         >
                           <div className={styles.listItemHeader}>
                             <div className={styles.listItemTitle}>
                               <Eye size={14} />
-                              <span>{view.name}</span>
+                              <span>{canonicalTableReference(view)}</span>
                             </div>
                           </div>
                           {view.columns && (
@@ -2201,14 +2258,14 @@ export default function SqlRunnerTab({ connectionId }) {
                     ) : (
                       groupedObjects.functions.map((func) => (
                         <div
-                          key={func.name}
+                          key={objectKey(func)}
                           className={styles.listItem}
                           onClick={() => handleTableClick(func)}
                         >
                           <div className={styles.listItemHeader}>
                             <div className={styles.listItemTitle}>
                               <FunctionSquare size={14} />
-                              <span>{func.name}</span>
+                              <span>{canonicalTableReference(func)}</span>
                             </div>
                           </div>
                         </div>
@@ -2238,14 +2295,14 @@ export default function SqlRunnerTab({ connectionId }) {
                     ) : (
                       groupedObjects.procedures.map((proc) => (
                         <div
-                          key={proc.name}
+                          key={objectKey(proc)}
                           className={styles.listItem}
                           onClick={() => handleTableClick(proc)}
                         >
                           <div className={styles.listItemHeader}>
                             <div className={styles.listItemTitle}>
                               <FileCode size={14} />
-                              <span>{proc.name}</span>
+                              <span>{canonicalTableReference(proc)}</span>
                             </div>
                           </div>
                         </div>

@@ -42,16 +42,18 @@ export function SchemaDocsPanel({
         const q = searchTerm.toLowerCase()
         return tables.filter(t => {
             const name = (t.tableName || '').toLowerCase()
+            const ref = (t.tableReference || '').toLowerCase()
+            const schema = (t.schemaName || '').toLowerCase()
             const desc = (t.note?.noteText || '').toLowerCase()
-            return name.includes(q) || desc.includes(q)
+            return name.includes(q) || ref.includes(q) || schema.includes(q) || desc.includes(q)
         })
     }, [tables, searchTerm])
 
-    const toggleTable = useCallback((tableName) => {
+    const toggleTable = useCallback((tableKey) => {
         setExpandedTables(prev => {
             const next = new Set(prev)
-            if (next.has(tableName)) next.delete(tableName)
-            else next.add(tableName)
+            if (next.has(tableKey)) next.delete(tableKey)
+            else next.add(tableKey)
             return next
         })
     }, [])
@@ -63,6 +65,8 @@ export function SchemaDocsPanel({
             const payload = {
                 connectionId,
                 scopeType: 'TABLE',
+                // Persist the qualified reference when present so multi-schema
+                // notes never collide on bare table names.
                 tableName,
                 columnName: null,
                 noteText: text,
@@ -157,18 +161,21 @@ export function SchemaDocsPanel({
                 </div>
             ) : (
                 <div className={styles.tableList}>
-                    {filteredTables.map(table => (
+                    {filteredTables.map(table => {
+                        const tableKey = table.tableReference || table.tableName
+                        return (
                         <SchemaDocsTableRow
-                            key={table.tableName}
+                            key={tableKey}
                             table={table}
-                            expanded={expandedTables.has(table.tableName)}
-                            onToggle={() => toggleTable(table.tableName)}
+                            expanded={expandedTables.has(tableKey)}
+                            onToggle={() => toggleTable(tableKey)}
                             onSaveTableNote={handleSaveTableNote}
                             onSaveColumnNote={handleSaveColumnNote}
                             savingNoteId={savingNoteId}
                             onOpenCompanyKnowledge={onOpenCompanyKnowledge}
                         />
-                    ))}
+                        )
+                    })}
                 </div>
             )}
         </div>

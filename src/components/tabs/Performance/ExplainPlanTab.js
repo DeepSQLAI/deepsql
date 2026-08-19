@@ -1741,9 +1741,9 @@ export default function ExplainPlanTab({ connectionId }) {
                                 <div className={styles.indexSection}>
                                     <h3>Index Recommendations ({indexRecommendations.length})</h3>
                                     {indexRecommendations.map((rec, idx) => (
-                                        <div key={`${rec.tableName}-${idx}`} className={styles.indexCard}>
+                                        <div key={`${rec.schemaName || ''}.${rec.tableName}-${idx}`} className={styles.indexCard}>
                                             <div className={styles.indexHeader}>
-                                                <span className={styles.indexTable}>{rec.tableName}</span>
+                                                <span className={styles.indexTable}>{rec.schemaName ? `${rec.schemaName}.${rec.tableName}` : rec.tableName}</span>
                                                 {rec.priority && (
                                                     <span className={styles.indexPriority}>{rec.priority}</span>
                                                 )}

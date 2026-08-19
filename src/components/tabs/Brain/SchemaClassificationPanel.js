@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { AlertCircle, Loader, Info, Database, Table2 } from 'lucide-react'
+import { canonicalTableReference } from '@/lib/schemaNames'
 import { ActionGuard } from '@/components/ActionGuard'
 import { HelpTooltip } from './components/HelpTooltip'
 import { useSchemaClassification } from './hooks/useSchemaClassification'
@@ -320,7 +321,7 @@ function TableList({ tables, roleFilter, setRoleFilter, getRoleColors, getHealth
     const renderCell = (table, column) => {
         switch (column) {
             case 'Table Name':
-                return <td className={styles.tableCellName}>{table.tableName}</td>
+                return <td className={styles.tableCellName}>{canonicalTableReference(table) || table.tableName}</td>
             case 'Role':
                 return (
                     <td className={styles.tableCell}>

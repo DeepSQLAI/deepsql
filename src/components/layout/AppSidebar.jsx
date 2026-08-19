@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { BookOpen, Brain, Code2, Database, Settings, PanelLeftClose, PanelLeftOpen, LogOut, User, ChevronDown, Check, Newspaper, Gauge, Activity, MessageSquare, LayoutDashboard } from 'lucide-react'
+import { Brain, Code2, Database, Settings, PanelLeftClose, PanelLeftOpen, LogOut, User, ChevronDown, Check, Newspaper, Gauge, MessageSquare, LayoutDashboard } from 'lucide-react'
 import { useActiveSection, useSetActiveSection } from '@/lib/stores/useNavStore'
 import { useConnectionManager } from '@/lib/hooks/useConnectionManager'
 import { AGENTS_ENABLED, canAccessHomeSection, getConnectionAccessBadge, getConnectionAccessLabel } from '@/lib/features'
@@ -14,10 +14,8 @@ const NAV_ITEMS = [
   { id: 'digest',  label: 'Digest',  icon: Newspaper },
   ...(AGENTS_ENABLED ? [{ id: 'brain', label: 'Agents', icon: Brain }] : []),
   { id: 'company-knowledge', label: 'Brain', icon: Brain },
-  { id: 'slow-queries', label: 'Slow Queries', icon: Gauge },
-  { id: 'workload-analysis', label: 'Workload Analysis', icon: Activity },
+  { id: 'performance', label: 'Performance', icon: Gauge },
   { id: 'editor',  label: 'Editor',  icon: Code2 },
-  { id: 'docs',    label: 'Docs',    icon: BookOpen },
 ]
 
 export default function AppSidebar() {
@@ -30,7 +28,7 @@ export default function AppSidebar() {
   const [showConnectionDropdown, setShowConnectionDropdown] = useState(false)
   const userMenuRef = useRef(null)
   const connectionDropdownRef = useRef(null)
-  const { logout, role, username, isAdmin } = useAuth()
+  const { logout, role, username, impersonating } = useAuth()
   const { connections, connectionId, selectedConnection, changeConnection, isLoading, refetch } = useConnectionManager()
   const visibleNavItems = NAV_ITEMS.filter(({ id }) => canAccessHomeSection(id, role, selectedConnection))
 
@@ -93,8 +91,7 @@ export default function AppSidebar() {
         <nav className={styles.nav}>
           {visibleNavItems.map(({ id, label, icon: Icon }) => {
             // Freeze these sections until the first DB connection is added.
-            // Docs is reference content — available even without any connection.
-            const requiresConnection = id !== 'agent' && id !== 'digest' && id !== 'docs'
+            const requiresConnection = id !== 'agent' && id !== 'digest'
             const isLocked = requiresConnection && connections.length === 0
             const lockTitle = isLocked
               ? 'Add a database connection to unlock'
@@ -195,7 +192,12 @@ export default function AppSidebar() {
                   <div className={styles.userDropdownAvatar}>
                     <User size={18} />
                   </div>
-                  <span className={styles.userDropdownName}>{username}</span>
+                  <div>
+                    <span className={styles.userDropdownName}>{username}</span>
+                    {impersonating && (
+                      <span className={styles.userDropdownMeta}>Viewing as this user</span>
+                    )}
+                  </div>
                 </div>
                 <div className={styles.userDropdownDivider} />
                 <button

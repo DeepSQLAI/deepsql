@@ -7,6 +7,7 @@ import com.dbaagent.model.EffectiveConnectionAccess;
 import com.dbaagent.repository.AnalysisHistoryRepository;
 import com.dbaagent.repository.ChatFeedbackRepository;
 import com.dbaagent.repository.ChatRepository;
+import com.dbaagent.security.ImpersonationContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
@@ -68,8 +69,12 @@ public class AccessControlService {
     }
 
     public ConnectionAccessService.ResolvedConnectionAccess resolveCurrentUserAccess(String connectionId) {
-        if (!authEnabled) {
-            return connectionAccessService.resolveAccess(connectionId, null, true);
+        if (!authEnabled && !ImpersonationContext.isActive()) {
+            try {
+                return connectionAccessService.resolveAccess(connectionId, null, true);
+            } catch (RuntimeException e) {
+                throw new ResponseStatusException(NOT_FOUND, "Connection not found");
+            }
         }
         Authentication authentication = currentAuthentication();
         if (authentication == null || !authentication.isAuthenticated()) {
@@ -177,6 +182,11 @@ public class AccessControlService {
     }
 
     public boolean isCurrentUserAdmin() {
+        if (ImpersonationContext.isActive()) {
+            return ImpersonationContext.current()
+                .map(state -> state.target() != null && state.target().isAdmin())
+                .orElse(false);
+        }
         if (!authEnabled) {
             return true;
         }
@@ -195,7 +205,7 @@ public class AccessControlService {
     }
 
     private Optional<Chat> findAccessibleChatIfPresent(String chatId) {
-        if (!authEnabled) {
+        if (!authEnabled && !ImpersonationContext.isActive()) {
             return chatRepository.findById(chatId);
         }
         String username = requireCurrentUsername();

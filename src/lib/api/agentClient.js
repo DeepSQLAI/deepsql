@@ -20,9 +20,26 @@ const CSRF_HEADER = "X-Hermes-CSRF-Token";
 /** Cached CSRF token for the agent API (required once trusted-auth is on). */
 let agentCsrfToken = null;
 
+/**
+ * Effective DeepSQL username from the last `/api/agent/session` bootstrap.
+ * Vite has no nginx `auth_request` to stamp `X-Remote-User`, so the browser
+ * must send it. Never hardcode a user — impersonation ("View as") changes this.
+ */
+let agentRemoteUser = null;
+
+function withAgentAuthHeaders(headers = {}) {
+  if (agentRemoteUser) {
+    headers["X-Remote-User"] = agentRemoteUser;
+  }
+  return headers;
+}
+
 async function ensureAgentCsrf() {
   if (agentCsrfToken) return agentCsrfToken;
-  const res = await fetch(`${AGENT_BASE}/api/auth/status`, { credentials: "include" });
+  const res = await fetch(`${AGENT_BASE}/api/auth/status`, {
+    credentials: "include",
+    headers: withAgentAuthHeaders(),
+  });
   if (!res.ok) return null;
   const data = await res.json().catch(() => ({}));
   agentCsrfToken = data?.csrf_token || null;
@@ -35,6 +52,7 @@ async function postJson(url, body, _retried = false) {
   // enables the agent auth gate, unsafe POSTs need the session CSRF token or
   // the agent answers 403 "Session expired - reload the page".
   if (url.startsWith(AGENT_BASE) || url.includes("/agent-api/")) {
+    withAgentAuthHeaders(headers);
     const csrf = await ensureAgentCsrf();
     if (csrf) headers[CSRF_HEADER] = csrf;
   }
@@ -99,6 +117,7 @@ export const agentChatAPI = {
   /** Resolve/provision the current user's agent profile (via Spring → cookie auth). */
   async bootstrap(connectionId) {
     const data = await postJson("/api/agent/session", { connectionId });
+    if (data?.username) agentRemoteUser = data.username;
     // Must happen before any session/new / resume path that hits /agent-api.
     try {
       await switchAgentProfile(data?.profile);

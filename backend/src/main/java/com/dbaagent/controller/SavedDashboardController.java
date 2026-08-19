@@ -1,5 +1,6 @@
 package com.dbaagent.controller;
 
+import com.dbaagent.model.DashboardVersion;
 import com.dbaagent.model.SavedDashboard;
 import com.dbaagent.service.SavedDashboardService;
 import com.dbaagent.service.security.AccessControlService;
@@ -232,6 +233,83 @@ public class SavedDashboardController {
             errorResponse.put("success", false);
             errorResponse.put("message", "Failed to update dashboard: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+
+    /**
+     * Duplicate a dashboard as a new, independent draft.
+     */
+    @PostMapping("/{id}/clone")
+    public ResponseEntity<Map<String, Object>> cloneDashboard(@PathVariable UUID id) {
+        try {
+            SavedDashboard existing = savedDashboardService.getDashboardById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Dashboard not found"));
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
+            SavedDashboard clone = savedDashboardService.cloneDashboard(id);
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("savedDashboard", clone);
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("success", false, "message", e.getMessage()));
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Error cloning dashboard", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("success", false, "message", "Failed to clone dashboard"));
+        }
+    }
+
+    /**
+     * List version history for a dashboard, most recent first.
+     */
+    @GetMapping("/{id}/versions")
+    public ResponseEntity<Map<String, Object>> getVersionHistory(@PathVariable UUID id) {
+        try {
+            SavedDashboard existing = savedDashboardService.getDashboardById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Dashboard not found"));
+            accessControlService.assertCanReadConnectionContent(existing.getConnectionId());
+            List<DashboardVersion> versions = savedDashboardService.getVersionHistory(id);
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("versions", versions);
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("success", false, "message", e.getMessage()));
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Error fetching dashboard version history", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("success", false, "message", "Failed to fetch version history"));
+        }
+    }
+
+    /**
+     * Restore a prior version as the dashboard's current config.
+     */
+    @PostMapping("/{id}/versions/{versionId}/restore")
+    public ResponseEntity<Map<String, Object>> restoreVersion(@PathVariable UUID id, @PathVariable UUID versionId) {
+        try {
+            SavedDashboard existing = savedDashboardService.getDashboardById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Dashboard not found"));
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
+            SavedDashboard restored = savedDashboardService.restoreVersion(id, versionId);
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("savedDashboard", restored);
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("success", false, "message", e.getMessage()));
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            throw e;
+        } catch (OptimisticLockingFailureException e) {
+            return conflict(e);
+        } catch (Exception e) {
+            log.error("Error restoring dashboard version", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("success", false, "message", "Failed to restore version"));
         }
     }
 
