@@ -166,6 +166,41 @@ class UserDataAccessPolicyServiceTest {
     // reached through any other syntax position was never enumerated and the
     // allowlist silently permitted it.
 
+    // Column inspection cannot reach a select nested inside FROM/JOIN/WHERE, so a
+    // protected table referenced there must be refused rather than implicitly allowed.
+
+    @Test
+    void enforcePreExecution_blocksProtectedTableInsideDerivedTable() {
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy());
+
+        UserDataAccessPolicyException exception = assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest("SELECT t.email FROM (SELECT email FROM customer_profiles) t", null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo("POLICY_SQL_BLOCKED");
+    }
+
+    @Test
+    void enforcePreExecution_blocksProtectedTableInsideWhereSubquery() {
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy());
+
+        UserDataAccessPolicyException exception = assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest("SELECT id FROM orders WHERE id IN (SELECT email FROM customer_profiles)", null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo("POLICY_SQL_BLOCKED");
+    }
+
     @Test
     void enforcePreExecution_blocksForbiddenSchemaInsideWhereSubquery() {
         assertThat(assertSchemaScopeBlocks(

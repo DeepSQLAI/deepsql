@@ -127,6 +127,7 @@ public class UserDataAccessPolicyService {
                 // how a subquery, UNION branch, or CTE body reached a schema
                 // outside the caller's scope.
                 enforceAllowedSchemas(parsed, policy.allowedSchemas());
+                assertProtectedTablesAreInspectable(parsed, collectPlainSelects(select), protectedObjects);
                 // Likewise inspect every branch. Gating this on getPlainSelect()
                 // != null skipped protection entirely for a SetOperationList,
                 // because a UNION's body is not a PlainSelect.
@@ -335,6 +336,78 @@ public class UserDataAccessPolicyService {
 
     private boolean mentionsProtectedTables(String normalized, ConnectionChatAccessPolicyService.EffectivePolicy policy) {
         return policy.impactedTables().stream().anyMatch(table -> normalized.contains(table.toLowerCase(Locale.ROOT)));
+    }
+
+    /**
+     * Fails closed on statement shapes inspection cannot reach.
+     *
+     * TablesNamesFinder sees every table in the statement; collectPlainSelects
+     * deliberately does not descend into a select nested inside FROM/JOIN/WHERE/
+     * HAVING, because enumerating arbitrary expression trees correctly is the very
+     * thing that went wrong here the first time. So instead of trying harder to
+     * walk, compare the two: when a protected table is referenced somewhere the
+     * column inspection could not examine, refuse the query.
+     *
+     * A syntax form we failed to enumerate must never become an implicit permit --
+     * that is exactly how a subquery, a UNION branch and a CTE body each evaded
+     * the schema allowlist. Refusing costs a conservative block on some safe
+     * nested aggregates; allowing costs the data.
+     */
+    private void assertProtectedTablesAreInspectable(
+        Statement statement,
+        List<PlainSelect> inspectedBranches,
+        Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> protectedObjects
+    ) {
+        if (protectedObjects == null || protectedObjects.isEmpty()) {
+            return;
+        }
+        Set<String> referenced = new LinkedHashSet<>();
+        for (String name : new TablesNamesFinder<>().getTables(statement)) {
+            addNameForms(name, referenced);
+        }
+        Set<String> inspected = new LinkedHashSet<>();
+        for (PlainSelect branch : inspectedBranches) {
+            collectDirectTables(branch, inspected);
+        }
+        for (ConnectionChatAccessPolicyService.ProtectionDescriptor descriptor : protectedObjects.values()) {
+            Set<String> forms = new LinkedHashSet<>();
+            addNameForms(descriptor.qualifiedTableName(), forms);
+            boolean isReferenced = forms.stream().anyMatch(referenced::contains);
+            boolean wasInspected = forms.stream().anyMatch(inspected::contains);
+            if (isReferenced && !wasInspected) {
+                throw new UserDataAccessPolicyException(
+                    "This query reaches restricted data through a nested query DeepSQL cannot fully verify, so it was blocked before execution.",
+                    "POLICY_SQL_BLOCKED"
+                );
+            }
+        }
+    }
+
+    /** Adds both the qualified name and its bare table part, so schema.t matches t. */
+    private void addNameForms(String name, Set<String> out) {
+        if (name == null || name.isBlank()) {
+            return;
+        }
+        String normalized = normalizeName(name);
+        out.add(normalized);
+        int dot = normalized.lastIndexOf('.');
+        if (dot > 0 && dot < normalized.length() - 1) {
+            out.add(normalized.substring(dot + 1));
+        }
+    }
+
+    /** Tables named directly in this branch's FROM/JOIN -- what inspection actually saw. */
+    private void collectDirectTables(PlainSelect select, Set<String> out) {
+        if (select.getFromItem() instanceof Table table) {
+            addNameForms(table.getFullyQualifiedName(), out);
+        }
+        if (select.getJoins() != null) {
+            for (Join join : select.getJoins()) {
+                if (join.getRightItem() instanceof Table table) {
+                    addNameForms(table.getFullyQualifiedName(), out);
+                }
+            }
+        }
     }
 
     /**
