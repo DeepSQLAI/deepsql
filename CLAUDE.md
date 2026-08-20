@@ -238,6 +238,21 @@ Admins can **View as** a sub-user from the top-right of the home layout (`Profil
    `hermes_requires <0.20.0` on a "verified" 401 that came from a hand-rolled
    `hermes serve` run rather than `hermes webui`. 0.20.0 works. Verify against the
    real start path before writing a version constraint.
+5. **The agent image build clones two third-party repos over the public internet,
+   unauthenticated.** `agent/Dockerfile` fetches `NousResearch/hermes-agent` and
+   `nesquena/hermes-webui` at build time. GitHub rate-limits unauthenticated
+   requests *per source IP*, and Actions runners share pooled egress addresses, so
+   `docker compose build` intermittently died on `fatal: unable to access ...: The
+   requested URL returned error: 429` (exit 128) — 2 of 15 runs, always on branches
+   whose diff had nothing to do with the agent. Both clones now retry 5x with
+   backoff, and still print FATAL and exit 1 on exhaustion so a genuinely dead
+   upstream cannot yield an image with no runtime in it. Two lessons worth keeping:
+   a CI failure that is *intermittent and unrelated to the diff* is a network or
+   rate-limit signature, not a code defect — read the log before bisecting the
+   branch; and the webui clone's pre-existing `|| git clone` fallback looked like
+   resilience but only ever handled a *moved ref*, re-issuing the identical refused
+   request against a 429. A fallback that fails the same way as the thing it backs
+   up is not a fallback.
 
 ### Verification Anti-Patterns (do not repeat)
 
@@ -333,6 +348,42 @@ it against a real database — not a theoretical hardening pass.
   does nothing (Spring proxies are bypassed by `this::`). This broke
   `POST /users/admin/reset` on every install that had run `setup-agent.sh`, since that
   mints an admin MCP token on each run.
+
+### Endpoint Authorization Rules
+
+- **Authentication is not authorization.** `SecurityConfig` only asserts
+  `.anyRequest().authenticated()` and `JwtAuthenticationFilter` only resolves a
+  principal — neither looks at a `connectionId`. Connections are **private per user**
+  (`ConnectionAccessService.resolveAccess` keys on `ownerUsername` plus an explicit
+  grant table), so any endpoint taking a caller-supplied `connectionId` **must** call
+  `accessControlService.assertCanReadConnectionContent` (reads) or
+  `assertCanManageConnectionContent` (writes) itself. There is no filter, interceptor
+  or aspect that does this for you.
+- **`BrainController` shipped with 93 of its 116 endpoints unguarded.** Only the first
+  ~15 (`/understanding`, `/notes/*`, `/tasks/*`, `/key-columns/*`,
+  `/inferred-relationships/*`) had the check; every later "Phase" block did not — so an
+  authenticated user could pass someone else's connection id to
+  `/brain/health-scores/{id}`, `/brain/data-sensitivity/{id}` (which names the PII
+  columns), `/brain/cost-attribution/{id}`, `/brain/ml-overview/{id}` and ~90 more and
+  read that user's database intelligence. All 116 are now guarded, and
+  `BrainControllerAuthorizationSafetyTest` fails the build if a new one is not. The
+  misses clustered by **when a section was written**, not by read/write semantics —
+  when adding a controller section, guard it as you write it.
+- **When the path carries some other id** (`simulationId`, `experimentId`, `patternId`,
+  `noteId`, `taskId`), resolve the owning connection first via that service's
+  `getConnectionId(id)` and assert on the result. Do not skip the check because the
+  path has no `connectionId` in it.
+- **An endpoint with no connection scope at all is admin-only.**
+  `POST /brain/column-values/embed-all` spans every connection, so it carries
+  `@PreAuthorize("hasRole('ADMIN')")` — it cannot be authorized against one
+  connection's grants. `@EnableMethodSecurity(prePostEnabled = true)` is on in
+  `SecurityConfig`, so `@PreAuthorize` is live.
+- **Assert inside the `try`, and rethrow `ResponseStatusException` before the
+  catch-all.** Every handler in `BrainController` ends with a
+  `catch (Exception) -> 500`; without the earlier
+  `catch (ResponseStatusException e) { throw e; }` a 403 is swallowed and reported as a
+  server error, so a client cannot tell "not yours" from "broken". The safety test
+  asserts this too.
 
 ### MCP & CLI Release Rules
 

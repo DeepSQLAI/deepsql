@@ -19,8 +19,8 @@ Cron for the weekly automation: `CRON_TZ=America/Los_Angeles 0 9 * * 6`.
 
 | Surface | Where | Current |
 |---------|-------|---------|
-| Product / Git tag | `vMAJOR.MINOR.PATCH` | `v1.1.0` |
-| Backend JAR | `backend/pom.xml` `<version>` | `1.1.0` |
+| Product / Git tag | `vMAJOR.MINOR.PATCH` | `v1.2.0` |
+| Backend JAR | `backend/pom.xml` `<version>` | `1.2.0` |
 | Frontend package | root `package.json` | `0.1.0` (internal) |
 | MCP / CLI npm | `mcp/package.json` | `0.27.0` |
 

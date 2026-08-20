@@ -723,6 +723,12 @@ public class ConfigTuningService {
         experimentRepository.delete(experiment);
     }
 
+    public String getConnectionId(String experimentId) {
+        return experimentRepository.findById(experimentId)
+            .map(TuningExperiment::getConnectionId)
+            .orElseThrow(() -> new IllegalArgumentException("Experiment not found: " + experimentId));
+    }
+
     /**
      * Get experiment history.
      */

@@ -8,6 +8,29 @@ for product tags (`vMAJOR.MINOR.PATCH`).
 
 Product releases follow a **weekly cadence** (Saturday 09:00 America/Los_Angeles). See `docs/oss-ux/RELEASE.md`.
 
+## [1.2.0] — 2026-08-19
+
+### Added
+
+- Schema-scoped chat access policies with plain-English rules (`allowedSchemas`, column/table deny lists).
+- Admin profile switch (“View as”) for policy validation (`/admin/impersonate`).
+- ACME ERP multi-schema Postgres fixture (`acme_erp`: `crm`, `sales`, `finance`, `inventory`, `hr`, `marts`) and `scripts/seed-acme-erp.sh`.
+- Multi-schema E2E gate: `scripts/self-host/e2e-multischema-check.py`.
+
+### Fixed
+
+- Postgres `getTableColumns` binds the caller schema (#60).
+- Dashboard loading states (#61).
+- SQL editor guard bypasses closed (#63).
+- `COMMENT` / `CALL` table names no longer treated as mutations (#64).
+- ReDoS-safe parsing for chat-access-policy deny/allow regexes (#65).
+- Hermes agent + web UI pinned to release tags (#68).
+
+### Changed
+
+- Schema API (`/objects`, `/schema`, table indexes/stats) filters by per-user policy.
+- `@deepsql/mcp` remains `0.27.0` for this cut.
+
 ## [1.1.0] — 2026-08-15
 
 ### Added
@@ -59,5 +82,6 @@ First public OSS release.
 - Residual high-severity items tracked in `docs/oss-ux/OSS_SECURITY_REVIEW.md` (IDOR sweep, SET preamble allowlist, SSRF hardening, share-password defaults) are deferred past this cut.
 - Primary distribution path remains `docker compose up --build` (no pre-built container registry in this release).
 
+[1.2.0]: https://github.com/DeepSQLAI/deepsql/releases/tag/v1.2.0
 [1.1.0]: https://github.com/DeepSQLAI/deepsql/releases/tag/v1.1.0
 [1.0.0]: https://github.com/DeepSQLAI/deepsql/releases/tag/v1.0.0
