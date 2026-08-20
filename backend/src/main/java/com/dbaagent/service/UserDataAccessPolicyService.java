@@ -160,6 +160,7 @@ public class UserDataAccessPolicyService {
                 );
             }
             enforceAllowedSchemas(select, policy.allowedSchemas());
+            assertProtectedTablesAreInspectable(inspectable, collectPlainSelects(select), protectedObjects);
             QueryInspection inspection = inspectSelect(select, protectedObjects, policy.allowAggregates());
             if (inspection.selectsWildcardFromProtectedTable
                 || inspection.rawProtectedColumnsSelected
@@ -501,6 +502,18 @@ public class UserDataAccessPolicyService {
         return parsed;
     }
 
+    /**
+     * Enforces the schema allowlist over every table reference in the statement.
+     *
+     * Uses JSqlParser's TablesNamesFinder rather than a hand-rolled walk of
+     * FROM and JOIN. Enumeration has to be exhaustive by construction: an
+     * allowlist implemented as a partial walk implicitly permits every syntax
+     * position the walker forgot (subquery, UNION branch, CTE body).
+     *
+     * Unqualified names fail closed when a schema allowlist is present: they
+     * resolve through search_path and could be any schema. CTE aliases are
+     * skipped because they are not tables.
+     */
     private void enforceAllowedSchemas(Select select, Set<String> allowedSchemas) {
         if (allowedSchemas == null || allowedSchemas.isEmpty()) {
             return;
@@ -531,6 +544,125 @@ public class UserDataAccessPolicyService {
                     "POLICY_SCHEMA_BLOCKED"
                 );
             }
+        }
+    }
+
+    /**
+     * Fails closed on statement shapes column inspection cannot reach.
+     *
+     * TablesNamesFinder sees every table in the statement; collectPlainSelects
+     * does not descend into a select nested inside FROM/JOIN/WHERE/HAVING.
+     * When a protected table is referenced somewhere the column inspection
+     * could not examine, refuse the query.
+     */
+    private void assertProtectedTablesAreInspectable(
+        Statement statement,
+        List<PlainSelect> inspectedBranches,
+        Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> protectedObjects
+    ) {
+        if (protectedObjects == null || protectedObjects.isEmpty()) {
+            return;
+        }
+        Set<String> referenced = new LinkedHashSet<>();
+        for (String name : new TablesNamesFinder<>().getTables(statement)) {
+            if (name != null && !name.isBlank()) {
+                referenced.add(normalizeName(name));
+            }
+        }
+        Set<String> inspected = new LinkedHashSet<>();
+        for (PlainSelect branch : inspectedBranches) {
+            collectDirectTables(branch, inspected);
+        }
+        for (ConnectionChatAccessPolicyService.ProtectionDescriptor descriptor : protectedObjects.values()) {
+            String protectedName = descriptor.qualifiedTableName();
+            boolean isReferenced = referenced.stream().anyMatch(name -> namesMatch(protectedName, name));
+            boolean wasInspected = inspected.stream().anyMatch(name -> namesMatch(protectedName, name));
+            if (isReferenced && !wasInspected) {
+                throw new UserDataAccessPolicyException(
+                    "This query reaches restricted data through a nested query DeepSQL cannot fully verify, so it was blocked before execution.",
+                    "POLICY_SQL_BLOCKED"
+                );
+            }
+        }
+    }
+
+    /**
+     * Does a query's table reference name the protected table?
+     *
+     * Asymmetric on purpose. {@code qualifyTable()} drops the schema when it is
+     * {@code public}, so a bare protected name means {@code public.<table>}.
+     * A bare reference in a query resolves through search_path and could be
+     * any schema, so it matches on bare name (ambiguous → block).
+     * A qualified protection must not catch the same table name in another
+     * schema ({@code marts.customer_profiles} vs {@code public.customer_profiles}).
+     */
+    private boolean namesMatch(String protectedName, String referencedName) {
+        String protectedNorm = normalizeName(protectedName);
+        String referencedNorm = normalizeName(referencedName);
+        if (protectedNorm.isEmpty() || referencedNorm.isEmpty()) {
+            return false;
+        }
+        if (!referencedNorm.contains(".")) {
+            return bareName(protectedNorm).equals(referencedNorm);
+        }
+        if (!protectedNorm.contains(".")) {
+            return referencedNorm.equals("public." + protectedNorm);
+        }
+        return protectedNorm.equals(referencedNorm);
+    }
+
+    private String bareName(String normalizedName) {
+        int dot = normalizedName.lastIndexOf('.');
+        return dot > 0 && dot < normalizedName.length() - 1
+            ? normalizedName.substring(dot + 1)
+            : normalizedName;
+    }
+
+    /** Tables named directly in this branch's FROM/JOIN. */
+    private void collectDirectTables(PlainSelect select, Set<String> out) {
+        if (select.getFromItem() instanceof Table table) {
+            out.add(normalizeName(table.getFullyQualifiedName()));
+        }
+        if (select.getJoins() != null) {
+            for (Join join : select.getJoins()) {
+                if (join.getRightItem() instanceof Table table) {
+                    out.add(normalizeName(table.getFullyQualifiedName()));
+                }
+            }
+        }
+    }
+
+    /**
+     * Collects every PlainSelect in a statement: the top level, each branch of a
+     * set operation, parenthesised selects, and every CTE body.
+     */
+    private List<PlainSelect> collectPlainSelects(Select select) {
+        List<PlainSelect> found = new ArrayList<>();
+        collectPlainSelects(select, found);
+        return found;
+    }
+
+    private void collectPlainSelects(Select select, List<PlainSelect> found) {
+        if (select == null) {
+            return;
+        }
+        if (select.getWithItemsList() != null) {
+            for (WithItem<?> item : select.getWithItemsList()) {
+                if (item != null) {
+                    collectPlainSelects(item.getSelect(), found);
+                }
+            }
+        }
+        if (select instanceof PlainSelect plain) {
+            found.add(plain);
+        } else if (select instanceof SetOperationList setOps) {
+            if (setOps.getSelects() != null) {
+                for (Select branch : setOps.getSelects()) {
+                    collectPlainSelects(branch, found);
+                }
+            }
+        } else if (select instanceof ParenthesedSelect parenthesed) {
+            collectPlainSelects(parenthesed.getSelect(), found);
         }
     }
 
@@ -660,11 +792,12 @@ public class UserDataAccessPolicyService {
                 return;
             }
             for (ColumnReference reference : referencedColumns) {
+                // Outer SELECT id FROM (subquery) t has no concrete FROM table. Nested
+                // selects are already walked by inspectFromItem; unqualified nested
+                // table names are refused by assertProtectedTablesAreInspectable + namesMatch.
+                // Treating blank provenance as unresolved would also block a same-named
+                // table in another schema (marts.customer_profiles vs public.customer_profiles).
                 if ((reference.tableName() == null || reference.tableName().isBlank()) && defaultTableName.isBlank()) {
-                    if (!protectedObjects.isEmpty()) {
-                        inspection.unresolvedProtectedReference = true;
-                        inspection.reason = "Protected column provenance could not be established";
-                    }
                     continue;
                 }
                 if (isProtectedReference(protectedObjects, reference)) {
