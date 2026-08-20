@@ -176,6 +176,10 @@ public class AgentBridgeService {
             }
             agentToken = authToken == null ? "" : authToken;
         }
+        // The provisioner also mirrors this token onto every profile
+        // `deepsql.token` the already-running Hermes MCP subprocess watches.
+        // Profile switch does not respawn MCP; without that mirror, View as
+        // Agent chats keep the admin credential and skip policy.
         callProvisioner(username, profile, agentToken, connectionId);
         return new ProfileBootstrap(profile, agentToken);
     }

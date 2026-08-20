@@ -56,12 +56,47 @@ def write_token_file(home: Path, token: str) -> Path:
     MCP subprocess (which re-reads this file on every request, see
     deepsql-phase1-lib.js readTokenFile) never observes a partially-written
     token mid-rotation. 0600 — same secrecy bar as the profile .env."""
+    home.mkdir(parents=True, exist_ok=True)
     path = token_file_for(home)
     tmp = path.with_suffix(f".tmp-{os.getpid()}")
     tmp.write_text((token or "") + "\n")
     os.chmod(tmp, 0o600)
     os.replace(tmp, path)
     return path
+
+
+def iter_profile_homes(hermes_home: Path):
+    """Yield each ``profiles/<name>`` directory under a Hermes home."""
+    profiles = hermes_home / "profiles"
+    if not profiles.is_dir():
+        return
+    for child in profiles.iterdir():
+        if child.is_dir():
+            yield child
+
+
+def mirror_token_for_live_mcp(hermes_home: Path, token: str) -> list[Path]:
+    """Copy the provisioned token onto every file a live MCP process might read.
+
+    Hermes starts one DeepSQL MCP stdio server from whichever profile first
+    loaded ``mcp_servers``, then keeps that subprocess for the life of the
+    Agent API. ``POST /api/profile/switch`` is explicitly ``process_wide=False``
+    — it sets a cookie / thread-local for sessions, but does **not** respawn
+    MCP with the target profile's ``DEEPSQL_AUTH_TOKEN``.
+
+    The MCP client re-reads ``DEEPSQL_TOKEN_FILE`` per request (mtime cache).
+    Writing only ``profiles/u-<target>/deepsql.token`` therefore leaves the
+    already-running server on the previous user's credential (in practice the
+    admin who first opened the Agent tab). View as / a new chat thread then
+    executes SQL as admin and skips chat-access policy.
+
+    Mirror onto ``$HERMES_HOME/deepsql.token`` and every profile token file so
+    whichever path the live process was started with picks up the rotation.
+    """
+    written = [write_token_file(hermes_home, token)]
+    for home in iter_profile_homes(hermes_home):
+        written.append(write_token_file(home, token))
+    return written
 
 
 def ensure_profile(name: str) -> Path:
@@ -210,6 +245,11 @@ class Handler(BaseHTTPRequestHandler):
             token_file = write_token_file(home, token)
             write_profile_mcp(home, user=user, token=token, token_file=token_file)
             write_profile_env(home, user=user, token=token, token_file=token_file)
+            mirrored = mirror_token_for_live_mcp(HERMES_HOME, token)
+            sys.stderr.write(
+                f"[agent-provisioner] mirrored MCP token for {user} onto "
+                f"{len(mirrored)} live token file(s)\n"
+            )
         except Exception as e:
             return self._send(500, {"error": str(e)})
         return self._send(200, {"ok": True, "profile": profile, "home": str(home)})
@@ -243,6 +283,44 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, {"ok": True, "profile": profile, "home": str(home)})
 
 
+def _self_test() -> int:
+    """Prove token mirroring covers the process-global MCP watch path."""
+    import tempfile
+    import traceback
+
+    hermes_home = Path(tempfile.mkdtemp(prefix="deepsql-provisioner-test-"))
+    try:
+        admin = hermes_home / "profiles" / "u-admin"
+        editor = hermes_home / "profiles" / "u-marts-editor"
+        admin.mkdir(parents=True)
+        editor.mkdir(parents=True)
+        write_token_file(admin, "dsql_mcp_admin.old")
+        write_token_file(editor, "dsql_mcp_editor.old")
+
+        rotated = "dsql_mcp_editor.live"
+        written = mirror_token_for_live_mcp(hermes_home, rotated)
+        paths = {p.resolve() for p in written}
+        expected = {
+            token_file_for(hermes_home).resolve(),
+            token_file_for(admin).resolve(),
+            token_file_for(editor).resolve(),
+        }
+        if paths != expected:
+            raise AssertionError(f"mirrored paths {paths} != {expected}")
+        for path in expected:
+            body = path.read_text().strip()
+            if body != rotated:
+                raise AssertionError(f"{path} still {body!r}, expected {rotated!r}")
+        print("ok: live MCP token is mirrored onto every profile token file")
+        return 0
+    except Exception:
+        traceback.print_exc()
+        return 1
+    finally:
+        import shutil
+        shutil.rmtree(hermes_home, ignore_errors=True)
+
+
 def main():
     if not SECRET:
         print("AGENT_PROVISION_SECRET is required", file=sys.stderr)
@@ -258,4 +336,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--self-test":
+        sys.exit(_self_test())
     main()

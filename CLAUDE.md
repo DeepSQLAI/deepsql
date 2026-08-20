@@ -245,7 +245,16 @@ The Agent tab must not inherit the admin MCP token. `/api/agent/session` mints a
    `hermes_requires <0.20.0` on a "verified" 401 that came from a hand-rolled
    `hermes serve` run rather than `hermes webui`. 0.20.0 works. Verify against the
    real start path before writing a version constraint.
-5. **The agent image build clones two third-party repos over the public internet,
+5. **Hermes MCP is process-global.** One `deepsql-phase1-server.js` stdio server
+   is started from the first loaded profile (usually `u-admin`) and lives until
+   the Agent API process dies. `POST /api/profile/switch` is `process_wide=False`
+   on purpose (per-browser cookie), so a View as / new-thread Agent chat tagged
+   `profile: u-marts-editor` still sends the admin MCP bearer. Chat-access policy
+   then `resolveEffectivePolicy(..., actorIsAdmin=true)` → `none()`. The
+   provisioner mirrors the target user's token onto every `deepsql.token` the
+   live process might re-read (`DEEPSQL_TOKEN_FILE` mtime cache in
+   `mcp/deepsql-phase1-lib.js`).
+6. **The agent image build clones two third-party repos over the public internet,
    unauthenticated.** `agent/Dockerfile` fetches `NousResearch/hermes-agent` and
    `nesquena/hermes-webui` at build time. GitHub rate-limits unauthenticated
    requests *per source IP*, and Actions runners share pooled egress addresses, so
@@ -283,6 +292,16 @@ broken. Assert the *outcome*, never the attempt:
 - **`set -e` + `read` at EOF aborts silently.** Prompts in `install.sh` use
   `read … || true` so the explicit emptiness checks report the problem. Without it the
   installer exited 1 with no message, after writing generated secrets to `.env`.
+- **Minting an Agent MCP token ≠ Hermes using it.** `/api/agent/session` can mint
+  `u-marts-editor`'s token and `POST /api/profile/switch` can 200 while
+  `execute_sql` still authenticates as admin. Hermes keeps one DeepSQL MCP
+  stdio process (started from the first profile that loaded `mcp_servers`) and
+  `profile/switch` is `process_wide=False`. A new chat thread does not respawn
+  MCP. `probeMcpAuth` only proves the *minted* token works against Spring, not
+  that the live MCP process will send it. The provisioner must mirror the
+  token onto every `deepsql.token` the live process might be watching
+  (`scripts/local-agent-provisioner.py`). Audit: `security_event.user_id` on
+  `EDITOR_QUERY_EXECUTED` with `clientType=mcp`.
 - **Silent-failure rule, concretely:** the CLI rendered an unreachable server as
   `No databases connected yet` because one `catch` covered both the connection fetch
   and decorative extras. An unreachable host must never look like an empty account.
