@@ -2,6 +2,7 @@ import { useState, useEffect, createContext, useContext, useMemo, useCallback } 
 import { useNavigate, useLocation } from 'react-router-dom'
 import { getActionPermission, getActionConfig } from '@/lib/actions'
 import { authAPI, setupAPI, adminAPI, AUTH_CHANGE_EVENT } from '@/lib/api/client'
+import { clearAgentRemoteUser } from '@/lib/api/agentClient'
 import { queryClient } from '@/lib/queryClient'
 import { useChatStore } from '@/lib/stores/useChatStore'
 import { useConnectionStore } from '@/lib/stores/useConnectionStore'
@@ -205,12 +206,14 @@ export function AuthProvider({ children }) {
 
   const startImpersonation = useCallback(async (userId) => {
     const payload = await adminAPI.startImpersonation(userId)
+    clearAgentRemoteUser()
     applyAuthPayload(payload, { resetSession: true })
     return payload
   }, [applyAuthPayload])
 
   const stopImpersonation = useCallback(async () => {
     const payload = await adminAPI.stopImpersonation()
+    clearAgentRemoteUser()
     applyAuthPayload(payload, { resetSession: true })
     return payload
   }, [applyAuthPayload])
