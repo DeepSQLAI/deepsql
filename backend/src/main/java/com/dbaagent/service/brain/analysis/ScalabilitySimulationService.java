@@ -504,6 +504,12 @@ public class ScalabilitySimulationService {
         return predictionRepository.findByScalabilitySimulationId(simulationId);
     }
 
+    public String getConnectionId(String simulationId) {
+        return simulationRepository.findById(simulationId)
+            .map(ScalabilitySimulation::getConnectionId)
+            .orElseThrow(() -> new IllegalArgumentException("Simulation not found"));
+    }
+
     /**
      * Get high-risk tables.
      */
