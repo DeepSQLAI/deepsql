@@ -822,9 +822,9 @@ though the properties themselves still sit in `application*.properties`.
       - `DELETE /api/admin/users/{id}` - Delete user (ADMIN only)
       - `GET /api/admin/roles` - Get all roles with permissions (ADMIN only)
       - `GET /api/admin/impersonate` - List switchable users and current profile-switch status (ADMIN only)
-      - `POST /api/admin/impersonate` - `{ userId }` start viewing the product as that user (ADMIN only; cannot target admins or self)
+      - `POST /api/admin/impersonate` - `{ userId }` start viewing the product as that user (ADMIN only; cannot target admins or self). Sets `impersonate_user` cookie and restamps the access JWT with `impUid` so policy (and Agent Bearer fallback) run as the target while the JWT subject stays the admin.
       - `DELETE /api/admin/impersonate` - Stop profile switch and restore the admin session
-      - `GET /api/auth/me` - Get current user's profile including role/permissions; while switching, this is the **target** user plus `impersonating` / `impersonatorUsername`
+      - `GET /api/auth/me` - Get current user's profile including role/permissions; while switching, this is the **target** user plus `impersonating` / `impersonatorUsername`. Also sets `X-Remote-User` to the effective username for nginx `/agent-api` auth_request.
     - **Frontend Components**:
       - `PermissionGuard.jsx` - Wrapper component for permission-based rendering
       - `UsersTab.jsx` - Admin user management tab in Workspace

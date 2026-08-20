@@ -136,7 +136,7 @@ public class AgentChatClient {
             throw new IllegalArgumentException("agent profile is required");
         }
         // Profiles are provisioned as u-<username>; the trusted-auth header is the
-        // bare username (nginx hard-codes X-Remote-User: admin for the browser path).
+        // bare username (browser /agent-api gets this from /api/auth/me via nginx).
         remoteUser = profile.startsWith("u-") ? profile.substring(2) : profile;
         postJson("/api/profile/switch", Map.of("name", profile));
     }

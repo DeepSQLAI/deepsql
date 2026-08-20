@@ -73,6 +73,17 @@ export default defineConfig({
             if (typeof incoming === 'string' && incoming.trim()) {
               lastRemoteUser = incoming.trim()
             }
+            try {
+              const url = new URL(req.url, 'http://vite.local')
+              const fromQuery = url.searchParams.get('remote_user')
+              if (fromQuery && fromQuery.trim()) {
+                lastRemoteUser = fromQuery.trim()
+                url.searchParams.delete('remote_user')
+                proxyReq.path = url.pathname + url.search
+              }
+            } catch {
+              /* keep lastRemoteUser */
+            }
             if (lastRemoteUser) {
               proxyReq.setHeader('X-Remote-User', lastRemoteUser)
             }

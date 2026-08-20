@@ -210,7 +210,13 @@ returns a number).
 5. **Design**: Minimal black/white/grey palette, Inter font, subtle transitions. See UX guidelines in full CLAUDE.md.
 
 ### Admin profile switch
-Admins can **View as** a sub-user from the top-right of the home layout (`ProfileSwitch`) to verify connection ACLs, chat/editor policies, and role-gated nav. The admin JWT stays on the session; `ImpersonationService` sets an httpOnly `impersonate_user` cookie and `JwtAuthenticationFilter` overlays the target principal. `POST|DELETE|GET /api/admin/impersonate` are excluded from the overlay so stop/list still run as the real admin. Cannot target another ADMIN, self, or a non-ACTIVE account. `/auth/me` returns the **effective** user plus `impersonating` / `impersonatorUsername`.
+Admins can **View as** a sub-user from the top-right of the home layout (`ProfileSwitch`) to verify connection ACLs, chat/editor policies, and role-gated nav.
+
+The admin JWT **subject** stays the administrator so logout, refresh, and `/admin/impersonate` still own the real session. Policy identity is the target: an httpOnly `impersonate_user` cookie plus an `impUid` claim on the access token. `JwtAuthenticationFilter` overlays that principal onto the SecurityContext for every request except the impersonation control plane, logout, and session refresh. Chat, Editor, schema listing, and Agent MCP calls then run `AccessControlService` / `ConnectionChatAccessPolicyService` as the target (`actorIsAdmin` is false, so policies apply).
+
+The Agent tab must not inherit the admin MCP token. `/api/agent/session` mints an MCP token for the effective user and never falls back to the admin session JWT while View as is active. nginx `auth_request` on `/agent-api` forwards `/api/auth/me`'s `X-Remote-User` (the overlaid username) instead of hardcoding `admin`.
+
+`POST|DELETE|GET /api/admin/impersonate` are excluded from the overlay so stop/list still run as the real admin. Cannot target another ADMIN, self, or a non-ACTIVE account. `/auth/me` returns the **effective** user plus `impersonating` / `impersonatorUsername`.
 
 ### Git Rules
 - Do NOT commit automatically — wait for explicit user instruction.

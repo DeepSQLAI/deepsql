@@ -207,11 +207,21 @@ public class AuthController {
         User effectiveUser = impersonationService.resolveFromCookie(httpRequest, user)
             .map(ImpersonationContext.State::target)
             .orElse(user);
-        // Keep the user's agent token alive for as long as the UI session lives.
-        // The SPA refreshes on access-token expiry (~every 15 min of activity), so
-        // this slides the agent token forward on each active interval — a logged-in
-        // UI never ends up with a dead agent.
+        if (effectiveUser != user && effectiveUser.getId() != null) {
+            authSessionService.reissueAccessToken(
+                httpResponse,
+                session.getId(),
+                user,
+                effectiveUser.getId()
+            );
+        }
+        // Keep agent tokens alive for as long as the UI session lives.
+        // During View as the SPA still refreshes the *admin* session; also
+        // slide the target user's minted MCP token or their Agent tab dies.
         agentBridgeService.extendAgentTokens(user.getUsername());
+        if (!effectiveUser.getUsername().equals(user.getUsername())) {
+            agentBridgeService.extendAgentTokens(effectiveUser.getUsername());
+        }
         Map<String, Object> payload = toAuthPayload(
             effectiveUser,
             effectiveUser.getRoleEnum(),
