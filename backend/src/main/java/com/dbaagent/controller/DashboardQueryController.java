@@ -77,7 +77,10 @@ public class DashboardQueryController {
             qr.setExecutionOrigin(QueryExecutionOrigin.API);
             QueryResult result = queryExecutorService.executeQuery(
                 request.connectionId(), qr,
-                QueryExecutionContext.api(accessControlService.getCurrentUsername()));
+                QueryExecutionContext.api(
+                    accessControlService.getCurrentUsername(),
+                    accessControlService.isCurrentUserAdmin()
+                ));
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "columns", result.getColumns() == null ? java.util.List.of() : result.getColumns(),

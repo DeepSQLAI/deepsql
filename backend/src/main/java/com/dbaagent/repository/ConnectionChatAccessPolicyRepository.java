@@ -9,5 +9,6 @@ import java.util.Optional;
 public interface ConnectionChatAccessPolicyRepository extends JpaRepository<ConnectionChatAccessPolicy, Long> {
     Optional<ConnectionChatAccessPolicy> findByConnectionIdAndUsernameIgnoreCase(String connectionId, String username);
     List<ConnectionChatAccessPolicy> findAllByUsernameIgnoreCaseOrderByUpdatedAtDesc(String username);
+    boolean existsByConnectionIdAndActiveTrue(String connectionId);
     void deleteByConnectionId(String connectionId);
 }

@@ -77,6 +77,12 @@ public class ConnectionChatAccessPolicyService {
     }
 
     @Transactional(readOnly = true)
+    public boolean hasActivePolicy(String connectionId) {
+        return connectionId != null && !connectionId.isBlank()
+            && policyRepository.existsByConnectionIdAndActiveTrue(connectionId);
+    }
+
+    @Transactional(readOnly = true)
     public EffectivePolicy resolveEffectivePolicy(String connectionId, String username, boolean actorIsAdmin) {
         if (actorIsAdmin || username == null || username.isBlank()) {
             return EffectivePolicy.none();
@@ -109,6 +115,8 @@ public class ConnectionChatAccessPolicyService {
         policy.setBlockedSensitivityCategories(parsedPolicy.blockedSensitivityCategories());
         policy.setDeniedTables(parsedPolicy.deniedTables());
         policy.setDeniedColumns(parsedPolicy.deniedColumns());
+        policy.setAllowedSchemas(parsedPolicy.allowedSchemas());
+        policy.setAllowAggregates(false);
         policy.setBlockMode(parsedPolicy.blockMode());
         policy.setRedactMode(parsedPolicy.redactMode());
         policy.setActive(active == null || active);
@@ -140,6 +148,8 @@ public class ConnectionChatAccessPolicyService {
             .blockedSensitivityCategories(parsedPolicy.blockedSensitivityCategories())
             .deniedTables(parsedPolicy.deniedTables())
             .deniedColumns(parsedPolicy.deniedColumns())
+            .allowedSchemas(parsedPolicy.allowedSchemas())
+            .allowAggregates(false)
             .impactedTables(parsedPolicy.impactedTables())
             .impactedColumns(parsedPolicy.impactedColumns())
             .blockMode(parsedPolicy.blockMode())
@@ -157,6 +167,8 @@ public class ConnectionChatAccessPolicyService {
             .blockedSensitivityCategories(policy.getBlockedSensitivityCategories())
             .deniedTables(policy.getDeniedTables())
             .deniedColumns(policy.getDeniedColumns())
+            .allowedSchemas(policy.getAllowedSchemas())
+            .allowAggregates(policy.isAllowAggregates())
             .blockMode(policy.isBlockMode())
             .redactMode(policy.isRedactMode())
             .active(policy.isActive())
@@ -170,6 +182,10 @@ public class ConnectionChatAccessPolicyService {
 
     private EffectivePolicy toEffectivePolicy(ConnectionChatAccessPolicy policy) {
         ParsedPolicy parsedPolicy = parsedFromPolicy(policy);
+        Set<String> storedSchemas = normalizeSet(policy.getAllowedSchemas());
+        Set<String> allowedSchemas = storedSchemas.isEmpty()
+            ? new LinkedHashSet<>(parsedPolicy.allowedSchemas())
+            : storedSchemas;
         return new EffectivePolicy(
             true,
             policy.getConnectionId(),
@@ -177,9 +193,10 @@ public class ConnectionChatAccessPolicyService {
             new LinkedHashSet<>(policy.getBlockedSensitivityCategories() == null ? List.of() : policy.getBlockedSensitivityCategories()),
             new LinkedHashSet<>(policy.getDeniedTables() == null ? List.of() : policy.getDeniedTables()),
             new LinkedHashSet<>(policy.getDeniedColumns() == null ? List.of() : policy.getDeniedColumns()),
-            new LinkedHashSet<>(parsedPolicy.allowedSchemas()),
+            allowedSchemas,
             policy.isBlockMode(),
             policy.isRedactMode(),
+            policy.isAllowAggregates(),
             policy.getPlainEnglishPolicy(),
             parsedPolicy.impactedTables(),
             parsedPolicy.impactedColumns()
@@ -689,12 +706,13 @@ public class ConnectionChatAccessPolicyService {
         Set<String> allowedSchemas,
         boolean blockMode,
         boolean redactMode,
+        boolean allowAggregates,
         String plainEnglishPolicy,
         List<String> impactedTables,
         List<String> impactedColumns
     ) {
         public static EffectivePolicy none() {
-            return new EffectivePolicy(false, null, null, Set.of(), Set.of(), Set.of(), Set.of(), false, false, null, List.of(), List.of());
+            return new EffectivePolicy(false, null, null, Set.of(), Set.of(), Set.of(), Set.of(), false, false, false, null, List.of(), List.of());
         }
 
         public boolean protectsAnything() {

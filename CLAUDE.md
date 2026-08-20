@@ -199,8 +199,9 @@ returns a number).
 2. **LLM Provider Registry**: Use `LlmProviderRegistry` for all provider-specific LLM behavior. Do NOT add if/else or switch on provider type. Chat and embedding providers are registered and resolved independently — some providers offer only one. Providers are *factories* over credentials, not `ChatModel`s, so credentials stay resolvable per call and key rotation needs no restart.
 3. **SSH-Aware Access**: Always use `ConnectionService.getJdbcTemplate(connectionId, request)` — handles SSH tunneling transparently.
 4. **SQL Rule**: All generated SQL MUST use table-qualified column names (`table.column_name`).
-5. **RAG Caching**: Three-tier cache (memory → Redis → Azure Search). Redis failure is graceful (app continues without caching).
-6. **Virtual Threads**: Enabled for concurrency (JDK 25).
+5. **Chat access policy**: Fail closed. Walk the whole SQL tree (CTEs, set ops, subqueries). Deny unparseable or unhandled statements. Require an actor except `INTERNAL`/`SCHEDULED`. MCP/Editor identity comes from `SecurityContext`, not `QueryActorContextHolder`. Persist `allowed_schemas`. Do not let "how many" override a protected-column mention. Public share is refused when the connection has an active policy.
+6. **RAG Caching**: Three-tier cache (memory → Redis → Azure Search). Redis failure is graceful (app continues without caching).
+7. **Virtual Threads**: Enabled for concurrency (JDK 25).
 
 ### Frontend Rules
 1. **API Centralization**: ALL API calls through `src/lib/api/client.js`. Never create direct axios instances.

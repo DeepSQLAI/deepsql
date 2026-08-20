@@ -1,6 +1,8 @@
 package com.dbaagent.service;
 
 import com.dbaagent.model.QueryExecutionOrigin;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 public record QueryExecutionContext(
     QueryExecutionOrigin origin,
@@ -19,7 +21,7 @@ public record QueryExecutionContext(
         return new QueryExecutionContext(
             QueryExecutionOrigin.CHAT,
             MutationMode.READ_ONLY_ONLY,
-            QueryActorContextHolder.currentUsername(),
+            resolveActorUsername(),
             false,
             false
         );
@@ -46,11 +48,15 @@ public record QueryExecutionContext(
     }
 
     public static QueryExecutionContext mcp(String actorUsername) {
+        return mcp(actorUsername, false);
+    }
+
+    public static QueryExecutionContext mcp(String actorUsername, boolean actorIsAdmin) {
         return new QueryExecutionContext(
             QueryExecutionOrigin.MCP,
             MutationMode.READ_ONLY_ONLY,
             actorUsername,
-            false,
+            actorIsAdmin,
             false
         );
     }
@@ -66,12 +72,32 @@ public record QueryExecutionContext(
     }
 
     public static QueryExecutionContext api(String actorUsername) {
+        return api(actorUsername, false);
+    }
+
+    public static QueryExecutionContext api(String actorUsername, boolean actorIsAdmin) {
         return new QueryExecutionContext(
             QueryExecutionOrigin.API,
             MutationMode.READ_ONLY_ONLY,
             actorUsername,
-            false,
+            actorIsAdmin,
             false
         );
+    }
+
+    private static String resolveActorUsername() {
+        String fromHolder = QueryActorContextHolder.currentUsername();
+        if (fromHolder != null && !fromHolder.isBlank()) {
+            return fromHolder;
+        }
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return null;
+        }
+        String name = authentication.getName();
+        if (name == null || name.isBlank() || "anonymousUser".equals(name)) {
+            return null;
+        }
+        return name;
     }
 }

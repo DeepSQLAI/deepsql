@@ -2,6 +2,7 @@ package com.dbaagent.controller;
 
 import com.dbaagent.model.DashboardVersion;
 import com.dbaagent.model.SavedDashboard;
+import com.dbaagent.service.ConnectionChatAccessPolicyService;
 import com.dbaagent.service.SavedDashboardService;
 import com.dbaagent.service.security.AccessControlService;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,9 @@ public class SavedDashboardController {
     @Autowired
     private AccessControlService accessControlService;
 
+    @Autowired
+    private ConnectionChatAccessPolicyService connectionChatAccessPolicyService;
+
     // Every write method below is load-then-save on a row a background generation
     // turn (SavedDashboardService.beginGenerationTurn etc.) may be writing at the
     // same time. Without this helper, the loser's raw Hibernate message
@@ -47,6 +51,13 @@ public class SavedDashboardController {
             SavedDashboard existing = savedDashboardService.getDashboardById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Dashboard not found"));
             accessControlService.assertCanReadConnectionContent(existing.getConnectionId());
+            if (connectionChatAccessPolicyService.hasActivePolicy(existing.getConnectionId())) {
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "success", false,
+                    "errorCode", "POLICY_PUBLIC_SHARE_FORBIDDEN",
+                    "message", "This connection has an active chat access policy, so the dashboard cannot be shared publicly."
+                ));
+            }
             SavedDashboard d = savedDashboardService.enablePublicShare(id);
             return ResponseEntity.ok(Map.of("success", true,
                 "shareToken", d.getShareToken(), "isPublic", true));

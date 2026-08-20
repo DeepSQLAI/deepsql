@@ -8,7 +8,6 @@ import com.dbaagent.model.QueryRequest;
 import com.dbaagent.model.QueryResult;
 import com.dbaagent.service.ExplainPlanService;
 import com.dbaagent.service.McpSqlGuardService;
-import com.dbaagent.service.QueryActorContextHolder;
 import com.dbaagent.service.QueryExecutionContext;
 import com.dbaagent.service.QueryExecutionPolicyException;
 import com.dbaagent.service.QueryExecutorService;
@@ -77,7 +76,10 @@ public class McpController {
             QueryResult result = queryExecutorService.executeQuery(
                 request.getConnectionId(),
                 queryRequest,
-                QueryExecutionContext.mcp(QueryActorContextHolder.currentUsername())
+                QueryExecutionContext.mcp(
+                    accessControlService.getCurrentUsername(),
+                    accessControlService.isCurrentUserAdmin()
+                )
             );
             return ResponseEntity.ok(Map.of(
                 "success", true,

@@ -115,6 +115,7 @@ class ConnectionChatAccessPolicyServiceTest {
                 "marts.fct_enrollment.currency",
                 "marts.dim_ott_subscription.currency"
             );
+        assertThat(preview.getAllowedSchemas()).containsExactly("marts");
     }
 
     @Test
