@@ -31,6 +31,8 @@ export function clearAgentRemoteUser() {
   agentRemoteUser = null
   agentCsrfToken = null
 }
+
+function withAgentAuthHeaders(headers = {}) {
   if (agentRemoteUser) {
     headers["X-Remote-User"] = agentRemoteUser;
   }
