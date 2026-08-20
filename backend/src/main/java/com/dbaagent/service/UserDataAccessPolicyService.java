@@ -25,6 +25,9 @@ import net.sf.jsqlparser.statement.select.Join;
 import net.sf.jsqlparser.statement.select.ParenthesedSelect;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
+import net.sf.jsqlparser.statement.select.SetOperationList;
+import net.sf.jsqlparser.statement.select.WithItem;
+import net.sf.jsqlparser.util.TablesNamesFinder;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -117,9 +120,19 @@ public class UserDataAccessPolicyService {
 
         try {
             Statement parsed = CCJSqlParserUtil.parse(queryRequest.getQuery());
-            if (parsed instanceof Select select && select.getPlainSelect() != null) {
-                enforceAllowedSchemas(select.getPlainSelect(), policy.allowedSchemas());
-                QueryInspection inspection = inspectPlainSelect(select.getPlainSelect(), protectedObjects);
+            if (parsed instanceof Select select) {
+                // Enumerate over the WHOLE statement, not just FROM/JOIN of the
+                // outermost PlainSelect. An allowlist is only sound if the walk is
+                // total: any node left unvisited is implicitly permitted, which is
+                // how a subquery, UNION branch, or CTE body reached a schema
+                // outside the caller's scope.
+                enforceAllowedSchemas(parsed, policy.allowedSchemas());
+                assertProtectedTablesAreInspectable(parsed, collectPlainSelects(select), protectedObjects);
+                // Likewise inspect every branch. Gating this on getPlainSelect()
+                // != null skipped protection entirely for a SetOperationList,
+                // because a UNION's body is not a PlainSelect.
+                for (PlainSelect branch : collectPlainSelects(select)) {
+                QueryInspection inspection = inspectPlainSelect(branch, protectedObjects);
                 if (inspection.selectsWildcardFromProtectedTable || inspection.rawProtectedColumnsSelected) {
                     logPolicyEvent(SecurityEventType.CHAT_ACCESS_POLICY_BLOCKED, executionContext.actorUsername(), connectionId, "sql_blocked", Map.of(
                         "query", truncate(queryRequest.getQuery()),
@@ -131,6 +144,7 @@ public class UserDataAccessPolicyService {
                         "This query would return restricted data for your account, so DeepSQL blocked it before execution.",
                         "POLICY_SQL_BLOCKED"
                     );
+                }
                 }
             }
         } catch (UserDataAccessPolicyException e) {
@@ -324,16 +338,167 @@ public class UserDataAccessPolicyService {
         return policy.impactedTables().stream().anyMatch(table -> normalized.contains(table.toLowerCase(Locale.ROOT)));
     }
 
-    private void enforceAllowedSchemas(PlainSelect select, Set<String> allowedSchemas) {
+    /**
+     * Fails closed on statement shapes inspection cannot reach.
+     *
+     * TablesNamesFinder sees every table in the statement; collectPlainSelects
+     * deliberately does not descend into a select nested inside FROM/JOIN/WHERE/
+     * HAVING, because enumerating arbitrary expression trees correctly is the very
+     * thing that went wrong here the first time. So instead of trying harder to
+     * walk, compare the two: when a protected table is referenced somewhere the
+     * column inspection could not examine, refuse the query.
+     *
+     * A syntax form we failed to enumerate must never become an implicit permit --
+     * that is exactly how a subquery, a UNION branch and a CTE body each evaded
+     * the schema allowlist. Refusing costs a conservative block on some safe
+     * nested aggregates; allowing costs the data.
+     */
+    private void assertProtectedTablesAreInspectable(
+        Statement statement,
+        List<PlainSelect> inspectedBranches,
+        Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> protectedObjects
+    ) {
+        if (protectedObjects == null || protectedObjects.isEmpty()) {
+            return;
+        }
+        Set<String> referenced = new LinkedHashSet<>();
+        for (String name : new TablesNamesFinder<>().getTables(statement)) {
+            if (name != null && !name.isBlank()) {
+                referenced.add(normalizeName(name));
+            }
+        }
+        Set<String> inspected = new LinkedHashSet<>();
+        for (PlainSelect branch : inspectedBranches) {
+            collectDirectTables(branch, inspected);
+        }
+        for (ConnectionChatAccessPolicyService.ProtectionDescriptor descriptor : protectedObjects.values()) {
+            String protectedName = descriptor.qualifiedTableName();
+            boolean isReferenced = referenced.stream().anyMatch(name -> namesMatch(protectedName, name));
+            boolean wasInspected = inspected.stream().anyMatch(name -> namesMatch(protectedName, name));
+            if (isReferenced && !wasInspected) {
+                throw new UserDataAccessPolicyException(
+                    "This query reaches restricted data through a nested query DeepSQL cannot fully verify, so it was blocked before execution.",
+                    "POLICY_SQL_BLOCKED"
+                );
+            }
+        }
+    }
+
+    /**
+     * Does a query's table reference name the protected table?
+     *
+     * Asymmetric on purpose, because the two sides carry different information.
+     * ConnectionChatAccessPolicyService.qualifyTable() drops the schema when it is
+     * "public", so a bare PROTECTED name means public.<table> -- it is not unknown.
+     * A bare REFERENCE in a query is genuinely unknown: it resolves through the
+     * session search_path and could be any schema.
+     *
+     *   reference unqualified -> match on bare name. Ambiguous, so block; the
+     *                            search_path may well point at the protected table.
+     *   protected public      -> the qualified reference must actually say public.
+     *                            marts.customer_profiles is a different table, and
+     *                            treating it as protected refused every other
+     *                            schema's copy -- which this product's own
+     *                            multi-schema fixtures (crm/sales/finance/hr) hit.
+     *   both qualified        -> exact match.
+     */
+    private boolean namesMatch(String protectedName, String referencedName) {
+        String protectedNorm = normalizeName(protectedName);
+        String referencedNorm = normalizeName(referencedName);
+        if (protectedNorm.isEmpty() || referencedNorm.isEmpty()) {
+            return false;
+        }
+        if (!referencedNorm.contains(".")) {
+            return bareName(protectedNorm).equals(referencedNorm);
+        }
+        if (!protectedNorm.contains(".")) {
+            return referencedNorm.equals("public." + protectedNorm);
+        }
+        return protectedNorm.equals(referencedNorm);
+    }
+
+    private String bareName(String normalizedName) {
+        int dot = normalizedName.lastIndexOf('.');
+        return dot > 0 && dot < normalizedName.length() - 1
+            ? normalizedName.substring(dot + 1)
+            : normalizedName;
+    }
+
+    /** Tables named directly in this branch's FROM/JOIN -- what inspection actually saw. */
+    private void collectDirectTables(PlainSelect select, Set<String> out) {
+        if (select.getFromItem() instanceof Table table) {
+            out.add(normalizeName(table.getFullyQualifiedName()));
+        }
+        if (select.getJoins() != null) {
+            for (Join join : select.getJoins()) {
+                if (join.getRightItem() instanceof Table table) {
+                    out.add(normalizeName(table.getFullyQualifiedName()));
+                }
+            }
+        }
+    }
+
+    /**
+     * Collects every PlainSelect in a statement: the top level, each branch of a
+     * set operation (UNION/INTERSECT/EXCEPT), parenthesised selects, and every
+     * CTE body. Callers that inspect only the outermost select leave the rest
+     * unprotected.
+     */
+    private List<PlainSelect> collectPlainSelects(Select select) {
+        List<PlainSelect> found = new ArrayList<>();
+        collectPlainSelects(select, found);
+        return found;
+    }
+
+    private void collectPlainSelects(Select select, List<PlainSelect> found) {
+        if (select == null) {
+            return;
+        }
+        if (select.getWithItemsList() != null) {
+            for (WithItem<?> item : select.getWithItemsList()) {
+                if (item != null) {
+                    collectPlainSelects(item.getSelect(), found);
+                }
+            }
+        }
+        if (select instanceof PlainSelect plain) {
+            found.add(plain);
+        } else if (select instanceof SetOperationList setOps) {
+            if (setOps.getSelects() != null) {
+                for (Select branch : setOps.getSelects()) {
+                    collectPlainSelects(branch, found);
+                }
+            }
+        } else if (select instanceof ParenthesedSelect parenthesed) {
+            collectPlainSelects(parenthesed.getSelect(), found);
+        }
+    }
+
+    /**
+     * Enforces the schema allowlist over every table reference in the statement.
+     *
+     * Uses JSqlParser's TablesNamesFinder rather than a hand-rolled walk of
+     * FROM and JOIN. The distinction is the whole fix: enumeration has to be
+     * exhaustive by construction, because an allowlist implemented as a partial
+     * walk implicitly permits every syntax position the walker forgot -- here a
+     * subquery in WHERE/HAVING/SELECT, a UNION branch, and a CTE body.
+     *
+     * Bare (unqualified) names stay unchecked, exactly as before: they resolve
+     * through the session search_path, and CTE names are not tables at all.
+     */
+    private void enforceAllowedSchemas(Statement statement, Set<String> allowedSchemas) {
         if (allowedSchemas == null || allowedSchemas.isEmpty()) {
             return;
         }
-        Map<String, String> aliasToTable = buildAliasMap(select);
         Set<String> referencedSchemas = new LinkedHashSet<>();
-        collectReferencedSchemas(select.getFromItem(), aliasToTable, referencedSchemas);
-        if (select.getJoins() != null) {
-            for (Join join : select.getJoins()) {
-                collectReferencedSchemas(join.getRightItem(), aliasToTable, referencedSchemas);
+        for (String qualifiedName : new TablesNamesFinder<>().getTables(statement)) {
+            if (qualifiedName == null) {
+                continue;
+            }
+            String[] parts = qualifiedName.split("\\.");
+            if (parts.length >= 2) {
+                // db.schema.table and schema.table both put the schema second-to-last.
+                referencedSchemas.add(parts[parts.length - 2]);
             }
         }
         for (String schema : referencedSchemas) {
@@ -342,20 +507,6 @@ public class UserDataAccessPolicyService {
                     "This query references schema '" + schema + "' which is outside your allowed schema scope.",
                     "POLICY_SCHEMA_BLOCKED"
                 );
-            }
-        }
-    }
-
-    private void collectReferencedSchemas(FromItem fromItem, Map<String, String> aliasToTable, Set<String> schemas) {
-        if (fromItem instanceof Table table) {
-            String schema = table.getSchemaName();
-            if (schema != null && !schema.isBlank()) {
-                schemas.add(schema);
-                return;
-            }
-            String qualified = aliasToTable.get(normalizeName(table.getName()));
-            if (qualified != null && qualified.contains(".")) {
-                schemas.add(qualified.substring(0, qualified.indexOf('.')));
             }
         }
     }

@@ -140,6 +140,142 @@ class UserDataAccessPolicyServiceTest {
         assertThat(exception.getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
     }
 
+    private ConnectionChatAccessPolicyService.EffectivePolicy martsOnlyPolicy() {
+        return new ConnectionChatAccessPolicyService.EffectivePolicy(
+            true, "conn-1", "analyst",
+            Set.of(), Set.of(), Set.of(), Set.of("marts"),
+            true, true, "Only schema marts", List.of(), List.of()
+        );
+    }
+
+    private UserDataAccessPolicyException assertSchemaScopeBlocks(String sql) {
+        ConnectionChatAccessPolicyService.EffectivePolicy schemaPolicy = martsOnlyPolicy();
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(schemaPolicy);
+        lenient().when(policyService.buildProtectionDescriptors(schemaPolicy)).thenReturn(Map.of());
+        return assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest(sql, null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+            )
+        );
+    }
+
+    // The schema allowlist walked only FROM and JOIN, so a forbidden schema
+    // reached through any other syntax position was never enumerated and the
+    // allowlist silently permitted it.
+
+    // Column inspection cannot reach a select nested inside FROM/JOIN/WHERE, so a
+    // protected table referenced there must be refused rather than implicitly allowed.
+
+    @Test
+    void enforcePreExecution_blocksProtectedTableInsideDerivedTable() {
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy());
+
+        UserDataAccessPolicyException exception = assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest("SELECT t.email FROM (SELECT email FROM customer_profiles) t", null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo("POLICY_SQL_BLOCKED");
+    }
+
+    @Test
+    void enforcePreExecution_blocksProtectedTableInsideWhereSubquery() {
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy());
+
+        UserDataAccessPolicyException exception = assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest("SELECT id FROM orders WHERE id IN (SELECT email FROM customer_profiles)", null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo("POLICY_SQL_BLOCKED");
+    }
+
+    // A qualified protection names exactly one table. marts.customer_profiles is a
+    // different table from public.customer_profiles and must not be caught by it.
+    @Test
+    void enforcePreExecution_allowsSameNamedTableInAnotherSchemaWhenProtectionIsQualified() {
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy());
+        when(policyService.buildProtectionDescriptors(any(ConnectionChatAccessPolicyService.EffectivePolicy.class)))
+            .thenReturn(Map.of("public.customer_profiles",
+                descriptor("public", "customer_profiles", false, "email")));
+
+        service.enforcePreExecution(
+            "conn-1",
+            new QueryRequest("SELECT id FROM (SELECT id FROM marts.customer_profiles) t", null, null),
+            new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+        );
+    }
+
+    // The genuinely ambiguous direction is an unqualified REFERENCE, not an
+    // unqualified protection: qualifyTable() stores public.<t> as bare <t>, so a
+    // bare protected name means public, while a bare reference in a query
+    // resolves through search_path and could be any schema. Block that one.
+    @Test
+    void enforcePreExecution_blocksUnqualifiedReferenceBecauseSearchPathIsUnknown() {
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy());
+
+        UserDataAccessPolicyException exception = assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest("SELECT id FROM (SELECT id FROM customer_profiles) t", null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo("POLICY_SQL_BLOCKED");
+    }
+
+    @Test
+    void enforcePreExecution_blocksForbiddenSchemaInsideWhereSubquery() {
+        assertThat(assertSchemaScopeBlocks(
+            "SELECT id FROM marts.orders WHERE total = (SELECT MAX(salary) FROM hr.salaries)"
+        ).getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
+    }
+
+    @Test
+    void enforcePreExecution_blocksForbiddenSchemaInUnionBranch() {
+        assertThat(assertSchemaScopeBlocks(
+            "SELECT id FROM marts.orders UNION ALL SELECT ssn FROM hr.salaries"
+        ).getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
+    }
+
+    // The same fail-open gate skipped protected-column inspection entirely, so a
+    // UNION reached restricted columns even inside an allowed schema.
+    @Test
+    void enforcePreExecution_blocksProtectedColumnsInUnionBranch() {
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy());
+
+        UserDataAccessPolicyException exception = assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest("SELECT 1 AS x UNION ALL SELECT email FROM customer_profiles", null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo("POLICY_SQL_BLOCKED");
+    }
+
+    @Test
+    void enforcePreExecution_blocksForbiddenSchemaInsideCte() {
+        assertThat(assertSchemaScopeBlocks(
+            "WITH leaked AS (SELECT ssn FROM hr.salaries) SELECT * FROM leaked"
+        ).getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
+    }
+
     @Test
     void enforcePreExecution_allowsMartsQueriesWhenOtherSchemasHaveProtectedColumns() {
         ConnectionChatAccessPolicyService.EffectivePolicy schemaPolicy = new ConnectionChatAccessPolicyService.EffectivePolicy(
