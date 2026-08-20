@@ -18,6 +18,14 @@ class QueryExecutionContextTest {
     }
 
     @Test
+    void mcpFactoryHonoursAdminFlagFromSecurityContext() {
+        QueryExecutionContext ctx = QueryExecutionContext.mcp("admin", true);
+        assertThat(ctx.origin()).isEqualTo(QueryExecutionOrigin.MCP);
+        assertThat(ctx.actorUsername()).isEqualTo("admin");
+        assertThat(ctx.actorIsAdmin()).isTrue();
+    }
+
+    @Test
     void scheduledFactoryProducesMayMutateInternalActor() {
         QueryExecutionContext ctx = QueryExecutionContext.scheduled();
         assertThat(ctx.origin()).isEqualTo(QueryExecutionOrigin.SCHEDULED);

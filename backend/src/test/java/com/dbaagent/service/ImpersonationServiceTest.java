@@ -7,6 +7,7 @@ import com.dbaagent.model.UserAccountStatus;
 import com.dbaagent.repository.UserRepository;
 import com.dbaagent.security.CustomUserDetailsService;
 import com.dbaagent.security.ImpersonationContext;
+import com.dbaagent.security.JwtUtil;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,6 +55,9 @@ class ImpersonationServiceTest {
     @Mock
     private SecurityEventService securityEventService;
 
+    @Mock
+    private JwtUtil jwtUtil;
+
     @InjectMocks
     private ImpersonationService impersonationService;
 
@@ -61,6 +65,7 @@ class ImpersonationServiceTest {
     void setUp() {
         ReflectionTestUtils.setField(impersonationService, "authEnabled", true);
         ReflectionTestUtils.setField(impersonationService, "impersonateCookieName", "impersonate_user");
+        ReflectionTestUtils.setField(impersonationService, "accessCookieName", "auth_token");
     }
 
     @AfterEach
@@ -82,6 +87,7 @@ class ImpersonationServiceTest {
 
         assertEquals("marts-editor", state.targetUsername());
         verify(authSessionService).writeImpersonationCookie(response, "impersonate_user", 2L);
+        verify(authSessionService, never()).reissueAccessToken(any(), any(), any(), any());
         ArgumentCaptor<SecurityEventService.EventRequest> captor =
             ArgumentCaptor.forClass(SecurityEventService.EventRequest.class);
         verify(securityEventService).log(captor.capture());
@@ -131,6 +137,54 @@ class ImpersonationServiceTest {
         ResponseStatusException ex = assertThrows(ResponseStatusException.class,
             () -> impersonationService.start(editor, 5L, new MockHttpServletRequest(), new MockHttpServletResponse()));
         assertEquals(403, ex.getStatusCode().value());
+    }
+
+    @Test
+    void startRewritesAccessTokenWithImpersonationClaim() {
+        User admin = user(1L, "admin", "ADMIN");
+        User editor = user(2L, "marts-editor", "DEVELOPER");
+        when(userRepository.findById(2L)).thenReturn(Optional.of(editor));
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute("auth.sessionId", "sess-1");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        impersonationService.start(admin, 2L, request, response);
+
+        verify(authSessionService).reissueAccessToken(response, "sess-1", admin, 2L);
+    }
+
+    @Test
+    void applySwapsPrincipalFromAccessTokenClaimWithoutCookie() {
+        User admin = user(1L, "admin", "ADMIN");
+        User editor = user(2L, "marts-editor", "DEVELOPER");
+        when(userRepository.findByUsername("admin")).thenReturn(Optional.of(admin));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(editor));
+        when(jwtUtil.extractImpersonateUserId("admin.jwt.with.imp")).thenReturn(2L);
+        UserDetails editorDetails = new org.springframework.security.core.userdetails.User(
+            "marts-editor",
+            "x",
+            List.of(new SimpleGrantedAuthority("ROLE_DEVELOPER"), new SimpleGrantedAuthority("USE_CHAT"))
+        );
+        when(userDetailsService.loadUserByUsername("marts-editor")).thenReturn(editorDetails);
+
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(
+                "admin",
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))
+            )
+        );
+
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/connections/abc/query");
+        request.setServletPath("/connections/abc/query");
+        request.addHeader("Authorization", "Bearer admin.jwt.with.imp");
+
+        impersonationService.applyToRequest(request);
+
+        assertEquals("marts-editor", SecurityContextHolder.getContext().getAuthentication().getName());
+        assertTrue(ImpersonationContext.isActive());
+        assertEquals("marts-editor", ImpersonationContext.current().orElseThrow().targetUsername());
     }
 
     @Test

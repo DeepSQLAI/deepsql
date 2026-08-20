@@ -27,6 +27,11 @@ let agentCsrfToken = null;
  */
 let agentRemoteUser = null;
 
+export function clearAgentRemoteUser() {
+  agentRemoteUser = null
+  agentCsrfToken = null
+}
+
 function withAgentAuthHeaders(headers = {}) {
   if (agentRemoteUser) {
     headers["X-Remote-User"] = agentRemoteUser;
@@ -165,8 +170,10 @@ export const agentChatAPI = {
 
   /** Subscribe to a turn's SSE stream. Returns the EventSource (caller may .close()). */
   streamChat(streamId, { onToken, onTool, onToolComplete, onEnd, onError } = {}) {
+    const qs = new URLSearchParams({ stream_id: streamId })
+    if (agentRemoteUser) qs.set('remote_user', agentRemoteUser)
     const es = new EventSource(
-      `${AGENT_BASE}/api/chat/stream?stream_id=${encodeURIComponent(streamId)}`,
+      `${AGENT_BASE}/api/chat/stream?${qs.toString()}`,
       { withCredentials: true },
     );
     let done = false;

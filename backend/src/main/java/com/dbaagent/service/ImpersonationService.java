@@ -7,6 +7,7 @@ import com.dbaagent.model.UserAccountStatus;
 import com.dbaagent.repository.UserRepository;
 import com.dbaagent.security.CustomUserDetailsService;
 import com.dbaagent.security.ImpersonationContext;
+import com.dbaagent.security.JwtUtil;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -33,10 +34,18 @@ import static org.springframework.http.HttpStatus.FORBIDDEN;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 /**
- * Admin-only profile switch. The admin session (JWT cookies) is unchanged;
- * a separate httpOnly cookie names the user to evaluate as. The JWT filter
- * overlays that principal onto the SecurityContext for every request except
- * the impersonation control plane, logout, and session refresh.
+ * Admin-only profile switch so an administrator can verify another user's
+ * connection ACLs and chat/editor policies.
+ *
+ * <p>The admin session stays the real session (logout/refresh/control-plane).
+ * Identity for policy is the target user: an httpOnly {@code impersonate_user}
+ * cookie plus an {@code impUid} claim on the access JWT. The JWT filter overlays
+ * that principal onto the SecurityContext for every request except the
+ * impersonation control plane, logout, and session refresh.
+ *
+ * <p>The {@code impUid} claim matters for callers that send the access token as
+ * a Bearer credential without cookies (Agent MCP fallback). Cookie-only overlay
+ * left those paths running as the administrator, which skipped policy.
  */
 @Service
 @RequiredArgsConstructor
@@ -49,12 +58,16 @@ public class ImpersonationService {
     private final CustomUserDetailsService userDetailsService;
     private final AuthSessionService authSessionService;
     private final SecurityEventService securityEventService;
+    private final JwtUtil jwtUtil;
 
     @Value("${security.auth.enabled:true}")
     private boolean authEnabled;
 
     @Value("${security.cookie.impersonate-name:" + DEFAULT_COOKIE_NAME + "}")
     private String impersonateCookieName;
+
+    @Value("${security.cookie.name:auth_token}")
+    private String accessCookieName;
 
     public ImpersonationContext.State start(
         User actor,
@@ -65,6 +78,7 @@ public class ImpersonationService {
         requireAdminActor(actor);
         User target = requireAllowedTarget(actor, targetUserId);
         authSessionService.writeImpersonationCookie(response, impersonateCookieName, target.getId());
+        rewriteAccessToken(request, response, actor, target.getId());
         securityEventService.log(SecurityEventService.EventRequest.builder()
             .eventType(SecurityEventType.IMPERSONATION_STARTED)
             .outcome(SecurityEventOutcome.SUCCESS)
@@ -91,6 +105,7 @@ public class ImpersonationService {
         requireAdminActor(actor);
         Optional<User> target = readTargetUser(request);
         authSessionService.clearImpersonationCookie(response, impersonateCookieName);
+        rewriteAccessToken(request, response, actor, null);
         ImpersonationContext.clear();
         target.ifPresent(stopped -> securityEventService.log(SecurityEventService.EventRequest.builder()
             .eventType(SecurityEventType.IMPERSONATION_STOPPED)
@@ -145,6 +160,10 @@ public class ImpersonationService {
      * Overlay the target principal when the admin JWT (or the auth-disabled
      * synthetic admin) is already in the SecurityContext. No-ops on the
      * impersonation control-plane, logout/refresh, MCP tokens, and invalid cookies.
+     *
+     * <p>The target is taken from the {@code impersonate_user} cookie first, then
+     * from the access token's {@code impUid} claim so Bearer callers without
+     * cookies still evaluate policy as the viewed-as user.
      */
     public void applyToRequest(HttpServletRequest request) {
         if (!shouldApply(request)) {
@@ -218,6 +237,14 @@ public class ImpersonationService {
     }
 
     private Long readTargetUserId(HttpServletRequest request) {
+        Long fromCookie = readTargetUserIdFromCookie(request);
+        if (fromCookie != null) {
+            return fromCookie;
+        }
+        return readTargetUserIdFromJwt(request);
+    }
+
+    private Long readTargetUserIdFromCookie(HttpServletRequest request) {
         Cookie[] cookies = request.getCookies();
         if (cookies == null) {
             return null;
@@ -225,6 +252,69 @@ public class ImpersonationService {
         for (Cookie cookie : cookies) {
             if (impersonateCookieName.equals(cookie.getName())) {
                 return parseUserId(cookie.getValue());
+            }
+        }
+        return null;
+    }
+
+    private Long readTargetUserIdFromJwt(HttpServletRequest request) {
+        String jwt = readAccessJwt(request);
+        if (jwt == null) {
+            return null;
+        }
+        try {
+            return jwtUtil.extractImpersonateUserId(jwt);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void rewriteAccessToken(
+        HttpServletRequest request,
+        HttpServletResponse response,
+        User sessionOwner,
+        Long impersonateUserId
+    ) {
+        String sessionId = sessionIdFrom(request);
+        if (sessionId == null) {
+            return;
+        }
+        authSessionService.reissueAccessToken(response, sessionId, sessionOwner, impersonateUserId);
+    }
+
+    private String sessionIdFrom(HttpServletRequest request) {
+        Object attr = request.getAttribute("auth.sessionId");
+        if (attr instanceof String sid && !sid.isBlank()) {
+            return sid;
+        }
+        String jwt = readAccessJwt(request);
+        if (jwt == null) {
+            return null;
+        }
+        try {
+            String sessionId = jwtUtil.extractSessionId(jwt);
+            return sessionId == null || sessionId.isBlank() ? null : sessionId;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String readAccessJwt(HttpServletRequest request) {
+        String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
+        if (authorization != null && authorization.startsWith("Bearer ")) {
+            String token = authorization.substring(7);
+            if (token.startsWith(McpTokenService.TOKEN_PREFIX)) {
+                return null;
+            }
+            return token.isBlank() ? null : token;
+        }
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null) {
+            return null;
+        }
+        for (Cookie cookie : cookies) {
+            if (accessCookieName.equals(cookie.getName())) {
+                return cookie.getValue();
             }
         }
         return null;

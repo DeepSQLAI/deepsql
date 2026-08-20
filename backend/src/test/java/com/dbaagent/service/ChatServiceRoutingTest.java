@@ -164,6 +164,8 @@ class ChatServiceRoutingTest {
             .thenReturn(UserDataAccessPolicyService.PromptDecision.allow(ConnectionChatAccessPolicyService.EffectivePolicy.none()));
         lenient().when(userDataAccessPolicyService.decorateQuestionWithPolicy(any(), anyString()))
             .thenAnswer(invocation -> invocation.getArgument(1, String.class));
+        lenient().when(userDataAccessPolicyService.filterSchemaMetadata(any(), any(), anyBoolean(), any()))
+            .thenAnswer(invocation -> invocation.getArgument(3));
         lenient().when(contextAssembler.formatRowCount(anyLong()))
             .thenAnswer(invocation -> String.valueOf(invocation.getArgument(0, Long.class)));
         lenient().when(contextAssembler.formatBytes(anyLong()))

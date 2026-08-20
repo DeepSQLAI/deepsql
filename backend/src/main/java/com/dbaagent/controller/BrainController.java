@@ -65,6 +65,7 @@ import com.dbaagent.service.brain.query.AdaptivePlanScoringService;
 import com.dbaagent.service.brain.query.PlanPatternLibraryService;
 import com.dbaagent.service.brain.BrainInsightEmbeddingService;
 import com.dbaagent.service.SlowQueryHistoryService;
+import com.dbaagent.service.UserDataAccessPolicyService;
 import com.dbaagent.service.security.AccessControlService;
 import com.dbaagent.model.SlowQueryAnalysis;
 import lombok.RequiredArgsConstructor;
@@ -139,6 +140,7 @@ public class BrainController {
     private final SlowQueryHistoryService slowQueryHistoryService;
     private final BrainInsightEmbeddingService brainInsightEmbeddingService;
     private final AccessControlService accessControlService;
+    private final UserDataAccessPolicyService userDataAccessPolicyService;
 
     @GetMapping("/understanding/{connectionId}")
     public ResponseEntity<BrainUnderstandingResponse> getUnderstanding(
@@ -531,7 +533,12 @@ public class BrainController {
     ) {
         try {
             accessControlService.assertCanReadConnectionContent(connectionId);
-            return ResponseEntity.ok(joinRelationshipInferenceService.getRelationships(connectionId));
+            return ResponseEntity.ok(userDataAccessPolicyService.filterInferredRelationships(
+                connectionId,
+                accessControlService.getCurrentUsername(),
+                accessControlService.isCurrentUserAdmin(),
+                joinRelationshipInferenceService.getRelationships(connectionId)
+            ));
         } catch (ResponseStatusException e) {
             throw e;
         } catch (Exception e) {

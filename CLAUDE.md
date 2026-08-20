@@ -199,8 +199,9 @@ returns a number).
 2. **LLM Provider Registry**: Use `LlmProviderRegistry` for all provider-specific LLM behavior. Do NOT add if/else or switch on provider type. Chat and embedding providers are registered and resolved independently — some providers offer only one. Providers are *factories* over credentials, not `ChatModel`s, so credentials stay resolvable per call and key rotation needs no restart.
 3. **SSH-Aware Access**: Always use `ConnectionService.getJdbcTemplate(connectionId, request)` — handles SSH tunneling transparently.
 4. **SQL Rule**: All generated SQL MUST use table-qualified column names (`table.column_name`).
-5. **RAG Caching**: Three-tier cache (memory → Redis → Azure Search). Redis failure is graceful (app continues without caching).
-6. **Virtual Threads**: Enabled for concurrency (JDK 25).
+5. **Chat access policy**: Fail closed. Walk the whole SQL tree (CTEs, set ops, subqueries). Deny unparseable or unhandled statements. Require an actor except `INTERNAL`/`SCHEDULED`. MCP/Editor identity comes from `SecurityContext`, not `QueryActorContextHolder`. Persist `allowed_schemas`. Do not let "how many" override a protected-column mention. Public share is refused when the connection has an active policy.
+6. **RAG Caching**: Three-tier cache (memory → Redis → Azure Search). Redis failure is graceful (app continues without caching).
+7. **Virtual Threads**: Enabled for concurrency (JDK 25).
 
 ### Frontend Rules
 1. **API Centralization**: ALL API calls through `src/lib/api/client.js`. Never create direct axios instances.
@@ -210,7 +211,13 @@ returns a number).
 5. **Design**: Minimal black/white/grey palette, Inter font, subtle transitions. See UX guidelines in full CLAUDE.md.
 
 ### Admin profile switch
-Admins can **View as** a sub-user from the top-right of the home layout (`ProfileSwitch`) to verify connection ACLs, chat/editor policies, and role-gated nav. The admin JWT stays on the session; `ImpersonationService` sets an httpOnly `impersonate_user` cookie and `JwtAuthenticationFilter` overlays the target principal. `POST|DELETE|GET /api/admin/impersonate` are excluded from the overlay so stop/list still run as the real admin. Cannot target another ADMIN, self, or a non-ACTIVE account. `/auth/me` returns the **effective** user plus `impersonating` / `impersonatorUsername`.
+Admins can **View as** a sub-user from the top-right of the home layout (`ProfileSwitch`) to verify connection ACLs, chat/editor policies, and role-gated nav.
+
+The admin JWT **subject** stays the administrator so logout, refresh, and `/admin/impersonate` still own the real session. Policy identity is the target: an httpOnly `impersonate_user` cookie plus an `impUid` claim on the access token. `JwtAuthenticationFilter` overlays that principal onto the SecurityContext for every request except the impersonation control plane, logout, and session refresh. Chat, Editor, schema listing, and Agent MCP calls then run `AccessControlService` / `ConnectionChatAccessPolicyService` as the target (`actorIsAdmin` is false, so policies apply).
+
+The Agent tab must not inherit the admin MCP token. `/api/agent/session` mints an MCP token for the effective user and never falls back to the admin session JWT while View as is active. nginx `auth_request` on `/agent-api` forwards `/api/auth/me`'s `X-Remote-User` (the overlaid username) instead of hardcoding `admin`.
+
+`POST|DELETE|GET /api/admin/impersonate` are excluded from the overlay so stop/list still run as the real admin. Cannot target another ADMIN, self, or a non-ACTIVE account. `/auth/me` returns the **effective** user plus `impersonating` / `impersonatorUsername`.
 
 ### Git Rules
 - Do NOT commit automatically — wait for explicit user instruction.
@@ -238,7 +245,16 @@ Admins can **View as** a sub-user from the top-right of the home layout (`Profil
    `hermes_requires <0.20.0` on a "verified" 401 that came from a hand-rolled
    `hermes serve` run rather than `hermes webui`. 0.20.0 works. Verify against the
    real start path before writing a version constraint.
-5. **The agent image build clones two third-party repos over the public internet,
+5. **Hermes MCP is process-global.** One `deepsql-phase1-server.js` stdio server
+   is started from the first loaded profile (usually `u-admin`) and lives until
+   the Agent API process dies. `POST /api/profile/switch` is `process_wide=False`
+   on purpose (per-browser cookie), so a View as / new-thread Agent chat tagged
+   `profile: u-marts-editor` still sends the admin MCP bearer. Chat-access policy
+   then `resolveEffectivePolicy(..., actorIsAdmin=true)` → `none()`. The
+   provisioner mirrors the target user's token onto every `deepsql.token` the
+   live process might re-read (`DEEPSQL_TOKEN_FILE` mtime cache in
+   `mcp/deepsql-phase1-lib.js`).
+6. **The agent image build clones two third-party repos over the public internet,
    unauthenticated.** `agent/Dockerfile` fetches `NousResearch/hermes-agent` and
    `nesquena/hermes-webui` at build time. GitHub rate-limits unauthenticated
    requests *per source IP*, and Actions runners share pooled egress addresses, so
@@ -276,6 +292,16 @@ broken. Assert the *outcome*, never the attempt:
 - **`set -e` + `read` at EOF aborts silently.** Prompts in `install.sh` use
   `read … || true` so the explicit emptiness checks report the problem. Without it the
   installer exited 1 with no message, after writing generated secrets to `.env`.
+- **Minting an Agent MCP token ≠ Hermes using it.** `/api/agent/session` can mint
+  `u-marts-editor`'s token and `POST /api/profile/switch` can 200 while
+  `execute_sql` still authenticates as admin. Hermes keeps one DeepSQL MCP
+  stdio process (started from the first profile that loaded `mcp_servers`) and
+  `profile/switch` is `process_wide=False`. A new chat thread does not respawn
+  MCP. `probeMcpAuth` only proves the *minted* token works against Spring, not
+  that the live MCP process will send it. The provisioner must mirror the
+  token onto every `deepsql.token` the live process might be watching
+  (`scripts/local-agent-provisioner.py`). Audit: `security_event.user_id` on
+  `EDITOR_QUERY_EXECUTED` with `clientType=mcp`.
 - **Silent-failure rule, concretely:** the CLI rendered an unreachable server as
   `No databases connected yet` because one `catch` covered both the connection fetch
   and decorative extras. An unreachable host must never look like an empty account.

@@ -155,6 +155,32 @@ public class AuthSessionService {
         response.addHeader(HttpHeaders.SET_COOKIE, buildRefreshCookie(sessionAuthentication.refreshToken()).toString());
     }
 
+    /**
+     * Rewrite the access cookie in place (same session id) so View as can stamp
+     * or clear {@code impUid} without rotating the refresh token. {@code impersonateUserId}
+     * null clears the claim.
+     */
+    public void reissueAccessToken(
+        HttpServletResponse response,
+        String sessionId,
+        User sessionOwner,
+        Long impersonateUserId
+    ) {
+        if (response == null || sessionId == null || sessionId.isBlank() || sessionOwner == null) {
+            return;
+        }
+        Role role = sessionOwner.getRoleEnum();
+        String accessToken = jwtUtil.generateAccessToken(
+            sessionOwner.getUsername(),
+            sessionId,
+            role,
+            role.getPermissions(),
+            Duration.ofMinutes(accessMinutes),
+            impersonateUserId
+        );
+        response.addHeader(HttpHeaders.SET_COOKIE, buildAccessCookie(accessToken).toString());
+    }
+
     public void writeImpersonationCookie(HttpServletResponse response, String cookieName, long targetUserId) {
         response.addHeader(HttpHeaders.SET_COOKIE, ResponseCookie.from(cookieName, Long.toString(targetUserId))
             .httpOnly(true)

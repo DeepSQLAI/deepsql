@@ -5,11 +5,12 @@ import com.dbaagent.model.User;
 import java.util.Optional;
 
 /**
- * Request-scoped impersonation overlay. The admin JWT stays on the session;
+ * Request-scoped impersonation overlay. The admin JWT subject stays on the
+ * session so logout/refresh/control-plane still own the real administrator;
  * {@link JwtAuthenticationFilter} swaps the SecurityContext principal to the
- * target user and records both identities here so {@code /auth/me} can show a
- * banner and {@code AccessControlService} can honour the target even when
- * {@code security.auth.enabled} is false.
+ * target user (from {@code impersonate_user} cookie or {@code impUid} claim)
+ * so policy evaluation, {@code /auth/me}, and {@code AccessControlService}
+ * honour the viewed-as user — including when {@code security.auth.enabled} is false.
  */
 public final class ImpersonationContext {
 

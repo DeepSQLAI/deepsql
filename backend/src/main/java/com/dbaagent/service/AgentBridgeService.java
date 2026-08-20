@@ -1,5 +1,6 @@
 package com.dbaagent.service;
 
+import com.dbaagent.security.ImpersonationContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -142,9 +143,19 @@ public class AgentBridgeService {
     public ProfileBootstrap ensureProfile(String username, String authToken, String connectionId) {
         String profile = profileFor(username);
         if (!provisionEnabled) {
+            if (ImpersonationContext.isActive()) {
+                throw new ProvisioningException(
+                    "Agent provisioning is disabled; View as cannot bind a user-scoped Agent token"
+                );
+            }
             return new ProfileBootstrap(profile, authToken);
         }
         if (provisionSecret == null || provisionSecret.isBlank()) {
+            if (ImpersonationContext.isActive()) {
+                throw new ProvisioningException(
+                    "Agent provisioning is not configured; View as cannot bind a user-scoped Agent token"
+                );
+            }
             log.warn("agent.provision-secret is unset — skipping per-user provisioning for {}", username);
             return new ProfileBootstrap(profile, authToken);
         }
@@ -154,11 +165,21 @@ public class AgentBridgeService {
         // every MCP call. Mint a dedicated, user-scoped, revocable MCP token
         // instead (authenticated by McpTokenAuthenticationFilter, not the session
         // filter). Fall back to the session token only if minting fails so the
-        // tab still opens.
+        // tab still opens — except during View as, where the session JWT is the
+        // administrator's and would skip the target user's policy.
         String agentToken = mintAgentToken(username);
         if (agentToken == null) {
+            if (ImpersonationContext.isActive()) {
+                throw new ProvisioningException(
+                    "Could not mint an MCP token for " + username + " while viewing as that user"
+                );
+            }
             agentToken = authToken == null ? "" : authToken;
         }
+        // The provisioner also mirrors this token onto every profile
+        // `deepsql.token` the already-running Hermes MCP subprocess watches.
+        // Profile switch does not respawn MCP; without that mirror, View as
+        // Agent chats keep the admin credential and skip policy.
         callProvisioner(username, profile, agentToken, connectionId);
         return new ProfileBootstrap(profile, agentToken);
     }

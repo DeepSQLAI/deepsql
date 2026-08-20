@@ -40,6 +40,13 @@ public class ConnectionChatAccessPolicy {
     @Column(name = "denied_columns", columnDefinition = "jsonb")
     private List<String> deniedColumns;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "allowed_schemas", columnDefinition = "jsonb")
+    private List<String> allowedSchemas;
+
+    @Column(name = "allow_aggregates", nullable = false)
+    private boolean allowAggregates = false;
+
     @Column(name = "block_mode", nullable = false)
     private boolean blockMode = true;
 

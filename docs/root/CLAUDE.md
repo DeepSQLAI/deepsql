@@ -21,9 +21,14 @@ Do NOT ask "should I update CLAUDE.md?" - just update it as part of task complet
 - Batch multiple related changes into a single commit
 - Provide a custom commit message if needed
 
-## Recent Changes
+- 2026-08-20: Chat access policy enforcement is fail-closed. `UserDataAccessPolicyService`
+  walks the whole parse tree (`TablesNamesFinder` plus CTEs/UNIONs/subqueries), denies
+  unparseable or unhandled SQL, requires an actor except `INTERNAL`/`SCHEDULED`, and
+  exempts only `COUNT(*)` / `COUNT(1)` without `GROUP BY`. MCP and Editor queries take
+  the actor from `SecurityContext` (MCP tokens included). Allowed schemas are persisted
+  on the policy row. RAG, brain relationships, and vault-first metadata are schema-scoped.
+  Public dashboard share is refused on connections with an active policy.
 
-- 2026-08-17: `McpSqlGuardService` (and the matching MCP JS shim) no longer treats
   `COMMENT` / `CALL` / `REPLACE` as mutating when they appear as table, column, or
   function names. The guard matches statement verbs: mutating CTEs, `WITH … DELETE`,
   `FOR UPDATE`, and `EXPLAIN DELETE`. `SELECT * FROM comment` is allowed. Dashboards
@@ -822,9 +827,9 @@ though the properties themselves still sit in `application*.properties`.
       - `DELETE /api/admin/users/{id}` - Delete user (ADMIN only)
       - `GET /api/admin/roles` - Get all roles with permissions (ADMIN only)
       - `GET /api/admin/impersonate` - List switchable users and current profile-switch status (ADMIN only)
-      - `POST /api/admin/impersonate` - `{ userId }` start viewing the product as that user (ADMIN only; cannot target admins or self)
+      - `POST /api/admin/impersonate` - `{ userId }` start viewing the product as that user (ADMIN only; cannot target admins or self). Sets `impersonate_user` cookie and restamps the access JWT with `impUid` so policy (and Agent Bearer fallback) run as the target while the JWT subject stays the admin.
       - `DELETE /api/admin/impersonate` - Stop profile switch and restore the admin session
-      - `GET /api/auth/me` - Get current user's profile including role/permissions; while switching, this is the **target** user plus `impersonating` / `impersonatorUsername`
+      - `GET /api/auth/me` - Get current user's profile including role/permissions; while switching, this is the **target** user plus `impersonating` / `impersonatorUsername`. Also sets `X-Remote-User` to the effective username for nginx `/agent-api` auth_request.
     - **Frontend Components**:
       - `PermissionGuard.jsx` - Wrapper component for permission-based rendering
       - `UsersTab.jsx` - Admin user management tab in Workspace

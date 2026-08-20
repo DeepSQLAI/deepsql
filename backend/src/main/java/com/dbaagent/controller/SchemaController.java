@@ -7,6 +7,7 @@ import com.dbaagent.service.CredentialService;
 import com.dbaagent.service.QueryExecutionContext;
 import com.dbaagent.service.QueryExecutionPolicyException;
 import com.dbaagent.service.ActiveQueryService;
+import com.dbaagent.service.McpTokenService;
 import com.dbaagent.service.QueryExecutorService;
 import com.dbaagent.service.RunningQueryRegistry;
 import com.dbaagent.service.SqlExecutionAuditService;
@@ -15,6 +16,7 @@ import com.dbaagent.service.UserDataAccessPolicyService;
 import com.dbaagent.service.SchemaScannerService;
 import com.dbaagent.service.VisualizationService;
 import com.dbaagent.service.security.AccessControlService;
+import org.springframework.http.HttpHeaders;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -195,11 +197,7 @@ public class SchemaController {
             QueryResult result = queryExecutorService.executeQuery(
                 connectionId,
                 queryRequest,
-                QueryExecutionContext.editor(
-                    accessControlService.getCurrentUsername(),
-                    accessControlService.isCurrentUserAdmin(),
-                    Boolean.TRUE.equals(queryRequest.getMutationConfirmed())
-                )
+                queryExecutionContext(queryRequest, httpRequest)
             );
             sqlExecutionAuditService.record(SqlExecutionAuditService.AuditRecord.executed()
                 .connectionId(connectionId)
@@ -411,6 +409,26 @@ public class SchemaController {
             response.put("message", "Failed to fetch table stats: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
         }
+    }
+
+    private QueryExecutionContext queryExecutionContext(QueryRequest queryRequest, HttpServletRequest httpRequest) {
+        String username = accessControlService.getCurrentUsername();
+        boolean admin = accessControlService.isCurrentUserAdmin();
+        if (isMcpBearer(httpRequest)) {
+            return QueryExecutionContext.mcp(username, admin);
+        }
+        return QueryExecutionContext.editor(
+            username,
+            admin,
+            Boolean.TRUE.equals(queryRequest.getMutationConfirmed())
+        );
+    }
+
+    private boolean isMcpBearer(HttpServletRequest httpRequest) {
+        String authorization = httpRequest.getHeader(HttpHeaders.AUTHORIZATION);
+        return authorization != null
+            && authorization.startsWith("Bearer ")
+            && authorization.substring(7).startsWith(McpTokenService.TOKEN_PREFIX);
     }
 
     private SchemaMetadata scopedSchema(String connectionId, SchemaMetadata schema) {

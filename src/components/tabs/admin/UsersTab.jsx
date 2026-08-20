@@ -1086,10 +1086,17 @@ function ConnectionAccessModal({ user, data, loading, onClose, onSave, onRevoke,
                           Assign the connection first, then save a per-user chat policy for it.
                         </div>
                       )}
+                      {assignment?.chatAccessPolicy?.allowedSchemas?.length > 0 && (
+                        <div className="mt-2 text-xs text-gray-600">
+                          <span className="font-medium">Resolved scope:</span>{' '}
+                          {assignment.chatAccessPolicy.allowedSchemas.join(', ')}
+                        </div>
+                      )}
 
                       {preview && (
                         <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 space-y-2">
                           <div><span className="font-medium">Blocked sensitivity:</span> {(preview.blockedSensitivityCategories || []).join(', ') || 'None'}</div>
+                          <div><span className="font-medium">Allowed schemas:</span> {(preview.allowedSchemas || []).join(', ') || 'All schemas'}</div>
                           <div><span className="font-medium">Impacted tables:</span> {(preview.impactedTables || []).join(', ') || 'None'}</div>
                           <div><span className="font-medium">Impacted columns:</span> {(preview.impactedColumns || []).join(', ') || 'None'}</div>
                           <div><span className="font-medium">Modes:</span> {preview.blockMode ? 'Block' : 'Allow'} + {preview.redactMode ? 'Redact' : 'Pass through'}</div>
