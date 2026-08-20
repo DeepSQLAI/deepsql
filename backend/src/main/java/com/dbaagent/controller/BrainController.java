@@ -70,6 +70,7 @@ import com.dbaagent.model.SlowQueryAnalysis;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -391,7 +392,14 @@ public class BrainController {
         }
     }
 
+    /**
+     * Not implemented. Kept admin-only rather than guarded per connection: the body
+     * never loads the anti-pattern, so there is no connection to authorize against.
+     * Whoever implements it must resolve the owning connection from {@code patternId}
+     * and switch to {@code assertCanManageConnectionContent}.
+     */
     @PostMapping("/key-columns/anti-pattern/{patternId}/acknowledge")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Map<String, String>> acknowledgeAntiPattern(
         @PathVariable Long patternId
     ) {
@@ -600,6 +608,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             queryQualityAnalysisService.analyzeQueryQuality(connectionId);
             List<QueryAntiPattern> patterns = queryQualityAnalysisService.getAllQueryAntiPatterns(connectionId);
 
@@ -631,6 +640,7 @@ public class BrainController {
         @PathVariable String severity
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             QueryAntiPattern.Severity severityEnum = QueryAntiPattern.Severity.valueOf(severity.toUpperCase());
             // Note: Need to add this method to QueryQualityAnalysisService
             return ResponseEntity.ok(List.of()); // TODO: Implement in service
@@ -651,6 +661,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(scalabilitySimulationService.getAllSimulations(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -665,6 +676,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return scalabilitySimulationService.getLatestSimulation(connectionId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
@@ -682,6 +694,7 @@ public class BrainController {
         @RequestParam(required = false) String scenario
     ) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             if (scenario != null && !scenario.isEmpty()) {
                 // Run single scenario
                 ScalabilitySimulation.GrowthScenario scenarioEnum =
@@ -708,7 +721,10 @@ public class BrainController {
         @PathVariable String simulationId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(scalabilitySimulationService.getConnectionId(simulationId));
             return ResponseEntity.ok(scalabilitySimulationService.getTablePredictions(simulationId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
         } catch (ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
@@ -722,6 +738,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(scalabilitySimulationService.getHighRiskTables(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -738,6 +755,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return brainScoreService.getLatestBrainScore(connectionId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
@@ -755,6 +773,7 @@ public class BrainController {
         @RequestParam(defaultValue = "10") int limit
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(brainScoreService.getBrainScoreHistory(connectionId, limit));
         } catch (ResponseStatusException e) {
             throw e;
@@ -769,6 +788,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             BrainScore score = brainScoreService.calculateBrainScore(connectionId);
             return ResponseEntity.ok(score);
         } catch (ResponseStatusException e) {
@@ -786,6 +806,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(accessPatternService.classifyAccessPatterns(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -800,6 +821,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(antiPatternService.detectAntiPatterns(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -814,6 +836,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(temporalService.classifyTemporalPatterns(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -828,6 +851,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(healthScoreService.calculateHealthScores(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -842,6 +866,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(domainService.classifyBusinessDomains(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -856,6 +881,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(sensitivityService.classifyDataSensitivity(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -870,6 +896,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(partitionService.evaluatePartitionReadiness(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -884,6 +911,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(relationshipClassificationService.getRelationships(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -898,6 +926,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(relationshipClassificationService.getIntegrityIssues(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -912,6 +941,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(relationshipClassificationService.getMissingIndexes(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -927,6 +957,7 @@ public class BrainController {
         @PathVariable String level
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<TableClassification> tables = schemaClassificationService.getAllTableClassifications(connectionId)
                 .stream()
                 .filter(tc -> level.equalsIgnoreCase(tc.getSensitivityLevel()))
@@ -946,6 +977,7 @@ public class BrainController {
         @PathVariable String domain
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<TableClassification> tables = schemaClassificationService.getAllTableClassifications(connectionId)
                 .stream()
                 .filter(tc -> domain.equalsIgnoreCase(tc.getBusinessDomain()))
@@ -964,6 +996,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<TableClassification> tables = schemaClassificationService.getAllTableClassifications(connectionId)
                 .stream()
                 .filter(tc -> tc.getPartitionReadiness() != null &&
@@ -984,6 +1017,7 @@ public class BrainController {
         @RequestParam(required = false) String severity
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<TableClassification> tables = schemaClassificationService.getAllTableClassifications(connectionId)
                 .stream()
                 .filter(tc -> tc.getAntiPatternCount() != null && tc.getAntiPatternCount() > 0)
@@ -1004,6 +1038,7 @@ public class BrainController {
         @RequestParam(defaultValue = "60") double threshold
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<TableClassification> tables = schemaClassificationService.getAllTableClassifications(connectionId)
                 .stream()
                 .filter(tc -> tc.getHealthScore() != null && tc.getHealthScore().doubleValue() < threshold)
@@ -1025,6 +1060,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(lifecycleService.classifyDataLifecycle(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -1039,6 +1075,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(cacheAffinityService.classifyCacheAffinity(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -1053,6 +1090,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(queryComplexityService.classifyQueryComplexity(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -1067,6 +1105,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(schemaRiskService.assessSchemaEvolutionRisk(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -1081,6 +1120,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(denormalizationService.identifyDenormalizationCandidates(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -1095,6 +1135,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(costService.calculateCostAttribution(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -1109,6 +1150,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(shardingService.assessShardingReadiness(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -1123,6 +1165,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(dataQualityService.calculateDataQuality(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -1137,6 +1180,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(dependencyCriticalityService.assessDependencyCriticality(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -1151,6 +1195,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(growthPredictionService.predictGrowth(connectionId));
         } catch (ResponseStatusException e) {
             throw e;
@@ -1168,6 +1213,7 @@ public class BrainController {
         @PathVariable String lifecycle
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<TableClassification> tables = schemaClassificationService.getAllTableClassifications(connectionId)
                 .stream()
                 .filter(tc -> lifecycle.equalsIgnoreCase(tc.getDataLifecycle()))
@@ -1186,6 +1232,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<TableClassification> tables = schemaClassificationService.getAllTableClassifications(connectionId)
                 .stream()
                 .filter(tc -> "HIGH_CACHE_VALUE".equalsIgnoreCase(tc.getCacheAffinity()))
@@ -1205,6 +1252,7 @@ public class BrainController {
         @PathVariable String level
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<TableClassification> tables = schemaClassificationService.getAllTableClassifications(connectionId)
                 .stream()
                 .filter(tc -> level.equalsIgnoreCase(tc.getSchemaEvolutionRisk()))
@@ -1223,6 +1271,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<TableClassification> tables = schemaClassificationService.getAllTableClassifications(connectionId)
                 .stream()
                 .filter(tc -> Boolean.TRUE.equals(tc.getDenormalizationCandidate()))
@@ -1241,6 +1290,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<TableClassification> tables = schemaClassificationService.getAllTableClassifications(connectionId)
                 .stream()
                 .filter(tc -> "READY".equalsIgnoreCase(tc.getShardingReadiness()))
@@ -1260,6 +1310,7 @@ public class BrainController {
         @RequestParam(defaultValue = "50") double threshold
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<TableClassification> tables = schemaClassificationService.getAllTableClassifications(connectionId)
                 .stream()
                 .filter(tc -> tc.getDataQualityScore() != null && tc.getDataQualityScore().doubleValue() < threshold)
@@ -1279,6 +1330,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<TableClassification> tables = schemaClassificationService.getAllTableClassifications(connectionId)
                 .stream()
                 .filter(tc -> "CRITICAL".equalsIgnoreCase(tc.getDependencyCriticality()) ||
@@ -1298,6 +1350,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<TableClassification> tables = schemaClassificationService.getAllTableClassifications(connectionId)
                 .stream()
                 .filter(tc -> "EXPLOSIVE".equalsIgnoreCase(tc.getGrowthCategory()) ||
@@ -1318,6 +1371,7 @@ public class BrainController {
         @PathVariable String tier
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<TableClassification> tables = schemaClassificationService.getAllTableClassifications(connectionId)
                 .stream()
                 .filter(tc -> tier.equalsIgnoreCase(tc.getCostTier()))
@@ -1343,6 +1397,7 @@ public class BrainController {
         @RequestParam(required = false) String tableName
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<ColumnValueCache> values = columnValueCollectionService.getCachedColumns(connectionId, tableName);
             return ResponseEntity.ok(values);
         } catch (ResponseStatusException e) {
@@ -1361,6 +1416,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             Map<String, Object> stats = columnValueCollectionService.getStatistics(connectionId);
             return ResponseEntity.ok(stats);
         } catch (ResponseStatusException e) {
@@ -1380,6 +1436,7 @@ public class BrainController {
         @PathVariable String connectionId
     ) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             log.info("Manually triggering column value refresh for connection: {}", connectionId);
 
             // Run async and return immediately
@@ -1409,8 +1466,12 @@ public class BrainController {
     /**
      * Embed all unembedded column values.
      * Useful for re-syncing Azure AI Search after migration or data loss.
+     *
+     * <p>Spans every connection with no per-connection scope, so it cannot be
+     * authorized against a single connection's grants — admin only.
      */
     @PostMapping("/column-values/embed-all")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Map<String, Object>> embedAllColumnValues() {
         try {
             int count = columnValueCollectionService.embedAllUnembedded();
@@ -1436,6 +1497,7 @@ public class BrainController {
     @PostMapping("/insights/{connectionId}/embed")
     public ResponseEntity<Map<String, Object>> embedBrainInsights(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             log.info("Embedding Brain insights for connection: {}", connectionId);
             Map<String, Object> result = brainInsightEmbeddingService.embedAllInsights(connectionId);
             return ResponseEntity.ok(result);
@@ -1457,6 +1519,7 @@ public class BrainController {
     @PostMapping("/insights/{connectionId}/embed/patterns")
     public ResponseEntity<Map<String, Object>> embedPlanPatterns(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             int count = brainInsightEmbeddingService.embedPlanPatterns(connectionId);
             return ResponseEntity.ok(Map.of(
                 "success", true,
@@ -1477,6 +1540,7 @@ public class BrainController {
     @PostMapping("/insights/{connectionId}/embed/workload")
     public ResponseEntity<Map<String, Object>> embedWorkloadInsight(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             boolean success = brainInsightEmbeddingService.embedWorkloadInsight(connectionId);
             return ResponseEntity.ok(Map.of(
                 "success", success,
@@ -1496,6 +1560,7 @@ public class BrainController {
     @PostMapping("/insights/{connectionId}/embed/cardinality")
     public ResponseEntity<Map<String, Object>> embedCardinalityInsights(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             int count = brainInsightEmbeddingService.embedCardinalityInsights(connectionId);
             return ResponseEntity.ok(Map.of(
                 "success", true,
@@ -1518,6 +1583,7 @@ public class BrainController {
     @PostMapping("/workload/collect/{connectionId}")
     public ResponseEntity<WorkloadMetricsSnapshot> collectWorkloadMetrics(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             log.info("Collecting workload metrics for connection: {}", connectionId);
             WorkloadMetricsSnapshot snapshot = metricsCollectorService.collectMetrics(connectionId);
             return ResponseEntity.ok(snapshot);
@@ -1535,6 +1601,7 @@ public class BrainController {
     @PostMapping("/workload/characterize/{connectionId}")
     public ResponseEntity<WorkloadProfile> characterizeWorkload(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             log.info("Characterizing workload for connection: {}", connectionId);
             WorkloadProfile profile = workloadCharacterizationService.characterizeWorkload(connectionId);
             return ResponseEntity.ok(profile);
@@ -1552,6 +1619,7 @@ public class BrainController {
     @GetMapping("/workload/profile/{connectionId}")
     public ResponseEntity<WorkloadProfile> getWorkloadProfile(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return workloadCharacterizationService.getProfile(connectionId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
@@ -1570,6 +1638,7 @@ public class BrainController {
     @GetMapping("/workload/status/{connectionId}")
     public ResponseEntity<Map<String, Object>> getWorkloadStatus(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             Map<String, Object> status = new java.util.HashMap<>();
 
             // Snapshot count
@@ -1620,6 +1689,7 @@ public class BrainController {
             @PathVariable String connectionId,
             @RequestParam(defaultValue = "5") int limit) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<WorkloadProfile> similar = workloadCharacterizationService.findSimilarProfiles(connectionId, limit);
             return ResponseEntity.ok(similar);
         } catch (ResponseStatusException e) {
@@ -1640,6 +1710,7 @@ public class BrainController {
             @PathVariable String connectionId,
             @RequestParam(defaultValue = "LATENCY") KnobRanking.TargetMetric targetMetric) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             log.info("Identifying knobs for connection: {} targeting: {}", connectionId, targetMetric);
             List<KnobRanking> rankings = knobIdentificationService.identifyKnobs(connectionId, targetMetric);
             return ResponseEntity.ok(rankings);
@@ -1660,6 +1731,7 @@ public class BrainController {
             @RequestParam(defaultValue = "LATENCY") KnobRanking.TargetMetric targetMetric,
             @RequestParam(defaultValue = "5") int limit) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<KnobRanking> topKnobs = knobIdentificationService.getTopKnobs(connectionId, targetMetric, limit);
             return ResponseEntity.ok(topKnobs);
         } catch (ResponseStatusException e) {
@@ -1676,6 +1748,7 @@ public class BrainController {
     @GetMapping("/config/rankings/{connectionId}")
     public ResponseEntity<List<KnobRanking>> getAllKnobRankings(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<KnobRanking> rankings = knobIdentificationService.getAllRankings(connectionId);
             return ResponseEntity.ok(rankings);
         } catch (ResponseStatusException e) {
@@ -1693,6 +1766,7 @@ public class BrainController {
     public ResponseEntity<List<ConfigurationRecommendation>> generateConfigRecommendations(
             @PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             log.info("Generating ML-based config recommendations for: {}", connectionId);
             List<ConfigurationRecommendation> recommendations = configTuningService.generateRecommendations(connectionId);
             return ResponseEntity.ok(recommendations);
@@ -1712,6 +1786,7 @@ public class BrainController {
             @PathVariable String connectionId,
             @org.springframework.web.bind.annotation.RequestBody ExperimentRequest request) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             log.info("Starting tuning experiment for: {}", connectionId);
             TuningExperiment experiment = configTuningService.startExperiment(
                 connectionId, request.getKnobChanges(), request.getRecommendationId());
@@ -1732,6 +1807,7 @@ public class BrainController {
     @PostMapping("/config/experiments/{experimentId}/complete")
     public ResponseEntity<TuningExperiment> completeTuningExperiment(@PathVariable String experimentId) {
         try {
+            accessControlService.assertCanManageConnectionContent(configTuningService.getConnectionId(experimentId));
             log.info("Completing experiment: {}", experimentId);
             TuningExperiment experiment = configTuningService.completeExperiment(experimentId);
             return ResponseEntity.ok(experiment);
@@ -1751,6 +1827,7 @@ public class BrainController {
     @DeleteMapping("/config/experiments/{experimentId}")
     public ResponseEntity<Void> cancelTuningExperiment(@PathVariable String experimentId) {
         try {
+            accessControlService.assertCanManageConnectionContent(configTuningService.getConnectionId(experimentId));
             log.info("Cancelling experiment: {}", experimentId);
             configTuningService.cancelExperiment(experimentId);
             return ResponseEntity.noContent().build();
@@ -1772,6 +1849,7 @@ public class BrainController {
             @PathVariable String connectionId,
             @RequestParam(defaultValue = "10") int limit) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<TuningExperiment> history = configTuningService.getExperimentHistory(connectionId, limit);
             return ResponseEntity.ok(history);
         } catch (ResponseStatusException e) {
@@ -1788,6 +1866,7 @@ public class BrainController {
     @GetMapping("/config/experiments/{connectionId}/success-rate")
     public ResponseEntity<Map<String, Object>> getExperimentSuccessRate(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             double successRate = configTuningService.getExperimentSuccessRate(connectionId);
             return ResponseEntity.ok(Map.of(
                 "connectionId", connectionId,
@@ -1811,6 +1890,7 @@ public class BrainController {
             @PathVariable String connectionId,
             @PathVariable String tableName) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             log.info("Collecting statistics for table: {} in connection: {}", tableName, connectionId);
             List<ColumnStatistics> stats = cardinalityEstimationService.collectTableStatistics(connectionId, tableName);
             return ResponseEntity.ok(stats);
@@ -1828,6 +1908,7 @@ public class BrainController {
     @GetMapping("/statistics/{connectionId}")
     public ResponseEntity<List<ColumnStatistics>> getColumnStatistics(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<ColumnStatistics> stats = cardinalityEstimationService.getStatistics(connectionId);
             return ResponseEntity.ok(stats);
         } catch (ResponseStatusException e) {
@@ -1846,6 +1927,7 @@ public class BrainController {
             @PathVariable String connectionId,
             @RequestParam(defaultValue = "1000") long minDistinct) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<ColumnStatistics> columns = cardinalityEstimationService.getHighCardinalityColumns(connectionId, minDistinct);
             return ResponseEntity.ok(columns);
         } catch (ResponseStatusException e) {
@@ -1862,6 +1944,7 @@ public class BrainController {
     @GetMapping("/statistics/{connectionId}/skewed")
     public ResponseEntity<List<ColumnStatistics>> getSkewedColumns(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<ColumnStatistics> columns = cardinalityEstimationService.getSkewedColumns(connectionId);
             return ResponseEntity.ok(columns);
         } catch (ResponseStatusException e) {
@@ -1880,6 +1963,7 @@ public class BrainController {
             @PathVariable String connectionId,
             @org.springframework.web.bind.annotation.RequestBody CardinalityEstimateRequest request) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             long estimate;
             if (request.getLowBound() != null || request.getHighBound() != null) {
                 estimate = cardinalityEstimationService.estimateRange(
@@ -1909,6 +1993,7 @@ public class BrainController {
     @PostMapping("/statistics/{connectionId}/refresh")
     public ResponseEntity<Map<String, Object>> refreshStaleStatistics(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             int refreshed = cardinalityEstimationService.refreshStaleStatistics(connectionId);
             return ResponseEntity.ok(Map.of("refreshedCount", refreshed));
         } catch (ResponseStatusException e) {
@@ -1926,6 +2011,7 @@ public class BrainController {
     @GetMapping("/statistics/{connectionId}/accuracy")
     public ResponseEntity<Map<String, Object>> getCardinalityAccuracy(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             Map<String, Object> accuracy = adaptivePlanScoringService.getCardinalityAccuracyStats(connectionId);
             return ResponseEntity.ok(accuracy);
         } catch (ResponseStatusException e) {
@@ -1946,6 +2032,7 @@ public class BrainController {
             @PathVariable String connectionId,
             @org.springframework.web.bind.annotation.RequestBody ExecutionRecordRequest request) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             PlanExecution execution = adaptivePlanScoringService.recordExecution(
                 connectionId, request.getQuery(), request.getActualExecutionMs(), request.getActualRows());
             return ResponseEntity.ok(execution);
@@ -1965,6 +2052,7 @@ public class BrainController {
             @PathVariable String connectionId,
             @RequestParam(defaultValue = "20") int limit) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<PlanExecution> executions = adaptivePlanScoringService.getRecentExecutions(connectionId, limit);
             return ResponseEntity.ok(executions);
         } catch (ResponseStatusException e) {
@@ -1983,6 +2071,7 @@ public class BrainController {
             @PathVariable String connectionId,
             @RequestParam(defaultValue = "10") int limit) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<PlanExecution> errors = adaptivePlanScoringService.getSignificantCardinalityErrors(connectionId, limit);
             return ResponseEntity.ok(errors);
         } catch (ResponseStatusException e) {
@@ -1999,6 +2088,7 @@ public class BrainController {
     @GetMapping("/calibration/{connectionId}")
     public ResponseEntity<Map<String, Object>> getCalibrationStatus(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             Map<String, Object> status = adaptivePlanScoringService.getCalibrationStatus(connectionId);
             return ResponseEntity.ok(status);
         } catch (ResponseStatusException e) {
@@ -2015,6 +2105,7 @@ public class BrainController {
     @GetMapping("/executions/{connectionId}/multiple-plans")
     public ResponseEntity<Map<String, List<String>>> getQueriesWithMultiplePlans(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             Map<String, List<String>> result = adaptivePlanScoringService.findQueriesWithMultiplePlans(connectionId);
             return ResponseEntity.ok(result);
         } catch (ResponseStatusException e) {
@@ -2028,9 +2119,10 @@ public class BrainController {
     /**
      * Reset cost calibration.
      */
-    @org.springframework.web.bind.annotation.DeleteMapping("/calibration/{connectionId}")
+    @DeleteMapping("/calibration/{connectionId}")
     public ResponseEntity<Void> resetCalibration(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             adaptivePlanScoringService.resetCalibration(connectionId);
             return ResponseEntity.ok().build();
         } catch (ResponseStatusException e) {
@@ -2051,6 +2143,7 @@ public class BrainController {
             @PathVariable String connectionId,
             @org.springframework.web.bind.annotation.RequestBody QueryRequest request) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             List<Map<String, Object>> suggestions = planPatternLibraryService.getSuggestions(connectionId, request.getQuery());
             return ResponseEntity.ok(suggestions);
         } catch (ResponseStatusException e) {
@@ -2067,6 +2160,7 @@ public class BrainController {
     @GetMapping("/patterns/{connectionId}/reliable")
     public ResponseEntity<List<PlanPattern>> getReliablePatterns(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<PlanPattern> patterns = planPatternLibraryService.getReliablePatterns(connectionId);
             return ResponseEntity.ok(patterns);
         } catch (ResponseStatusException e) {
@@ -2085,6 +2179,7 @@ public class BrainController {
             @PathVariable String connectionId,
             @RequestParam(defaultValue = "10") int limit) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<PlanPattern> patterns = planPatternLibraryService.getMostUsedPatterns(connectionId, limit);
             return ResponseEntity.ok(patterns);
         } catch (ResponseStatusException e) {
@@ -2101,6 +2196,7 @@ public class BrainController {
     @GetMapping("/patterns/{connectionId}/with-optimizations")
     public ResponseEntity<List<PlanPattern>> getPatternsWithOptimizations(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<PlanPattern> patterns = planPatternLibraryService.getPatternsWithOptimizations(connectionId);
             return ResponseEntity.ok(patterns);
         } catch (ResponseStatusException e) {
@@ -2117,6 +2213,7 @@ public class BrainController {
     @GetMapping("/patterns/{connectionId}/stats")
     public ResponseEntity<Map<String, Object>> getPatternStatistics(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             Map<String, Object> stats = planPatternLibraryService.getPatternStatistics(connectionId);
             return ResponseEntity.ok(stats);
         } catch (ResponseStatusException e) {
@@ -2135,8 +2232,11 @@ public class BrainController {
             @PathVariable String patternId,
             @RequestParam boolean wasSuccessful) {
         try {
+            accessControlService.assertCanManageConnectionContent(planPatternLibraryService.getConnectionId(patternId));
             planPatternLibraryService.recordFeedback(patternId, wasSuccessful);
             return ResponseEntity.ok().build();
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
         } catch (ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
@@ -2151,6 +2251,7 @@ public class BrainController {
     @PostMapping("/patterns/{connectionId}/cleanup")
     public ResponseEntity<Map<String, Object>> cleanupPatterns(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             int deleted = planPatternLibraryService.cleanupIneffectivePatterns(connectionId);
             return ResponseEntity.ok(Map.of("deletedCount", deleted));
         } catch (ResponseStatusException e) {
@@ -2169,6 +2270,7 @@ public class BrainController {
     @GetMapping("/ml-overview/{connectionId}")
     public ResponseEntity<Map<String, Object>> getMlOverview(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             Map<String, Object> overview = new java.util.HashMap<>();
 
             // Workload Profile
@@ -2211,6 +2313,7 @@ public class BrainController {
     @DeleteMapping("/query-intelligence/{connectionId}/executions")
     public ResponseEntity<Map<String, Object>> clearExecutions(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             long countBefore = adaptivePlanScoringService.getRecentExecutions(connectionId, 1).isEmpty() ? 0 :
                 adaptivePlanScoringService.getCardinalityAccuracyStats(connectionId).get("totalExecutions") instanceof Number n ? n.longValue() : 0;
             adaptivePlanScoringService.clearExecutions(connectionId);
@@ -2238,6 +2341,7 @@ public class BrainController {
     @PostMapping("/query-intelligence/{connectionId}/backfill")
     public ResponseEntity<Map<String, Object>> backfillQueryIntelligence(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             log.info("Starting Query Intelligence backfill for connection {}", connectionId);
 
             // Get history summaries (lightweight) instead of full entities to avoid OOM
@@ -2302,6 +2406,7 @@ public class BrainController {
             @PathVariable String connectionId,
             @RequestParam(defaultValue = "500") int maxQueries) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             // Limit max queries to prevent runaway jobs
             int safeMax = Math.min(maxQueries, 2000);
             var progress = adaptivePlanScoringService.startExplainBackfill(connectionId, safeMax);
@@ -2321,6 +2426,7 @@ public class BrainController {
     public ResponseEntity<AdaptivePlanScoringService.ExplainJobProgress> getExplainProgress(
             @PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             var progress = adaptivePlanScoringService.getExplainProgress(connectionId);
             return ResponseEntity.ok(progress);
         } catch (ResponseStatusException e) {
@@ -2337,6 +2443,7 @@ public class BrainController {
     @PostMapping("/query-intelligence/{connectionId}/explain-cancel")
     public ResponseEntity<Void> cancelExplainBackfill(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             adaptivePlanScoringService.cancelExplainBackfill(connectionId);
             return ResponseEntity.ok().build();
         } catch (ResponseStatusException e) {

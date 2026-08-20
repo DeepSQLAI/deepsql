@@ -194,6 +194,12 @@ public class PlanPatternLibraryService {
         }
     }
 
+    public String getConnectionId(String patternId) {
+        return patternRepository.findById(patternId)
+            .map(PlanPattern::getConnectionId)
+            .orElseThrow(() -> new IllegalArgumentException("Pattern not found: " + patternId));
+    }
+
     /**
      * Get reliable patterns for a connection.
      */
