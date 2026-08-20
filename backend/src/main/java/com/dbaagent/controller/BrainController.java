@@ -723,6 +723,8 @@ public class BrainController {
         try {
             accessControlService.assertCanReadConnectionContent(scalabilitySimulationService.getConnectionId(simulationId));
             return ResponseEntity.ok(scalabilitySimulationService.getTablePredictions(simulationId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
         } catch (ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
@@ -2117,9 +2119,10 @@ public class BrainController {
     /**
      * Reset cost calibration.
      */
-    @org.springframework.web.bind.annotation.DeleteMapping("/calibration/{connectionId}")
+    @DeleteMapping("/calibration/{connectionId}")
     public ResponseEntity<Void> resetCalibration(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             adaptivePlanScoringService.resetCalibration(connectionId);
             return ResponseEntity.ok().build();
         } catch (ResponseStatusException e) {
@@ -2232,6 +2235,8 @@ public class BrainController {
             accessControlService.assertCanManageConnectionContent(planPatternLibraryService.getConnectionId(patternId));
             planPatternLibraryService.recordFeedback(patternId, wasSuccessful);
             return ResponseEntity.ok().build();
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
         } catch (ResponseStatusException e) {
             throw e;
         } catch (Exception e) {

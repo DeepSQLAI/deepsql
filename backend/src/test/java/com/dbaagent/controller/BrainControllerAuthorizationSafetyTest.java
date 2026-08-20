@@ -36,8 +36,15 @@ class BrainControllerAuthorizationSafetyTest {
     private static final Path CONTROLLER =
         Path.of("src/main/java/com/dbaagent/controller/BrainController.java");
 
-    private static final Pattern MAPPING =
-        Pattern.compile("^\\s*@(Get|Post|Delete|Put|Patch)Mapping\\b");
+    /**
+     * Matches a fully-qualified annotation as well as a bare one. A
+     * {@code @org.springframework.web.bind.annotation.DeleteMapping} on
+     * {@code DELETE /calibration/{connectionId}} is exactly how the one destructive
+     * endpoint escaped the first sweep of this fix — a bare-name-only pattern silently
+     * skips it, so the endpoint reads as "not an endpoint" rather than "unguarded".
+     */
+    private static final Pattern MAPPING = Pattern.compile(
+        "^\\s*@(?:[\\w.]*\\.)?(Get|Post|Delete|Put|Patch)Mapping\\b");
 
     /** A method is authorized by a per-connection assert, or by being admin-only. */
     private static final Pattern AUTHORIZED = Pattern.compile(
