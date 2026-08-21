@@ -16,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import com.dbaagent.service.AuthSessionService;
+import com.dbaagent.service.ImpersonationService;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -39,6 +40,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     @Autowired
     private AuthSessionService authSessionService;
+
+    @Autowired
+    private ImpersonationService impersonationService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
@@ -69,7 +73,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                     "admin", null, devAuthorities);
             SecurityContextHolder.getContext().setAuthentication(auth);
-            chain.doFilter(request, response);
+            applyImpersonation(request, response, chain);
             return;
         }
 
@@ -132,7 +136,35 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         } else if (isBrainRequest) {
             log.warn("Brain auth missing user: path={}, username={}", requestPath, username);
         }
-        chain.doFilter(request, response);
+        applyImpersonation(request, response, chain);
+    }
+
+    private void applyImpersonation(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+            throws ServletException, IOException {
+        try {
+            impersonationService.applyToRequest(request);
+            stampEffectiveUser(response);
+            chain.doFilter(request, response);
+        } finally {
+            ImpersonationContext.clear();
+        }
+    }
+
+    /**
+     * nginx {@code auth_request} on {@code /agent-api} forwards this as
+     * {@code X-Remote-User}. It must be the <em>effective</em> principal so
+     * View as (and non-admin Agent users) do not run the shared admin profile.
+     */
+    private void stampEffectiveUser(HttpServletResponse response) {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return;
+        }
+        String name = authentication.getName();
+        if (name == null || name.isBlank() || "anonymousUser".equals(name)) {
+            return;
+        }
+        response.setHeader("X-Remote-User", name);
     }
 
     private String extractUsernameSafely(String token) {

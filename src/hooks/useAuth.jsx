@@ -1,7 +1,8 @@
 import { useState, useEffect, createContext, useContext, useMemo, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { getActionPermission, getActionConfig } from '@/lib/actions'
-import { authAPI, setupAPI, AUTH_CHANGE_EVENT } from '@/lib/api/client'
+import { authAPI, setupAPI, adminAPI, AUTH_CHANGE_EVENT } from '@/lib/api/client'
+import { clearAgentRemoteUser } from '@/lib/api/agentClient'
 import { queryClient } from '@/lib/queryClient'
 import { useChatStore } from '@/lib/stores/useChatStore'
 import { useConnectionStore } from '@/lib/stores/useConnectionStore'
@@ -88,6 +89,9 @@ export function AuthProvider({ children }) {
       emailTwoFactorEnabled: payload?.emailTwoFactorEnabled ?? false,
       mfaRequired: false,
       mfaEnrolled: false,
+      impersonating: Boolean(payload?.impersonating),
+      impersonatorUsername: payload?.impersonatorUsername || null,
+      impersonatorEmail: payload?.impersonatorEmail || null,
     })
     setRole(normalizedRole)
     setPermissions(permissionSet)
@@ -200,6 +204,20 @@ export function AuthProvider({ children }) {
     handleLoggedOut(true)
   }, [handleLoggedOut])
 
+  const startImpersonation = useCallback(async (userId) => {
+    const payload = await adminAPI.startImpersonation(userId)
+    clearAgentRemoteUser()
+    applyAuthPayload(payload, { resetSession: true })
+    return payload
+  }, [applyAuthPayload])
+
+  const stopImpersonation = useCallback(async () => {
+    const payload = await adminAPI.stopImpersonation()
+    clearAgentRemoteUser()
+    applyAuthPayload(payload, { resetSession: true })
+    return payload
+  }, [applyAuthPayload])
+
   const hasPermission = useCallback((permission) => {
     return permissions.has(permission)
   }, [permissions])
@@ -255,6 +273,8 @@ export function AuthProvider({ children }) {
 
   const isAdmin = useMemo(() => role === ROLES.ADMIN, [role])
   const isDeveloper = useMemo(() => role === ROLES.DEVELOPER, [role])
+  const impersonating = Boolean(user?.impersonating)
+  const canSwitchProfile = isAdmin || impersonating
 
   const canExecute = useMemo(() => permissions.has(PERMISSIONS.EXECUTE_QUERIES), [permissions])
   const canChat = useMemo(() => permissions.has(PERMISSIONS.USE_CHAT), [permissions])
@@ -268,9 +288,15 @@ export function AuthProvider({ children }) {
     login,
     logout,
     refreshCurrentUser,
+    startImpersonation,
+    stopImpersonation,
     user,
     username: user?.username || 'User',
     email: user?.email || '',
+    impersonating,
+    impersonatorUsername: user?.impersonatorUsername || null,
+    impersonatorEmail: user?.impersonatorEmail || null,
+    canSwitchProfile,
     role,
     permissions: [...permissions],
     hasPermission,
@@ -293,9 +319,13 @@ export function AuthProvider({ children }) {
     login,
     logout,
     refreshCurrentUser,
+    startImpersonation,
+    stopImpersonation,
     user,
     role,
     permissions,
+    impersonating,
+    canSwitchProfile,
     hasPermission,
     hasAnyPermission,
     hasAllPermissions,

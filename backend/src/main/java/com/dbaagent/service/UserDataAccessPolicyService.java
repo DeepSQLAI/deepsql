@@ -1,19 +1,34 @@
 package com.dbaagent.service;
 
+import com.dbaagent.model.DatabaseObject;
+import com.dbaagent.model.InferredTableRelationship;
+import com.dbaagent.model.QueryExecutionOrigin;
 import com.dbaagent.model.QueryRequest;
 import com.dbaagent.model.QueryResult;
+import com.dbaagent.model.SchemaMetadata;
 import com.dbaagent.model.SecurityEventOutcome;
 import com.dbaagent.model.SecurityEventType;
+import com.dbaagent.model.TableMetadata;
+import com.dbaagent.model.TrainingDataEmbedding;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.sf.jsqlparser.expression.AnalyticExpression;
 import net.sf.jsqlparser.expression.BinaryExpression;
+import net.sf.jsqlparser.expression.CaseExpression;
+import net.sf.jsqlparser.expression.CastExpression;
 import net.sf.jsqlparser.expression.Expression;
-import net.sf.jsqlparser.expression.Parenthesis;
 import net.sf.jsqlparser.expression.Function;
-import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
+import net.sf.jsqlparser.expression.LongValue;
+import net.sf.jsqlparser.expression.NotExpression;
+import net.sf.jsqlparser.expression.Parenthesis;
+import net.sf.jsqlparser.expression.SignedExpression;
+import net.sf.jsqlparser.expression.WhenClause;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
+import net.sf.jsqlparser.statement.ExplainStatement;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.select.AllColumns;
 import net.sf.jsqlparser.statement.select.AllTableColumns;
@@ -22,6 +37,9 @@ import net.sf.jsqlparser.statement.select.Join;
 import net.sf.jsqlparser.statement.select.ParenthesedSelect;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
+import net.sf.jsqlparser.statement.select.SetOperationList;
+import net.sf.jsqlparser.statement.select.WithItem;
+import net.sf.jsqlparser.util.TablesNamesFinder;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -42,6 +60,8 @@ public class UserDataAccessPolicyService {
         ".*\\b(show|list|export|get|give|find|fetch|retrieve|display|tell me|which)\\b.*\\b(email|emails|phone|phones|mobile|bank|credit card|card number|salary|income|ssn|passport|password|token|address)\\b.*",
         Pattern.CASE_INSENSITIVE
     );
+    private static final Set<String> SUMMARY_AGGREGATES = Set.of("sum", "avg");
+    private static final ObjectMapper RAG_METADATA_MAPPER = new ObjectMapper();
 
     private final ConnectionChatAccessPolicyService policyService;
     private final SecurityEventService securityEventService;
@@ -61,13 +81,7 @@ public class UserDataAccessPolicyService {
             || mentionsProtectedColumns(normalized, policy)
             || mentionsProtectedTables(normalized, policy);
 
-        boolean requestsAggregateOnly = normalized.contains("how many")
-            || normalized.contains("count")
-            || normalized.contains("trend")
-            || normalized.contains("summary")
-            || normalized.contains("breakdown");
-
-        if (policy.blockMode() && requestsSensitiveDetails && !requestsAggregateOnly) {
+        if (policy.blockMode() && requestsSensitiveDetails) {
             logPolicyEvent(SecurityEventType.CHAT_ACCESS_POLICY_BLOCKED, username, connectionId, "prompt_blocked", Map.of(
                 "message", truncate(message),
                 "blockedSensitivityCategories", policy.blockedSensitivityCategories(),
@@ -96,8 +110,20 @@ public class UserDataAccessPolicyService {
         QueryRequest queryRequest,
         QueryExecutionContext executionContext
     ) {
-        if (executionContext == null || executionContext.actorUsername() == null || executionContext.actorUsername().isBlank()) {
+        if (executionContext == null) {
+            throw new UserDataAccessPolicyException(
+                "DeepSQL could not determine who is running this query, so it was blocked.",
+                "POLICY_ACTOR_REQUIRED"
+            );
+        }
+        if (isActorExempt(executionContext.origin())) {
             return QueryGuardDecision.allow(ConnectionChatAccessPolicyService.EffectivePolicy.none());
+        }
+        if (executionContext.actorUsername() == null || executionContext.actorUsername().isBlank()) {
+            throw new UserDataAccessPolicyException(
+                "DeepSQL could not determine who is running this query, so it was blocked.",
+                "POLICY_ACTOR_REQUIRED"
+            );
         }
 
         ConnectionChatAccessPolicyService.EffectivePolicy policy = policyService.resolveEffectivePolicy(
@@ -109,46 +135,196 @@ public class UserDataAccessPolicyService {
             return QueryGuardDecision.allow(policy);
         }
 
-        Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> protectedObjects = policyService.buildProtectionDescriptors(
-            connectionId,
-            new ArrayList<>(policy.blockedSensitivityCategories()),
-            new ArrayList<>(policy.deniedTables()),
-            new ArrayList<>(policy.deniedColumns())
-        );
+        Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> protectedObjects =
+            policyService.buildProtectionDescriptors(policy);
+
+        Statement parsed;
+        try {
+            parsed = CCJSqlParserUtil.parse(queryRequest.getQuery());
+        } catch (Exception e) {
+            logPolicyEvent(SecurityEventType.CHAT_ACCESS_POLICY_BLOCKED, executionContext.actorUsername(), connectionId, "sql_unparseable", Map.of(
+                "query", truncate(queryRequest.getQuery())
+            ));
+            throw new UserDataAccessPolicyException(
+                "This query could not be verified against your access policy, so DeepSQL blocked it before execution.",
+                "POLICY_SQL_UNPARSEABLE"
+            );
+        }
 
         try {
-            Statement parsed = CCJSqlParserUtil.parse(queryRequest.getQuery());
-            if (parsed instanceof Select select && select.getPlainSelect() != null) {
-                QueryInspection inspection = inspectPlainSelect(select.getPlainSelect(), protectedObjects);
-                if (inspection.selectsWildcardFromProtectedTable || inspection.rawProtectedColumnsSelected) {
-                    logPolicyEvent(SecurityEventType.CHAT_ACCESS_POLICY_BLOCKED, executionContext.actorUsername(), connectionId, "sql_blocked", Map.of(
-                        "query", truncate(queryRequest.getQuery()),
-                        "reason", inspection.reason,
-                        "protectedTables", inspection.protectedTables,
-                        "protectedColumns", inspection.protectedColumns
-                    ));
-                    throw new UserDataAccessPolicyException(
-                        "This query would return restricted data for your account, so DeepSQL blocked it before execution.",
-                        "POLICY_SQL_BLOCKED"
-                    );
-                }
+            Statement inspectable = unwrapExplain(parsed);
+            if (!(inspectable instanceof Select select)) {
+                throw new UserDataAccessPolicyException(
+                    "This statement shape cannot be verified against your access policy, so DeepSQL blocked it.",
+                    "POLICY_SQL_UNHANDLED"
+                );
             }
-        } catch (UserDataAccessPolicyException e) {
-            throw e;
-        } catch (Exception e) {
-            String normalized = queryRequest.getQuery() == null ? "" : queryRequest.getQuery().toLowerCase(Locale.ROOT);
-            if (containsDangerousProtectedReference(normalized, protectedObjects)) {
-                logPolicyEvent(SecurityEventType.CHAT_ACCESS_POLICY_BLOCKED, executionContext.actorUsername(), connectionId, "sql_blocked_fallback", Map.of(
-                    "query", truncate(queryRequest.getQuery())
+            enforceAllowedSchemas(select, policy.allowedSchemas());
+            assertProtectedTablesAreInspectable(inspectable, collectPlainSelects(select), protectedObjects);
+            QueryInspection inspection = inspectSelect(select, protectedObjects, policy.allowAggregates());
+            if (inspection.selectsWildcardFromProtectedTable
+                || inspection.rawProtectedColumnsSelected
+                || inspection.unresolvedProtectedReference) {
+                logPolicyEvent(SecurityEventType.CHAT_ACCESS_POLICY_BLOCKED, executionContext.actorUsername(), connectionId, "sql_blocked", Map.of(
+                    "query", truncate(queryRequest.getQuery()),
+                    "reason", inspection.reason,
+                    "protectedTables", inspection.protectedTables,
+                    "protectedColumns", inspection.protectedColumns
                 ));
                 throw new UserDataAccessPolicyException(
-                    "This query appears to target restricted data for your account, so DeepSQL blocked it before execution.",
+                    "This query would return restricted data for your account, so DeepSQL blocked it before execution.",
                     "POLICY_SQL_BLOCKED"
                 );
             }
+        } catch (UserDataAccessPolicyException e) {
+            throw e;
         }
 
         return QueryGuardDecision.allow(policy);
+    }
+
+    public List<DatabaseObject> filterDatabaseObjects(
+        String connectionId,
+        String username,
+        boolean actorIsAdmin,
+        List<DatabaseObject> objects
+    ) {
+        if (objects == null || objects.isEmpty()) {
+            return objects;
+        }
+        Set<String> allowedSchemas = allowedSchemasForActor(connectionId, username, actorIsAdmin);
+        if (allowedSchemas.isEmpty()) {
+            return objects;
+        }
+        return objects.stream()
+            .filter(object -> ConnectionChatAccessPolicyService.isSchemaInScope(object.getSchema(), allowedSchemas))
+            .toList();
+    }
+
+    public SchemaMetadata filterSchemaMetadata(
+        String connectionId,
+        String username,
+        boolean actorIsAdmin,
+        SchemaMetadata schema
+    ) {
+        if (schema == null) {
+            return null;
+        }
+        Set<String> allowedSchemas = allowedSchemasForActor(connectionId, username, actorIsAdmin);
+        if (allowedSchemas.isEmpty()) {
+            return schema;
+        }
+
+        SchemaMetadata filtered = new SchemaMetadata();
+        filtered.setDatabaseName(schema.getDatabaseName());
+        filtered.setDbType(schema.getDbType());
+        filtered.setTotalViews(schema.getTotalViews());
+        filtered.setTotalSizeBytes(schema.getTotalSizeBytes());
+        List<TableMetadata> tables = schema.getTables() == null ? List.of() : schema.getTables().stream()
+            .filter(table -> ConnectionChatAccessPolicyService.isSchemaInScope(table.getSchema(), allowedSchemas))
+            .toList();
+        filtered.setTables(tables);
+        filtered.setTotalTables((long) tables.size());
+        if (schema.getRelationships() != null) {
+            filtered.setRelationships(schema.getRelationships().stream()
+                .filter(relationship ->
+                    ConnectionChatAccessPolicyService.isSchemaInScope(schemaFromTableRef(relationship.getFromTable()), allowedSchemas)
+                        && ConnectionChatAccessPolicyService.isSchemaInScope(schemaFromTableRef(relationship.getToTable()), allowedSchemas))
+                .toList());
+        }
+        return filtered;
+    }
+
+    public List<TrainingDataEmbedding> filterRagEmbeddings(
+        String connectionId,
+        String username,
+        boolean actorIsAdmin,
+        List<TrainingDataEmbedding> embeddings
+    ) {
+        if (embeddings == null || embeddings.isEmpty()) {
+            return embeddings == null ? List.of() : embeddings;
+        }
+        Set<String> allowedSchemas = allowedSchemasForActor(connectionId, username, actorIsAdmin);
+        if (allowedSchemas.isEmpty()) {
+            return embeddings;
+        }
+        return embeddings.stream()
+            .filter(embedding -> isRagMetadataInScope(allowedSchemas, embedding == null ? null : embedding.getMetadata()))
+            .toList();
+    }
+
+    public boolean isRagMetadataInScope(
+        String connectionId,
+        String username,
+        boolean actorIsAdmin,
+        String metadataJson
+    ) {
+        Set<String> allowedSchemas = allowedSchemasForActor(connectionId, username, actorIsAdmin);
+        if (allowedSchemas.isEmpty()) {
+            return true;
+        }
+        return isRagMetadataInScope(allowedSchemas, metadataJson);
+    }
+
+    public List<InferredTableRelationship> filterInferredRelationships(
+        String connectionId,
+        String username,
+        boolean actorIsAdmin,
+        List<InferredTableRelationship> relationships
+    ) {
+        if (relationships == null || relationships.isEmpty()) {
+            return relationships;
+        }
+        Set<String> allowedSchemas = allowedSchemasForActor(connectionId, username, actorIsAdmin);
+        if (allowedSchemas.isEmpty()) {
+            return relationships;
+        }
+        return relationships.stream()
+            .filter(relationship -> relationship != null
+                && ConnectionChatAccessPolicyService.isSchemaInScope(schemaFromTableRef(relationship.getSourceTable()), allowedSchemas)
+                && ConnectionChatAccessPolicyService.isSchemaInScope(schemaFromTableRef(relationship.getTargetTable()), allowedSchemas))
+            .toList();
+    }
+
+    public void assertTableSchemaAllowed(
+        String connectionId,
+        String username,
+        boolean actorIsAdmin,
+        String tableRef
+    ) {
+        Set<String> allowedSchemas = allowedSchemasForActor(connectionId, username, actorIsAdmin);
+        if (allowedSchemas.isEmpty()) {
+            return;
+        }
+        String schema = schemaFromTableRef(tableRef);
+        if (!ConnectionChatAccessPolicyService.isSchemaInScope(schema, allowedSchemas)) {
+            throw new UserDataAccessPolicyException(
+                "This object is in schema '" + (schema.isBlank() ? "public" : schema)
+                    + "' which is outside your allowed schema scope.",
+                "POLICY_SCHEMA_BLOCKED"
+            );
+        }
+    }
+
+    private Set<String> allowedSchemasForActor(String connectionId, String username, boolean actorIsAdmin) {
+        ConnectionChatAccessPolicyService.EffectivePolicy policy =
+            policyService.resolveEffectivePolicy(connectionId, username, actorIsAdmin);
+        if (policy == null || policy.allowedSchemas() == null) {
+            return Set.of();
+        }
+        return policy.allowedSchemas();
+    }
+
+    private String schemaFromTableRef(String tableRef) {
+        if (tableRef == null || tableRef.isBlank()) {
+            return "";
+        }
+        String normalized = normalizeName(tableRef);
+        String[] parts = normalized.split("\\.");
+        if (parts.length >= 2) {
+            return parts[parts.length - 2];
+        }
+        return "";
     }
 
     public QueryResult redactResult(
@@ -169,44 +345,30 @@ public class UserDataAccessPolicyService {
             return result;
         }
 
-        Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> descriptors = policyService.buildProtectionDescriptors(
-            connectionId,
-            new ArrayList<>(policy.blockedSensitivityCategories()),
-            new ArrayList<>(policy.deniedTables()),
-            new ArrayList<>(policy.deniedColumns())
-        );
+        Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> descriptors =
+            policyService.buildProtectionDescriptors(policy);
 
         if (result.getColumns() == null || result.getRows() == null) {
             return result;
         }
 
-        Set<String> protectedColumnNames = new LinkedHashSet<>();
-        descriptors.values().forEach(descriptor -> {
-            protectedColumnNames.addAll(descriptor.restrictedColumns().stream().map(value -> value.toLowerCase(Locale.ROOT)).toList());
-            if (descriptor.protectWholeTable()) {
-                protectedColumnNames.add(descriptor.tableName().toLowerCase(Locale.ROOT));
-            }
-        });
+        Set<Integer> redactIndexes = resolveRedactIndexes(result, descriptors);
+        if (redactIndexes.isEmpty()) {
+            return result;
+        }
 
         List<List<Object>> redactedRows = new ArrayList<>();
-        boolean redacted = false;
         for (List<Object> row : result.getRows()) {
             List<Object> redactedRow = new ArrayList<>();
             for (int i = 0; i < row.size(); i++) {
-                String column = i < result.getColumns().size() ? result.getColumns().get(i) : "";
                 Object value = row.get(i);
-                if (shouldRedactColumn(column, protectedColumnNames)) {
+                if (redactIndexes.contains(i)) {
                     redactedRow.add(redactValue(value));
-                    redacted = true;
                 } else {
                     redactedRow.add(value);
                 }
             }
             redactedRows.add(redactedRow);
-        }
-
-        if (!redacted) {
-            return result;
         }
 
         QueryResult redactedResult = new QueryResult(
@@ -216,13 +378,112 @@ public class UserDataAccessPolicyService {
             result.getTotalRowCount(),
             result.getIsLimited(),
             result.getExecutionTimeMs(),
-            result.getQuery()
+            result.getQuery(),
+            result.getSessionPid()
         );
         logPolicyEvent(SecurityEventType.CHAT_ACCESS_POLICY_REDACTED, executionContext.actorUsername(), connectionId, "result_redacted", Map.of(
             "query", truncate(result.getQuery()),
             "columns", result.getColumns()
         ));
         return redactedResult;
+    }
+
+    private Set<Integer> resolveRedactIndexes(
+        QueryResult result,
+        Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> descriptors
+    ) {
+        Set<Integer> indexes = new LinkedHashSet<>();
+        List<Set<ColumnReference>> provenance = resolveOutputProvenance(result.getQuery());
+        if (provenance != null && provenance.size() == result.getColumns().size()) {
+            for (int i = 0; i < provenance.size(); i++) {
+                Set<ColumnReference> sources = provenance.get(i);
+                if (sources.isEmpty()) {
+                    continue;
+                }
+                for (ColumnReference reference : sources) {
+                    if (isProtectedReference(descriptors, reference)) {
+                        indexes.add(i);
+                        break;
+                    }
+                }
+            }
+            return indexes;
+        }
+
+        Set<String> protectedColumnNames = new LinkedHashSet<>();
+        descriptors.values().forEach(descriptor -> {
+            String qualifiedTable = descriptor.qualifiedTableName();
+            descriptor.restrictedColumns().forEach(column ->
+                protectedColumnNames.add(normalizeName(qualifiedTable + "." + column))
+            );
+            if (descriptor.protectWholeTable()) {
+                protectedColumnNames.add(normalizeName(qualifiedTable));
+            }
+        });
+        for (int i = 0; i < result.getColumns().size(); i++) {
+            if (shouldRedactColumn(result.getColumns().get(i), protectedColumnNames)) {
+                indexes.add(i);
+            }
+        }
+        return indexes;
+    }
+
+    private List<Set<ColumnReference>> resolveOutputProvenance(String sql) {
+        if (sql == null || sql.isBlank()) {
+            return null;
+        }
+        try {
+            Statement parsed = unwrapExplain(CCJSqlParserUtil.parse(sql));
+            if (!(parsed instanceof Select select)) {
+                return null;
+            }
+            PlainSelect outermost = outermostPlainSelect(select);
+            if (outermost == null || outermost.getSelectItems() == null) {
+                return null;
+            }
+            Map<String, String> aliasToTable = buildAliasMap(outermost);
+            String defaultTableName = resolveDefaultTableName(outermost, aliasToTable);
+            List<Set<ColumnReference>> provenance = new ArrayList<>();
+            outermost.getSelectItems().forEach(item -> {
+                Set<ColumnReference> referenced = new LinkedHashSet<>();
+                Expression expression = item.getExpression();
+                if (expression instanceof AllColumns || expression instanceof AllTableColumns) {
+                    provenance.clear();
+                    return;
+                }
+                collectColumns(expression, referenced, aliasToTable, defaultTableName);
+                provenance.add(referenced);
+            });
+            return provenance.size() == outermost.getSelectItems().size() ? provenance : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private PlainSelect outermostPlainSelect(Select select) {
+        if (select == null) {
+            return null;
+        }
+        PlainSelect plainSelect = asPlainSelect(select);
+        if (plainSelect != null) {
+            return plainSelect;
+        }
+        SetOperationList setOperationList = asSetOperationList(select);
+        if (setOperationList != null && setOperationList.getSelects() != null && !setOperationList.getSelects().isEmpty()) {
+            return outermostPlainSelect(setOperationList.getSelects().getFirst());
+        }
+        if (select instanceof ParenthesedSelect parenthesedSelect) {
+            return outermostPlainSelect(parenthesedSelect.getSelect());
+        }
+        return null;
+    }
+
+    private PlainSelect asPlainSelect(Select select) {
+        return select instanceof PlainSelect plainSelect ? plainSelect : null;
+    }
+
+    private SetOperationList asSetOperationList(Select select) {
+        return select instanceof SetOperationList setOperationList ? setOperationList : null;
     }
 
     private boolean mentionsProtectedColumns(String normalized, ConnectionChatAccessPolicyService.EffectivePolicy policy) {
@@ -234,30 +495,261 @@ public class UserDataAccessPolicyService {
         return policy.impactedTables().stream().anyMatch(table -> normalized.contains(table.toLowerCase(Locale.ROOT)));
     }
 
-    private boolean containsDangerousProtectedReference(
-        String normalizedSql,
+    private Statement unwrapExplain(Statement parsed) {
+        if (parsed instanceof ExplainStatement explain && explain.getStatement() != null) {
+            return unwrapExplain(explain.getStatement());
+        }
+        return parsed;
+    }
+
+    /**
+     * Enforces the schema allowlist over every table reference in the statement.
+     *
+     * Uses JSqlParser's TablesNamesFinder rather than a hand-rolled walk of
+     * FROM and JOIN. Enumeration has to be exhaustive by construction: an
+     * allowlist implemented as a partial walk implicitly permits every syntax
+     * position the walker forgot (subquery, UNION branch, CTE body).
+     *
+     * Unqualified names fail closed when a schema allowlist is present: they
+     * resolve through search_path and could be any schema. CTE aliases are
+     * skipped because they are not tables.
+     */
+    private void enforceAllowedSchemas(Select select, Set<String> allowedSchemas) {
+        if (allowedSchemas == null || allowedSchemas.isEmpty()) {
+            return;
+        }
+        Set<String> cteNames = new LinkedHashSet<>();
+        collectCteNames(select, cteNames);
+        Set<String> tables = findReferencedTables(select);
+        Set<String> referencedSchemas = new LinkedHashSet<>();
+        for (String tableName : tables) {
+            String normalized = normalizeName(tableName);
+            String bare = bareTableName(normalized);
+            if (cteNames.contains(bare) && !normalized.contains(".")) {
+                continue;
+            }
+            String schema = schemaFromTableRef(normalized);
+            if (schema.isBlank()) {
+                throw new UserDataAccessPolicyException(
+                    "This query references an unqualified table which is outside your allowed schema scope.",
+                    "POLICY_SCHEMA_BLOCKED"
+                );
+            }
+            referencedSchemas.add(schema);
+        }
+        for (String schema : referencedSchemas) {
+            if (!allowedSchemas.contains(normalizeName(schema))) {
+                throw new UserDataAccessPolicyException(
+                    "This query references schema '" + schema + "' which is outside your allowed schema scope.",
+                    "POLICY_SCHEMA_BLOCKED"
+                );
+            }
+        }
+    }
+
+    /**
+     * Fails closed on statement shapes column inspection cannot reach.
+     *
+     * TablesNamesFinder sees every table in the statement; collectPlainSelects
+     * does not descend into a select nested inside FROM/JOIN/WHERE/HAVING.
+     * When a protected table is referenced somewhere the column inspection
+     * could not examine, refuse the query.
+     */
+    private void assertProtectedTablesAreInspectable(
+        Statement statement,
+        List<PlainSelect> inspectedBranches,
         Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> protectedObjects
     ) {
-        for (ConnectionChatAccessPolicyService.ProtectionDescriptor descriptor : protectedObjects.values()) {
-            if (descriptor.protectWholeTable() && normalizedSql.contains(descriptor.tableName().toLowerCase(Locale.ROOT))) {
-                return true;
+        if (protectedObjects == null || protectedObjects.isEmpty()) {
+            return;
+        }
+        Set<String> referenced = new LinkedHashSet<>();
+        for (String name : new TablesNamesFinder<>().getTables(statement)) {
+            if (name != null && !name.isBlank()) {
+                referenced.add(normalizeName(name));
             }
-            for (String column : descriptor.restrictedColumns()) {
-                if (normalizedSql.contains(column.toLowerCase(Locale.ROOT))) {
-                    return true;
+        }
+        Set<String> inspected = new LinkedHashSet<>();
+        for (PlainSelect branch : inspectedBranches) {
+            collectDirectTables(branch, inspected);
+        }
+        for (ConnectionChatAccessPolicyService.ProtectionDescriptor descriptor : protectedObjects.values()) {
+            String protectedName = descriptor.qualifiedTableName();
+            boolean isReferenced = referenced.stream().anyMatch(name -> namesMatch(protectedName, name));
+            boolean wasInspected = inspected.stream().anyMatch(name -> namesMatch(protectedName, name));
+            if (isReferenced && !wasInspected) {
+                throw new UserDataAccessPolicyException(
+                    "This query reaches restricted data through a nested query DeepSQL cannot fully verify, so it was blocked before execution.",
+                    "POLICY_SQL_BLOCKED"
+                );
+            }
+        }
+    }
+
+    /**
+     * Does a query's table reference name the protected table?
+     *
+     * Asymmetric on purpose. {@code qualifyTable()} drops the schema when it is
+     * {@code public}, so a bare protected name means {@code public.<table>}.
+     * A bare reference in a query resolves through search_path and could be
+     * any schema, so it matches on bare name (ambiguous → block).
+     * A qualified protection must not catch the same table name in another
+     * schema ({@code marts.customer_profiles} vs {@code public.customer_profiles}).
+     */
+    private boolean namesMatch(String protectedName, String referencedName) {
+        String protectedNorm = normalizeName(protectedName);
+        String referencedNorm = normalizeName(referencedName);
+        if (protectedNorm.isEmpty() || referencedNorm.isEmpty()) {
+            return false;
+        }
+        if (!referencedNorm.contains(".")) {
+            return bareName(protectedNorm).equals(referencedNorm);
+        }
+        if (!protectedNorm.contains(".")) {
+            return referencedNorm.equals("public." + protectedNorm);
+        }
+        return protectedNorm.equals(referencedNorm);
+    }
+
+    private String bareName(String normalizedName) {
+        int dot = normalizedName.lastIndexOf('.');
+        return dot > 0 && dot < normalizedName.length() - 1
+            ? normalizedName.substring(dot + 1)
+            : normalizedName;
+    }
+
+    /** Tables named directly in this branch's FROM/JOIN. */
+    private void collectDirectTables(PlainSelect select, Set<String> out) {
+        if (select.getFromItem() instanceof Table table) {
+            out.add(normalizeName(table.getFullyQualifiedName()));
+        }
+        if (select.getJoins() != null) {
+            for (Join join : select.getJoins()) {
+                if (join.getRightItem() instanceof Table table) {
+                    out.add(normalizeName(table.getFullyQualifiedName()));
                 }
             }
         }
-        return false;
+    }
+
+    /**
+     * Collects every PlainSelect in a statement: the top level, each branch of a
+     * set operation, parenthesised selects, and every CTE body.
+     */
+    private List<PlainSelect> collectPlainSelects(Select select) {
+        List<PlainSelect> found = new ArrayList<>();
+        collectPlainSelects(select, found);
+        return found;
+    }
+
+    private void collectPlainSelects(Select select, List<PlainSelect> found) {
+        if (select == null) {
+            return;
+        }
+        if (select.getWithItemsList() != null) {
+            for (WithItem<?> item : select.getWithItemsList()) {
+                if (item != null) {
+                    collectPlainSelects(item.getSelect(), found);
+                }
+            }
+        }
+        if (select instanceof PlainSelect plain) {
+            found.add(plain);
+        } else if (select instanceof SetOperationList setOps) {
+            if (setOps.getSelects() != null) {
+                for (Select branch : setOps.getSelects()) {
+                    collectPlainSelects(branch, found);
+                }
+            }
+        } else if (select instanceof ParenthesedSelect parenthesed) {
+            collectPlainSelects(parenthesed.getSelect(), found);
+        }
+    }
+
+    private Set<String> findReferencedTables(Select select) {
+        TablesNamesFinder finder = new TablesNamesFinder();
+        List<String> tableList = finder.getTableList((Statement) select);
+        return tableList == null ? Set.of() : new LinkedHashSet<>(tableList);
+    }
+
+    private void collectCteNames(Select select, Set<String> names) {
+        if (select == null) {
+            return;
+        }
+        if (select.getWithItemsList() != null) {
+            for (WithItem withItem : select.getWithItemsList()) {
+                if (withItem.getAlias() != null && withItem.getAlias().getName() != null) {
+                    names.add(normalizeName(withItem.getAlias().getName()));
+                }
+                if (withItem.getSelect() != null) {
+                    collectCteNames(withItem.getSelect(), names);
+                }
+            }
+        }
+        SetOperationList setOperationList = asSetOperationList(select);
+        if (setOperationList != null && setOperationList.getSelects() != null) {
+            for (Select part : setOperationList.getSelects()) {
+                collectCteNames(part, names);
+            }
+        }
+    }
+
+    private QueryInspection inspectSelect(
+        Select select,
+        Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> protectedObjects,
+        boolean allowAggregates
+    ) {
+        QueryInspection inspection = new QueryInspection();
+        if (select == null) {
+            inspection.unresolvedProtectedReference = true;
+            inspection.reason = "Unhandled SELECT shape";
+            return inspection;
+        }
+        if (select.getWithItemsList() != null) {
+            for (WithItem withItem : select.getWithItemsList()) {
+                if (withItem.getSelect() != null) {
+                    inspection.merge(inspectSelect(withItem.getSelect(), protectedObjects, allowAggregates));
+                }
+            }
+        }
+        PlainSelect plainSelect = asPlainSelect(select);
+        if (plainSelect != null) {
+            inspection.merge(inspectPlainSelect(plainSelect, protectedObjects, allowAggregates));
+            return inspection;
+        }
+        SetOperationList setOperationList = asSetOperationList(select);
+        if (setOperationList != null && setOperationList.getSelects() != null) {
+            for (Select part : setOperationList.getSelects()) {
+                inspection.merge(inspectSelect(part, protectedObjects, allowAggregates));
+            }
+            return inspection;
+        }
+        if (select instanceof ParenthesedSelect parenthesedSelect && parenthesedSelect.getSelect() != null) {
+            inspection.merge(inspectSelect(parenthesedSelect.getSelect(), protectedObjects, allowAggregates));
+            return inspection;
+        }
+        inspection.unresolvedProtectedReference = true;
+        inspection.reason = "Unhandled SELECT shape";
+        return inspection;
     }
 
     private QueryInspection inspectPlainSelect(
         PlainSelect select,
-        Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> protectedObjects
+        Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> protectedObjects,
+        boolean allowAggregates
     ) {
         Map<String, String> aliasToTable = buildAliasMap(select);
         String defaultTableName = resolveDefaultTableName(select, aliasToTable);
         QueryInspection inspection = new QueryInspection();
+        boolean grouped = select.getGroupBy() != null;
+        inspectFromItem(select.getFromItem(), protectedObjects, allowAggregates, inspection);
+        if (select.getJoins() != null) {
+            for (Join join : select.getJoins()) {
+                inspectFromItem(join.getRightItem(), protectedObjects, allowAggregates, inspection);
+            }
+        }
+        inspectExpressionTree(select.getWhere(), aliasToTable, defaultTableName, protectedObjects, allowAggregates, inspection);
+        inspectExpressionTree(select.getHaving(), aliasToTable, defaultTableName, protectedObjects, allowAggregates, inspection);
         if (select.getSelectItems() == null) {
             return inspection;
         }
@@ -265,36 +757,56 @@ public class UserDataAccessPolicyService {
         select.getSelectItems().forEach(item -> {
             Expression expression = item.getExpression();
             if (expression instanceof AllColumns) {
-                inspection.selectsWildcardFromProtectedTable = !protectedObjects.isEmpty();
-                inspection.reason = "SELECT * touches protected objects";
-                inspection.protectedTables.addAll(protectedObjects.values().stream().map(ConnectionChatAccessPolicyService.ProtectionDescriptor::tableName).toList());
+                String fromTable = resolveDefaultTableName(select, aliasToTable);
+                ConnectionChatAccessPolicyService.ProtectionDescriptor descriptor = lookupDescriptor(protectedObjects, fromTable);
+                if (descriptor != null && (descriptor.protectWholeTable() || !descriptor.restrictedColumns().isEmpty())) {
+                    inspection.selectsWildcardFromProtectedTable = true;
+                    inspection.reason = "SELECT * touches protected objects";
+                    inspection.protectedTables.add(descriptor.qualifiedTableName());
+                }
                 return;
             }
             if (expression instanceof AllTableColumns allTableColumns) {
-                String tableName = resolveTableName(allTableColumns.getTable(), aliasToTable);
-                ConnectionChatAccessPolicyService.ProtectionDescriptor descriptor = protectedObjects.get(normalizeName(tableName));
-                if (descriptor != null) {
+                String tableName = resolveQualifiedTableName(allTableColumns.getTable(), aliasToTable);
+                ConnectionChatAccessPolicyService.ProtectionDescriptor descriptor = lookupDescriptor(protectedObjects, tableName);
+                if (descriptor != null && (descriptor.protectWholeTable() || !descriptor.restrictedColumns().isEmpty())) {
                     inspection.selectsWildcardFromProtectedTable = true;
                     inspection.reason = "SELECT table.* touches protected table";
-                    inspection.protectedTables.add(tableName);
+                    inspection.protectedTables.add(descriptor.qualifiedTableName());
                 }
                 return;
             }
 
             Set<ColumnReference> referencedColumns = new LinkedHashSet<>();
             collectColumns(expression, referencedColumns, aliasToTable, defaultTableName);
-            boolean aggregateExpression = containsAggregate(expression);
+            if (containsSubselect(expression)) {
+                inspectExpressionTree(expression, aliasToTable, defaultTableName, protectedObjects, allowAggregates, inspection);
+            }
+            boolean aggregateExemption = !grouped && isCountStarOnly(expression);
+            if (allowAggregates && !grouped && isSummaryAggregate(expression)) {
+                aggregateExemption = true;
+            }
+            if (referencedColumns.isEmpty() && !isLiteralOrCountStar(expression) && mentionsAnyProtectedName(expression, protectedObjects)) {
+                inspection.unresolvedProtectedReference = true;
+                inspection.reason = "Protected column provenance could not be established";
+                return;
+            }
             for (ColumnReference reference : referencedColumns) {
-                ConnectionChatAccessPolicyService.ProtectionDescriptor descriptor = protectedObjects.get(normalizeName(reference.tableName()));
-                if (descriptor == null) {
+                // Outer SELECT id FROM (subquery) t has no concrete FROM table. Nested
+                // selects are already walked by inspectFromItem; unqualified nested
+                // table names are refused by assertProtectedTablesAreInspectable + namesMatch.
+                // Treating blank provenance as unresolved would also block a same-named
+                // table in another schema (marts.customer_profiles vs public.customer_profiles).
+                if ((reference.tableName() == null || reference.tableName().isBlank()) && defaultTableName.isBlank()) {
                     continue;
                 }
-                boolean protectedColumn = descriptor.protectWholeTable()
-                    || descriptor.restrictedColumns().stream().anyMatch(column -> normalizeName(column).equals(normalizeName(reference.columnName())));
-                if (protectedColumn) {
-                    inspection.protectedTables.add(reference.tableName());
-                    inspection.protectedColumns.add(reference.tableName() + "." + reference.columnName());
-                    if (!aggregateExpression) {
+                if (isProtectedReference(protectedObjects, reference)) {
+                    ConnectionChatAccessPolicyService.ProtectionDescriptor descriptor = lookupDescriptor(protectedObjects, reference.tableName());
+                    if (descriptor != null) {
+                        inspection.protectedTables.add(descriptor.qualifiedTableName());
+                        inspection.protectedColumns.add(descriptor.qualifiedTableName() + "." + reference.columnName());
+                    }
+                    if (!aggregateExemption) {
                         inspection.rawProtectedColumnsSelected = true;
                         inspection.reason = "Raw protected column selected";
                     }
@@ -304,18 +816,78 @@ public class UserDataAccessPolicyService {
         return inspection;
     }
 
+    private void inspectFromItem(
+        FromItem fromItem,
+        Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> protectedObjects,
+        boolean allowAggregates,
+        QueryInspection inspection
+    ) {
+        if (fromItem instanceof ParenthesedSelect parenthesedSelect) {
+            inspection.merge(inspectSelect(parenthesedSelect, protectedObjects, allowAggregates));
+        } else if (fromItem instanceof Select select) {
+            inspection.merge(inspectSelect(select, protectedObjects, allowAggregates));
+        }
+    }
+
+    private void inspectExpressionTree(
+        Expression expression,
+        Map<String, String> aliasToTable,
+        String defaultTableName,
+        Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> protectedObjects,
+        boolean allowAggregates,
+        QueryInspection inspection
+    ) {
+        if (expression instanceof ParenthesedSelect parenthesedSelect) {
+            inspection.merge(inspectSelect(parenthesedSelect, protectedObjects, allowAggregates));
+            return;
+        }
+        if (expression instanceof Select select) {
+            inspection.merge(inspectSelect(select, protectedObjects, allowAggregates));
+            return;
+        }
+        if (expression instanceof Function function && function.getParameters() != null) {
+            for (Expression parameter : function.getParameters().getExpressions()) {
+                inspectExpressionTree(parameter, aliasToTable, defaultTableName, protectedObjects, allowAggregates, inspection);
+            }
+            return;
+        }
+        if (expression instanceof BinaryExpression binaryExpression) {
+            inspectExpressionTree(binaryExpression.getLeftExpression(), aliasToTable, defaultTableName, protectedObjects, allowAggregates, inspection);
+            inspectExpressionTree(binaryExpression.getRightExpression(), aliasToTable, defaultTableName, protectedObjects, allowAggregates, inspection);
+            return;
+        }
+        if (expression instanceof Parenthesis parenthesis) {
+            inspectExpressionTree(parenthesis.getExpression(), aliasToTable, defaultTableName, protectedObjects, allowAggregates, inspection);
+            return;
+        }
+        if (expression instanceof CastExpression castExpression) {
+            inspectExpressionTree(castExpression.getLeftExpression(), aliasToTable, defaultTableName, protectedObjects, allowAggregates, inspection);
+            return;
+        }
+        if (expression instanceof CaseExpression caseExpression) {
+            inspectExpressionTree(caseExpression.getSwitchExpression(), aliasToTable, defaultTableName, protectedObjects, allowAggregates, inspection);
+            if (caseExpression.getWhenClauses() != null) {
+                for (WhenClause whenClause : caseExpression.getWhenClauses()) {
+                    inspectExpressionTree(whenClause.getWhenExpression(), aliasToTable, defaultTableName, protectedObjects, allowAggregates, inspection);
+                    inspectExpressionTree(whenClause.getThenExpression(), aliasToTable, defaultTableName, protectedObjects, allowAggregates, inspection);
+                }
+            }
+            inspectExpressionTree(caseExpression.getElseExpression(), aliasToTable, defaultTableName, protectedObjects, allowAggregates, inspection);
+        }
+    }
+
     private String resolveDefaultTableName(PlainSelect select, Map<String, String> aliasToTable) {
         if (select == null) {
             return "";
         }
         Set<String> concreteTables = new LinkedHashSet<>();
         if (select.getFromItem() instanceof Table table) {
-            concreteTables.add(resolveTableName(table, aliasToTable));
+            concreteTables.add(resolveQualifiedTableName(table, aliasToTable));
         }
         if (select.getJoins() != null) {
             for (Join join : select.getJoins()) {
                 if (join.getRightItem() instanceof Table table) {
-                    concreteTables.add(resolveTableName(table, aliasToTable));
+                    concreteTables.add(resolveQualifiedTableName(table, aliasToTable));
                 }
             }
         }
@@ -335,9 +907,16 @@ public class UserDataAccessPolicyService {
 
     private void extractAlias(FromItem fromItem, Map<String, String> aliasMap) {
         if (fromItem instanceof Table table) {
-            aliasMap.put(normalizeName(table.getName()), table.getName());
+            String qualified;
+            if (table.getSchemaName() != null && !table.getSchemaName().isBlank()) {
+                qualified = ConnectionChatAccessPolicyService.qualifyTable(table.getSchemaName(), table.getName());
+            } else {
+                qualified = table.getName();
+            }
+            aliasMap.put(normalizeName(table.getName()), qualified);
+            aliasMap.put(normalizeName(qualified), qualified);
             if (table.getAlias() != null) {
-                aliasMap.put(normalizeName(table.getAlias().getName()), table.getName());
+                aliasMap.put(normalizeName(table.getAlias().getName()), qualified);
             }
         } else if (fromItem instanceof ParenthesedSelect parenthesedSelect
             && parenthesedSelect.getAlias() != null) {
@@ -355,7 +934,7 @@ public class UserDataAccessPolicyService {
             return;
         }
         if (expression instanceof Column column) {
-            String resolvedTableName = resolveTableName(column.getTable(), aliasToTable);
+            String resolvedTableName = resolveQualifiedTableName(column.getTable(), aliasToTable);
             if (resolvedTableName.isBlank()) {
                 resolvedTableName = defaultTableName;
             }
@@ -370,6 +949,10 @@ public class UserDataAccessPolicyService {
             }
             return;
         }
+        if (expression instanceof AnalyticExpression analyticExpression) {
+            collectColumns(analyticExpression.getExpression(), references, aliasToTable, defaultTableName);
+            return;
+        }
         if (expression instanceof BinaryExpression binaryExpression) {
             collectColumns(binaryExpression.getLeftExpression(), references, aliasToTable, defaultTableName);
             collectColumns(binaryExpression.getRightExpression(), references, aliasToTable, defaultTableName);
@@ -377,26 +960,131 @@ public class UserDataAccessPolicyService {
         }
         if (expression instanceof Parenthesis parenthesis) {
             collectColumns(parenthesis.getExpression(), references, aliasToTable, defaultTableName);
+            return;
+        }
+        if (expression instanceof CastExpression castExpression) {
+            collectColumns(castExpression.getLeftExpression(), references, aliasToTable, defaultTableName);
+            return;
+        }
+        if (expression instanceof SignedExpression signedExpression) {
+            collectColumns(signedExpression.getExpression(), references, aliasToTable, defaultTableName);
+            return;
+        }
+        if (expression instanceof NotExpression notExpression) {
+            collectColumns(notExpression.getExpression(), references, aliasToTable, defaultTableName);
+            return;
+        }
+        if (expression instanceof CaseExpression caseExpression) {
+            collectColumns(caseExpression.getSwitchExpression(), references, aliasToTable, defaultTableName);
+            if (caseExpression.getWhenClauses() != null) {
+                for (WhenClause whenClause : caseExpression.getWhenClauses()) {
+                    collectColumns(whenClause.getWhenExpression(), references, aliasToTable, defaultTableName);
+                    collectColumns(whenClause.getThenExpression(), references, aliasToTable, defaultTableName);
+                }
+            }
+            collectColumns(caseExpression.getElseExpression(), references, aliasToTable, defaultTableName);
         }
     }
 
-    private String resolveTableName(Table table, Map<String, String> aliasToTable) {
+    private String resolveQualifiedTableName(Table table, Map<String, String> aliasToTable) {
         if (table == null || table.getName() == null) {
             return "";
+        }
+        if (table.getSchemaName() != null && !table.getSchemaName().isBlank()) {
+            return ConnectionChatAccessPolicyService.qualifyTable(table.getSchemaName(), table.getName());
         }
         return aliasToTable.getOrDefault(normalizeName(table.getName()), table.getName());
     }
 
-    private boolean containsAggregate(Expression expression) {
-        if (expression instanceof Function function) {
-            String name = function.getName();
-            return name != null && List.of("count", "sum", "avg", "min", "max", "array_agg", "string_agg").contains(name.toLowerCase(Locale.ROOT));
+    private ConnectionChatAccessPolicyService.ProtectionDescriptor lookupDescriptor(
+        Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> protectedObjects,
+        String tableRef
+    ) {
+        if (tableRef == null || tableRef.isBlank()) {
+            return null;
         }
-        if (expression instanceof BinaryExpression binaryExpression) {
-            return containsAggregate(binaryExpression.getLeftExpression()) || containsAggregate(binaryExpression.getRightExpression());
+        ConnectionChatAccessPolicyService.ProtectionDescriptor direct = protectedObjects.get(normalizeName(tableRef));
+        if (direct != null) {
+            return direct;
         }
-        if (expression instanceof Parenthesis parenthesis) {
-            return containsAggregate(parenthesis.getExpression());
+        if (!tableRef.contains(".")) {
+            List<ConnectionChatAccessPolicyService.ProtectionDescriptor> matches = protectedObjects.values().stream()
+                .filter(descriptor -> normalizeName(descriptor.tableName()).equals(normalizeName(tableRef)))
+                .toList();
+            if (matches.size() == 1) {
+                return matches.getFirst();
+            }
+        }
+        return null;
+    }
+
+    private boolean isProtectedReference(
+        Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> protectedObjects,
+        ColumnReference reference
+    ) {
+        ConnectionChatAccessPolicyService.ProtectionDescriptor descriptor = lookupDescriptor(protectedObjects, reference.tableName());
+        if (descriptor == null) {
+            return false;
+        }
+        return descriptor.protectWholeTable()
+            || descriptor.restrictedColumns().stream().anyMatch(column -> normalizeName(column).equals(normalizeName(reference.columnName())));
+    }
+
+    private boolean isCountStarOnly(Expression expression) {
+        if (!(expression instanceof Function function)) {
+            return false;
+        }
+        if (function.getName() == null || !"count".equalsIgnoreCase(function.getName())) {
+            return false;
+        }
+        if (function.isAllColumns()) {
+            return true;
+        }
+        if (function.getParameters() == null || function.getParameters().getExpressions() == null
+            || function.getParameters().getExpressions().isEmpty()) {
+            return true;
+        }
+        if (function.getParameters().getExpressions().size() != 1) {
+            return false;
+        }
+        Expression parameter = function.getParameters().getExpressions().getFirst();
+        if (parameter instanceof AllColumns) {
+            return true;
+        }
+        return parameter instanceof LongValue longValue && longValue.getValue() == 1;
+    }
+
+    private boolean isSummaryAggregate(Expression expression) {
+        if (!(expression instanceof Function function) || function.getName() == null) {
+            return false;
+        }
+        return SUMMARY_AGGREGATES.contains(function.getName().toLowerCase(Locale.ROOT));
+    }
+
+    private boolean isLiteralOrCountStar(Expression expression) {
+        return isCountStarOnly(expression)
+            || expression instanceof LongValue
+            || (expression != null && expression.getClass().getSimpleName().contains("Value"));
+    }
+
+    private boolean containsSubselect(Expression expression) {
+        return expression instanceof Select || expression instanceof ParenthesedSelect;
+    }
+
+    private boolean mentionsAnyProtectedName(
+        Expression expression,
+        Map<String, ConnectionChatAccessPolicyService.ProtectionDescriptor> protectedObjects
+    ) {
+        if (expression == null) {
+            return false;
+        }
+        String rendered = normalizeName(expression.toString());
+        for (ConnectionChatAccessPolicyService.ProtectionDescriptor descriptor : protectedObjects.values()) {
+            for (String column : descriptor.restrictedColumns()) {
+                if (rendered.contains(normalizeName(column))) {
+                    return true;
+                }
+            }
         }
         return false;
     }
@@ -409,11 +1097,9 @@ public class UserDataAccessPolicyService {
         if (protectedColumnNames.contains(normalized)) {
             return true;
         }
-        if (normalized.contains(".")) {
-            String bare = normalized.substring(normalized.indexOf('.') + 1);
-            return protectedColumnNames.contains(bare);
-        }
-        return false;
+        return protectedColumnNames.stream().anyMatch(protectedName ->
+            protectedName.endsWith("." + normalized) || protectedName.equals(normalized)
+        );
     }
 
     private Object redactValue(Object value) {
@@ -422,6 +1108,80 @@ public class UserDataAccessPolicyService {
         }
         String rendered = String.valueOf(value);
         return "[redacted:" + rendered.length() + "]";
+    }
+
+    private boolean isRagMetadataInScope(Set<String> allowedSchemas, String metadataJson) {
+        Set<String> tableRefs = extractTableRefsFromMetadata(metadataJson);
+        if (tableRefs.isEmpty()) {
+            return false;
+        }
+        for (String tableRef : tableRefs) {
+            if (!ConnectionChatAccessPolicyService.isSchemaInScope(schemaFromTableRef(tableRef), allowedSchemas)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private Set<String> extractTableRefsFromMetadata(String metadataJson) {
+        Set<String> tables = new LinkedHashSet<>();
+        if (metadataJson == null || metadataJson.isBlank()) {
+            return tables;
+        }
+        try {
+            JsonNode node = RAG_METADATA_MAPPER.readTree(metadataJson);
+            addTextualTable(tables, node, "tableName");
+            addTextualTable(tables, node, "objectName");
+            addTextualTable(tables, node, "schema");
+            addTextualTable(tables, node, "schemaName");
+            if (node.has("tablesUsed") && node.get("tablesUsed").isTextual()) {
+                for (String table : node.get("tablesUsed").asText("").split(",")) {
+                    addTableRef(tables, table);
+                }
+            }
+            addArrayTables(tables, node.get("linkedTables"));
+            if (node.has("linkedColumns") && node.get("linkedColumns").isArray()) {
+                for (JsonNode linkedColumn : node.get("linkedColumns")) {
+                    String columnReference = linkedColumn.asText("").trim();
+                    int lastDot = columnReference.lastIndexOf('.');
+                    if (lastDot > 0) {
+                        addTableRef(tables, columnReference.substring(0, lastDot));
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            return Set.of();
+        }
+        return tables;
+    }
+
+    private void addTextualTable(Set<String> tables, JsonNode node, String field) {
+        if (node != null && node.has(field) && node.get(field).isTextual()) {
+            addTableRef(tables, node.get(field).asText());
+        }
+    }
+
+    private void addArrayTables(Set<String> tables, JsonNode array) {
+        if (array == null || !array.isArray()) {
+            return;
+        }
+        for (JsonNode item : array) {
+            addTableRef(tables, item.asText());
+        }
+    }
+
+    private void addTableRef(Set<String> tables, String raw) {
+        if (raw == null) {
+            return;
+        }
+        String trimmed = raw.trim();
+        if (!trimmed.isBlank()) {
+            tables.add(trimmed);
+        }
+    }
+
+    private boolean isActorExempt(QueryExecutionOrigin origin) {
+        return origin == QueryExecutionOrigin.INTERNAL || origin == QueryExecutionOrigin.SCHEDULED;
     }
 
     private void logPolicyEvent(SecurityEventType eventType, String username, String connectionId, String reason, Map<String, Object> metadata) {
@@ -444,6 +1204,11 @@ public class UserDataAccessPolicyService {
 
     private String normalizeName(String value) {
         return value == null ? "" : value.trim().replace("\"", "").replace("`", "").toLowerCase(Locale.ROOT);
+    }
+
+    private String bareTableName(String qualified) {
+        int separator = qualified.lastIndexOf('.');
+        return separator >= 0 ? qualified.substring(separator + 1) : qualified;
     }
 
     public record PromptDecision(
@@ -472,9 +1237,21 @@ public class UserDataAccessPolicyService {
     private static final class QueryInspection {
         private boolean selectsWildcardFromProtectedTable;
         private boolean rawProtectedColumnsSelected;
+        private boolean unresolvedProtectedReference;
         private String reason;
         private final List<String> protectedTables = new ArrayList<>();
         private final List<String> protectedColumns = new ArrayList<>();
+
+        private void merge(QueryInspection other) {
+            this.selectsWildcardFromProtectedTable |= other.selectsWildcardFromProtectedTable;
+            this.rawProtectedColumnsSelected |= other.rawProtectedColumnsSelected;
+            this.unresolvedProtectedReference |= other.unresolvedProtectedReference;
+            if (this.reason == null) {
+                this.reason = other.reason;
+            }
+            this.protectedTables.addAll(other.protectedTables);
+            this.protectedColumns.addAll(other.protectedColumns);
+        }
     }
 
     private record ColumnReference(String tableName, String columnName) {

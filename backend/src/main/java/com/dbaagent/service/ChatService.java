@@ -2649,7 +2649,12 @@ public class ChatService {
                     }
                 }
 
-                SchemaMetadata schema = schemaScannerService.scanSchema(connectionId);
+                SchemaMetadata schema = scopeSchemaForActor(
+                    connectionId,
+                    accessControlService.getCurrentUsername(),
+                    accessControlService.isCurrentUserAdmin(),
+                    schemaScannerService.scanSchema(connectionId)
+                );
                 AgentDecision schemaAwareDecision = earlyAgenticDecision.useAgenticFlow()
                     ? earlyAgenticDecision
                     : agentOrchestrator.previewDecision(agenticEnabled, actualUserQuestion, questionRoute);
@@ -2687,7 +2692,12 @@ public class ChatService {
             }
 
             // 1. Get Schema Context (needed for metadata fast path and schema-aware flows)
-            SchemaMetadata schema = schemaScannerService.scanSchema(connectionId);
+            SchemaMetadata schema = scopeSchemaForActor(
+                connectionId,
+                accessControlService.getCurrentUsername(),
+                accessControlService.isCurrentUserAdmin(),
+                schemaScannerService.scanSchema(connectionId)
+            );
             log.debug("Schema scan completed in {}ms", System.currentTimeMillis() - startTime);
 
             // 2. FAST PATH: Check if we can answer directly from cached metadata (no LLM needed)
@@ -3620,7 +3630,12 @@ public class ChatService {
                 prepared.effectiveQuestion()
             );
 
-            SchemaMetadata schema = preloadedMetadataSchema != null ? preloadedMetadataSchema : schemaScannerService.scanSchema(connectionId);
+            SchemaMetadata schema = scopeSchemaForActor(
+                connectionId,
+                actorUsername,
+                actorIsAdmin,
+                preloadedMetadataSchema != null ? preloadedMetadataSchema : schemaScannerService.scanSchema(connectionId)
+            );
             ChatResponse vaultFirstMetadataResponse = tryBuildVaultFirstMetadataResponse(
                 connectionId,
                 prepared.chatId(),
@@ -3761,7 +3776,12 @@ public class ChatService {
     @Nullable
     private SchemaMetadata tryLoadSchemaForMetadataResponse(String connectionId) {
         try {
-            return schemaScannerService.scanSchema(connectionId);
+            return scopeSchemaForActor(
+                connectionId,
+                accessControlService.getCurrentUsername(),
+                accessControlService.isCurrentUserAdmin(),
+                schemaScannerService.scanSchema(connectionId)
+            );
         } catch (SQLException e) {
             log.warn("Failed to load schema for metadata fast path on {}: {}", connectionId, e.getMessage());
             return null;
@@ -4074,6 +4094,24 @@ public class ChatService {
             return explicitUserId;
         }
         return accessControlService.getCurrentUsername();
+    }
+
+    private SchemaMetadata scopeSchemaForActor(
+        String connectionId,
+        String actorUsername,
+        boolean actorIsAdmin,
+        SchemaMetadata schema
+    ) {
+        if (schema == null) {
+            return null;
+        }
+        SchemaMetadata scoped = userDataAccessPolicyService.filterSchemaMetadata(
+            connectionId,
+            actorUsername,
+            actorIsAdmin,
+            schema
+        );
+        return scoped != null ? scoped : schema;
     }
 
     private String currentChatOwnerUsername() {
@@ -4938,7 +4976,12 @@ public class ChatService {
     public RetrievedContextResult debugRagContext(String connectionId, String question) {
         String actualQuestion = extractActualUserQuestion(question);
         try {
-            SchemaMetadata schema = schemaScannerService.scanSchema(connectionId);
+            SchemaMetadata schema = scopeSchemaForActor(
+                connectionId,
+                accessControlService.getCurrentUsername(),
+                accessControlService.isCurrentUserAdmin(),
+                schemaScannerService.scanSchema(connectionId)
+            );
             return chatRetrievalContextService.buildContext(connectionId, actualQuestion, schema);
         } catch (Exception e) {
             log.warn("Failed to load schema for debug RAG context, using empty schema: {}", e.getMessage());

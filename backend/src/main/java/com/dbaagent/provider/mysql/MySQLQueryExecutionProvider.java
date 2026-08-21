@@ -123,4 +123,9 @@ public class MySQLQueryExecutionProvider implements QueryExecutionProvider {
             return String.valueOf(normalized.hashCode());
         }
     }
+
+    @Override
+    public String getSessionPidQuery() {
+        return "SELECT CONNECTION_ID()";
+    }
 }

@@ -16,6 +16,7 @@ export default function ShareMenu({ savedId, initialPublic, initialToken, initia
   const [pwInput, setPwInput] = useState('')
   const [pwEditing, setPwEditing] = useState(false)
   const [pwBusy, setPwBusy] = useState(false)
+  const [shareError, setShareError] = useState('')
   const ref = useRef(null)
 
   useEffect(() => {
@@ -41,6 +42,7 @@ export default function ShareMenu({ savedId, initialPublic, initialToken, initia
   const togglePublic = async () => {
     if (busy || !savedId) return
     setBusy(true)
+    setShareError('')
     try {
       if (!pub) {
         const res = await savedDashboardsAPI.enableShare(savedId)
@@ -48,7 +50,10 @@ export default function ShareMenu({ savedId, initialPublic, initialToken, initia
       } else {
         await savedDashboardsAPI.disableShare(savedId); setPub(false); onPublicChange?.(false)
       }
-    } catch { /* leave state as-is on failure */ } finally { setBusy(false) }
+    } catch (err) {
+      const message = err?.response?.data?.message || err?.message || 'Failed to update sharing'
+      setShareError(message)
+    } finally { setBusy(false) }
   }
 
   const savePassword = async () => {
@@ -105,6 +110,7 @@ export default function ShareMenu({ savedId, initialPublic, initialToken, initia
                 <span className={styles.knob}>{busy && <Loader2 size={10} className={styles.spin} />}</span>
               </button>
             </div>
+            {shareError ? <div className={styles.error}>{shareError}</div> : null}
             {pub ? (
               <>
                 <div className={styles.hint}>Anyone with this link can view — read-only, no login. Turn off to revoke.</div>

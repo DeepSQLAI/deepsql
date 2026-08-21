@@ -10,6 +10,7 @@ import com.dbaagent.service.RetrievedContextResult;
 import com.dbaagent.service.SemanticModelService;
 import com.dbaagent.service.TrainingJobService;
 import com.dbaagent.service.TrainingService;
+import com.dbaagent.service.UserDataAccessPolicyService;
 import com.dbaagent.service.security.AccessControlService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -37,6 +38,7 @@ public class TrainingController {
     private final CredentialRepository credentialRepository;
     private final SemanticModelService semanticModelService;
     private final AccessControlService accessControlService;
+    private final UserDataAccessPolicyService userDataAccessPolicyService;
 
     /**
      * Train with schema DDL
@@ -186,7 +188,9 @@ public class TrainingController {
             if (question == null || question.isBlank()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Query parameter 'q' is required"));
             }
-            return ResponseEntity.ok(trainingService.debugRetrieve(connectionId, question, topK));
+            Map<String, Object> payload = trainingService.debugRetrieve(connectionId, question, topK);
+            filterDebugRetrieval(connectionId, payload);
+            return ResponseEntity.ok(payload);
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
@@ -344,6 +348,34 @@ public class TrainingController {
     private void rebuildAndReindexConnection(String connectionId) {
         semanticModelService.rebuildSemanticModel(connectionId);
         trainingService.reindexConnection(connectionId);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void filterDebugRetrieval(String connectionId, Map<String, Object> payload) {
+        if (payload == null) {
+            return;
+        }
+        Object results = payload.get("results");
+        if (!(results instanceof List<?> rows)) {
+            return;
+        }
+        List<Map<String, Object>> filtered = new java.util.ArrayList<>();
+        for (Object row : rows) {
+            if (!(row instanceof Map<?, ?> map)) {
+                continue;
+            }
+            Object metadata = map.get("metadata");
+            if (userDataAccessPolicyService.isRagMetadataInScope(
+                connectionId,
+                accessControlService.getCurrentUsername(),
+                accessControlService.isCurrentUserAdmin(),
+                metadata == null ? null : String.valueOf(metadata)
+            )) {
+                filtered.add((Map<String, Object>) map);
+            }
+        }
+        payload.put("results", filtered);
+        payload.put("resultCount", filtered.size());
     }
 
     @Data

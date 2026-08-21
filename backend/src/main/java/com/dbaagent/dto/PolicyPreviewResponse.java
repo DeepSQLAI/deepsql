@@ -11,6 +11,8 @@ public class PolicyPreviewResponse {
     List<String> blockedSensitivityCategories;
     List<String> deniedTables;
     List<String> deniedColumns;
+    List<String> allowedSchemas;
+    boolean allowAggregates;
     List<String> impactedTables;
     List<String> impactedColumns;
     boolean blockMode;

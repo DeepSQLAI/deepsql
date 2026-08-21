@@ -144,8 +144,10 @@ services:
       DEEPSQL_CHAT_API_KEY: ${DEEPSQL_CHAT_API_KEY:-}
       DEEPSQL_CHAT_ENDPOINT: ${DEEPSQL_CHAT_ENDPOINT:-}
       DEEPSQL_CHAT_MODEL: ${DEEPSQL_CHAT_MODEL:-gpt-5.4}
-      # Reach the backend over the compose network (MCP tools + provisioner)
-      DEEPSQL_API_BASE_URL: http://backend:8080/api/
+      # Reach the backend over the compose network (MCP tools + provisioner).
+      # Override to http://host.docker.internal:8080/api/ when the Java backend
+      # runs on the host (native `mvn spring-boot:run`) instead of Compose.
+      DEEPSQL_API_BASE_URL: ${DEEPSQL_API_BASE_URL:-http://backend:8080/api/}
       # Shared secret with backend AgentBridgeService
       AGENT_PROVISION_SECRET: ${AGENT_PROVISION_SECRET:-}
       # Origins allowed by the agent API CSRF check
@@ -157,6 +159,8 @@ services:
       DEEPSQL_AGENT_TRUSTED_PROXY_CIDRS: ${DEEPSQL_AGENT_TRUSTED_PROXY_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
       HERMES_WEBUI_TRUSTED_PROXY_CIDRS: ${DEEPSQL_AGENT_TRUSTED_PROXY_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
       HERMES_WEBUI_TRUSTED_AUTH_HEADER: X-Remote-User
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:${DEEPSQL_AGENT_PORT:-8787}:8787"
       - "127.0.0.1:${DEEPSQL_AGENT_PROVISIONER_PORT:-8788}:8788"

@@ -135,6 +135,17 @@ public class JwtUtil {
         Set<Permission> permissions,
         Duration ttl
     ) {
+        return generateAccessToken(username, sessionId, role, permissions, ttl, null);
+    }
+
+    public String generateAccessToken(
+        String username,
+        String sessionId,
+        Role role,
+        Set<Permission> permissions,
+        Duration ttl,
+        Long impersonateUserId
+    ) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("role", role.name());
 
@@ -145,8 +156,34 @@ public class JwtUtil {
         if (sessionId != null && !sessionId.isBlank()) {
             claims.put("sid", sessionId);
         }
+        if (impersonateUserId != null && impersonateUserId > 0) {
+            claims.put("impUid", impersonateUserId);
+        }
 
         return createToken(claims, username, ttl);
+    }
+
+    /**
+     * Target user id stamped onto an admin access token during View as.
+     * The JWT subject stays the administrator so logout/refresh/control-plane
+     * still own the real session; policy evaluation overlays this user.
+     */
+    public Long extractImpersonateUserId(String token) {
+        Claims claims = extractAllClaims(token);
+        Object raw = claims.get("impUid");
+        if (raw instanceof Number number) {
+            long value = number.longValue();
+            return value > 0 ? value : null;
+        }
+        if (raw instanceof String text && !text.isBlank()) {
+            try {
+                long value = Long.parseLong(text.trim());
+                return value > 0 ? value : null;
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
     }
 
     /**

@@ -16,6 +16,8 @@ public class ConnectionChatAccessPolicyResponse {
     List<String> blockedSensitivityCategories;
     List<String> deniedTables;
     List<String> deniedColumns;
+    List<String> allowedSchemas;
+    boolean allowAggregates;
     boolean blockMode;
     boolean redactMode;
     boolean active;

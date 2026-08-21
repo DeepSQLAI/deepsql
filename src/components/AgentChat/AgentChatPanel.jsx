@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { ArrowUp, Plus, Square, Loader2, Database, Sparkles, Hash, Table2, Clock, AlertCircle } from 'lucide-react'
 import { agentChatAPI, withConnectionContext } from '@/lib/api/agentClient'
 import { agentConversationAPI } from '@/lib/api/client'
+import { useAuth } from '@/hooks/useAuth'
 import AgentMarkdown from './AgentMarkdown'
 import { sanitizeAssistantAnswer } from './sanitizeAssistantAnswer'
 import styles from './AgentChatPanel.module.css'
@@ -41,6 +42,7 @@ const SUGGESTIONS = [
 ]
 
 export default function AgentChatPanel({ connectionId, connectionName }) {
+  const { username } = useAuth()
   const [sessionId, setSessionId] = useState(null)
   const [booting, setBooting] = useState(true)
   const [bootError, setBootError] = useState(null)
@@ -113,7 +115,7 @@ export default function AgentChatPanel({ connectionId, connectionName }) {
     } finally {
       setBooting(false)
     }
-  }, [connectionId])
+  }, [connectionId, username])
 
   useEffect(() => { boot() }, [boot])
   useEffect(() => { if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight }, [messages])

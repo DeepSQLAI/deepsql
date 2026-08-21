@@ -9,6 +9,8 @@ import com.dbaagent.service.AgentBridgeService;
 import com.dbaagent.service.AuthSessionService;
 import com.dbaagent.service.PasswordlessAuthService;
 import com.dbaagent.service.PermissionService;
+import com.dbaagent.service.ImpersonationService;
+import com.dbaagent.security.ImpersonationContext;
 import com.dbaagent.service.SystemConfigService;
 import com.dbaagent.service.UserInviteService;
 import jakarta.servlet.http.Cookie;
@@ -47,6 +49,7 @@ public class AuthController {
     private final PrivateBetaRequestRepository privateBetaRequestRepository;
     private final SystemConfigService systemConfigService;
     private final AgentBridgeService agentBridgeService;
+    private final ImpersonationService impersonationService;
 
     @Value("${security.cookie.refresh-name:refresh_token}")
     private String refreshCookieName;
@@ -201,12 +204,31 @@ public class AuthController {
             return ResponseEntity.status(401).body(Map.of("message", "Session expired"));
         }
         authSessionService.writeSessionCookies(httpResponse, refreshed.get());
-        // Keep the user's agent token alive for as long as the UI session lives.
-        // The SPA refreshes on access-token expiry (~every 15 min of activity), so
-        // this slides the agent token forward on each active interval — a logged-in
-        // UI never ends up with a dead agent.
+        User effectiveUser = impersonationService.resolveFromCookie(httpRequest, user)
+            .map(ImpersonationContext.State::target)
+            .orElse(user);
+        if (effectiveUser != user && effectiveUser.getId() != null) {
+            authSessionService.reissueAccessToken(
+                httpResponse,
+                session.getId(),
+                user,
+                effectiveUser.getId()
+            );
+        }
+        // Keep agent tokens alive for as long as the UI session lives.
+        // During View as the SPA still refreshes the *admin* session; also
+        // slide the target user's minted MCP token or their Agent tab dies.
         agentBridgeService.extendAgentTokens(user.getUsername());
-        return ResponseEntity.ok(toAuthPayload(user, user.getRoleEnum(), permissionService.getEffectivePermissionCodes(user.getRoleEnum())));
+        if (!effectiveUser.getUsername().equals(user.getUsername())) {
+            agentBridgeService.extendAgentTokens(effectiveUser.getUsername());
+        }
+        Map<String, Object> payload = toAuthPayload(
+            effectiveUser,
+            effectiveUser.getRoleEnum(),
+            permissionService.getEffectivePermissionCodes(effectiveUser.getRoleEnum())
+        );
+        impersonationService.decorateAuthPayload(httpRequest, user, payload);
+        return ResponseEntity.ok(payload);
     }
 
     @PostMapping("/logout")
@@ -304,7 +326,7 @@ public class AuthController {
     }
 
     @GetMapping("/me")
-    public ResponseEntity<?> getCurrentUser() {
+    public ResponseEntity<?> getCurrentUser(HttpServletRequest httpRequest) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
             return ResponseEntity.status(401).body(Map.of("message", "Not authenticated"));
@@ -313,9 +335,7 @@ public class AuthController {
         Role role = user.getRoleEnum();
         Set<String> permissions = permissionService.getEffectivePermissionCodes(role);
         Map<String, Object> response = toAuthPayload(user, role, permissions);
-        response.put("emailVerified", user.isEmailVerified());
-        response.put("accountStatus", user.getAccountStatus());
-        response.put("emailTwoFactorEnabled", systemConfigService.getBoolean("security.workspace.email2fa.enabled"));
+        impersonationService.decorateAuthPayload(httpRequest, user, response);
         return ResponseEntity.ok(response);
     }
 
@@ -360,6 +380,7 @@ public class AuthController {
         }
         if (result.sessionAuthentication() != null && result.user() != null && result.role() != null) {
             authSessionService.writeSessionCookies(httpResponse, result.sessionAuthentication());
+            authSessionService.clearImpersonationCookie(httpResponse);
             Set<String> permissionNames = result.permissions() == null ? Set.of() : result.permissions().stream()
                 .map(Enum::name)
                 .collect(Collectors.toSet());

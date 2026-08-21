@@ -4,6 +4,7 @@ import com.dbaagent.model.CompanyKnowledgeEntry;
 import com.dbaagent.model.QualifiedTableName;
 import com.dbaagent.model.SchemaMetadata;
 import com.dbaagent.model.TrainingDataEmbedding;
+import com.dbaagent.service.security.AccessControlService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +29,8 @@ public class ChatRetrievalContextService {
     private final TrainingService trainingService;
     private final CompanyKnowledgeService companyKnowledgeService;
     private final ObjectMapper objectMapper;
+    private final UserDataAccessPolicyService userDataAccessPolicyService;
+    private final AccessControlService accessControlService;
 
     @Value("${app.chat.rag.general-top-k:20}")
     private int ragGeneralTopK;
@@ -57,6 +60,7 @@ public class ChatRetrievalContextService {
         String actualUserQuestion,
         SchemaMetadata schema
     ) {
+        SchemaMetadata scopedSchema = scopeSchema(connectionId, schema);
         RetrievalIntent retrievalIntent = detectRetrievalIntent(actualUserQuestion);
         if (isSimpleSchemaQuestion(actualUserQuestion)) {
             log.debug("Skipping RAG for simple schema question");
@@ -65,7 +69,7 @@ public class ChatRetrievalContextService {
             // is also a no-op without focus tables, so the section ends up empty (which
             // is the right behavior for "list all tables"-style queries).
             CompanyKnowledgeService.RelevantKnowledgeContext knowledgeContext =
-                companyKnowledgeService.selectFromRagHits(connectionId, List.of(), Set.of(), schema);
+                companyKnowledgeService.selectFromRagHits(connectionId, List.of(), Set.of(), scopedSchema);
             return new RetrievedContextResult(
                 "",
                 knowledgeContext.hintContext(),
@@ -85,19 +89,24 @@ public class ChatRetrievalContextService {
         long ragStart = System.currentTimeMillis();
         int retrievalTopK = resolveRetrievalTopK(retrievalIntent);
 
-        List<TrainingDataEmbedding> ragResults = trainingService.cachedRetrieveRelevant(
-            connectionId, actualUserQuestion, retrievalTopK);
-        ragResults = prioritizeTrainingDataByIntent(ragResults, retrievalIntent);
+        List<TrainingDataEmbedding> ragResults = scopeEmbeddings(connectionId, prioritizeTrainingDataByIntent(
+            trainingService.cachedRetrieveRelevant(connectionId, actualUserQuestion, retrievalTopK),
+            retrievalIntent
+        ));
 
-        String dbType = schema != null ? schema.getDbType() : null;
-        Set<QualifiedTableName> resolvedTables = schema == null
+        String dbType = scopedSchema != null ? scopedSchema.getDbType() : null;
+        Set<QualifiedTableName> resolvedTables = scopedSchema == null
             ? Set.of()
-            : trainingService.resolveRelevantTables(schema, actualUserQuestion, ragResults, dbType);
+            : trainingService.resolveRelevantTables(scopedSchema, actualUserQuestion, ragResults, dbType);
 
-        List<TrainingDataEmbedding> stage2Results = trainingService.retrieveTargetedByTables(
-            connectionId, resolvedTables, 100);
-        List<TrainingDataEmbedding> stage3Results = trainingService.deduplicateAgainstTargeted(
-            ragResults, stage2Results);
+        List<TrainingDataEmbedding> stage2Results = scopeEmbeddings(
+            connectionId,
+            trainingService.retrieveTargetedByTables(connectionId, resolvedTables, 100)
+        );
+        List<TrainingDataEmbedding> stage3Results = scopeEmbeddings(
+            connectionId,
+            trainingService.deduplicateAgainstTargeted(ragResults, stage2Results)
+        );
 
         List<TrainingDataEmbedding> allResults = new ArrayList<>(stage2Results);
         allResults.addAll(stage3Results);
@@ -110,7 +119,7 @@ public class ChatRetrievalContextService {
                 connectionId,
                 allResults,
                 extractTableNamesFromRag(allResults),
-                schema
+                scopedSchema
             );
 
         Set<String> ragTableNames = new LinkedHashSet<>(extractTableNamesFromRag(allResults));
@@ -153,20 +162,25 @@ public class ChatRetrievalContextService {
             return buildContext(connectionId, actualUserQuestion, schema);
         }
 
+        SchemaMetadata scopedSchema = scopeSchema(connectionId, schema);
         RetrievalIntent retrievalIntent = detectRetrievalIntent(actualUserQuestion);
         int retrievalTopK = resolveRetrievalTopK(retrievalIntent);
-        String dbType = schema.getDbType();
-        Set<QualifiedTableName> resolvedTables = resolveScopedTables(schema, requestedTables, dbType);
+        String dbType = scopedSchema.getDbType();
+        Set<QualifiedTableName> resolvedTables = resolveScopedTables(scopedSchema, requestedTables, dbType);
 
         String augmentedQuestion = actualUserQuestion + " tables: " + String.join(", ", requestedTables);
-        List<TrainingDataEmbedding> ragResults = trainingService.cachedRetrieveRelevant(
-            connectionId, augmentedQuestion, retrievalTopK);
-        ragResults = prioritizeTrainingDataByIntent(ragResults, retrievalIntent);
+        List<TrainingDataEmbedding> ragResults = scopeEmbeddings(connectionId, prioritizeTrainingDataByIntent(
+            trainingService.cachedRetrieveRelevant(connectionId, augmentedQuestion, retrievalTopK),
+            retrievalIntent
+        ));
 
         List<TrainingDataEmbedding> stage2Results = resolvedTables.isEmpty()
             ? List.of()
-            : trainingService.retrieveTargetedByTables(connectionId, resolvedTables, 100);
-        List<TrainingDataEmbedding> stage3Results = trainingService.deduplicateAgainstTargeted(ragResults, stage2Results);
+            : scopeEmbeddings(connectionId, trainingService.retrieveTargetedByTables(connectionId, resolvedTables, 100));
+        List<TrainingDataEmbedding> stage3Results = scopeEmbeddings(
+            connectionId,
+            trainingService.deduplicateAgainstTargeted(ragResults, stage2Results)
+        );
 
         List<TrainingDataEmbedding> allResults = new ArrayList<>(stage2Results);
         allResults.addAll(stage3Results);
@@ -179,7 +193,7 @@ public class ChatRetrievalContextService {
                 connectionId,
                 allResults,
                 selectorFocus,
-                schema
+                scopedSchema
             );
 
         Set<String> ragTableNames = new LinkedHashSet<>(requestedTables);
@@ -426,5 +440,23 @@ public class ChatRetrievalContextService {
                 .ifPresent(table -> resolved.add(trainingService.toQualifiedTableName(table, dbType)));
         }
         return resolved;
+    }
+
+    private SchemaMetadata scopeSchema(String connectionId, SchemaMetadata schema) {
+        return userDataAccessPolicyService.filterSchemaMetadata(
+            connectionId,
+            accessControlService.getCurrentUsername(),
+            accessControlService.isCurrentUserAdmin(),
+            schema
+        );
+    }
+
+    private List<TrainingDataEmbedding> scopeEmbeddings(String connectionId, List<TrainingDataEmbedding> embeddings) {
+        return userDataAccessPolicyService.filterRagEmbeddings(
+            connectionId,
+            accessControlService.getCurrentUsername(),
+            accessControlService.isCurrentUserAdmin(),
+            embeddings
+        );
     }
 }

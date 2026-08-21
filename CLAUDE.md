@@ -93,7 +93,7 @@ backend/
     repository/     # Spring Data repositories
     provider/       # Database dialect registry (PostgreSQL, MySQL)
     config/         # Spring configuration
-    security/       # JWT auth, RBAC
+    security/       # JWT auth, RBAC, admin profile switch (`ImpersonationService`)
     llm/            # LLM provider registry, config resolver, OpenAI-compatible provider
     util/           # Shared utilities
   src/test/         # JUnit 5 tests
@@ -110,7 +110,7 @@ src/                # Frontend (React)
   components/       # UI components
     tabs/           # 40+ specialized tabs
     sections/       # Top-level sidebar destinations (Agent, Dashboards, Brain,
-                    # Performance = Slow Queries + Workload, Editor, Docs)
+                    # Performance = Slow Queries + Workload, Editor)
   lib/
     api/client.js   # Centralized API layer (axios, 25+ modules)
     stores/         # Zustand stores (dashboard, connection, chat, UI)
@@ -318,8 +318,9 @@ returns a number).
 2. **LLM Provider Registry**: Use `LlmProviderRegistry` for all provider-specific LLM behavior. Do NOT add if/else or switch on provider type. Chat and embedding providers are registered and resolved independently — some providers offer only one. Providers are *factories* over credentials, not `ChatModel`s, so credentials stay resolvable per call and key rotation needs no restart.
 3. **SSH-Aware Access**: Always use `ConnectionService.getJdbcTemplate(connectionId, request)` — handles SSH tunneling transparently.
 4. **SQL Rule**: All generated SQL MUST use table-qualified column names (`table.column_name`).
-5. **RAG Caching**: Three-tier cache (memory → Redis → Azure Search). Redis failure is graceful (app continues without caching).
-6. **Virtual Threads**: Enabled for concurrency (JDK 25).
+5. **Chat access policy**: Fail closed. Walk the whole SQL tree (CTEs, set ops, subqueries). Deny unparseable or unhandled statements. Require an actor except `INTERNAL`/`SCHEDULED`. MCP/Editor identity comes from `SecurityContext`, not `QueryActorContextHolder`. Persist `allowed_schemas`. Do not let "how many" override a protected-column mention. Public share is refused when the connection has an active policy.
+6. **RAG Caching**: Three-tier cache (memory → Redis → Azure Search). Redis failure is graceful (app continues without caching).
+7. **Virtual Threads**: Enabled for concurrency (JDK 25).
 
 ### Frontend Rules
 1. **API Centralization**: ALL API calls through `src/lib/api/client.js`. Never create direct axios instances.
@@ -327,6 +328,15 @@ returns a number).
 3. **UI State**: Use Zustand stores from `src/lib/stores/`. Prefer selector hooks for optimized re-renders.
 4. **Tooltips**: Always use `HelpTooltip` component, never plain `title` attributes.
 5. **Design**: Minimal black/white/grey palette, Inter font, subtle transitions. See UX guidelines in full CLAUDE.md.
+
+### Admin profile switch
+Admins can **View as** a sub-user from the top-right of the home layout (`ProfileSwitch`) to verify connection ACLs, chat/editor policies, and role-gated nav.
+
+The admin JWT **subject** stays the administrator so logout, refresh, and `/admin/impersonate` still own the real session. Policy identity is the target: an httpOnly `impersonate_user` cookie plus an `impUid` claim on the access token. `JwtAuthenticationFilter` overlays that principal onto the SecurityContext for every request except the impersonation control plane, logout, and session refresh. Chat, Editor, schema listing, and Agent MCP calls then run `AccessControlService` / `ConnectionChatAccessPolicyService` as the target (`actorIsAdmin` is false, so policies apply).
+
+The Agent tab must not inherit the admin MCP token. `/api/agent/session` mints an MCP token for the effective user and never falls back to the admin session JWT while View as is active. nginx `auth_request` on `/agent-api` forwards `/api/auth/me`'s `X-Remote-User` (the overlaid username) instead of hardcoding `admin`.
+
+`POST|DELETE|GET /api/admin/impersonate` are excluded from the overlay so stop/list still run as the real admin. Cannot target another ADMIN, self, or a non-ACTIVE account. `/auth/me` returns the **effective** user plus `impersonating` / `impersonatorUsername`.
 
 ### Git Rules
 - Do NOT commit automatically — wait for explicit user instruction.
@@ -354,6 +364,30 @@ returns a number).
    `hermes_requires <0.20.0` on a "verified" 401 that came from a hand-rolled
    `hermes serve` run rather than `hermes webui`. 0.20.0 works. Verify against the
    real start path before writing a version constraint.
+5. **Hermes MCP is process-global.** One `deepsql-phase1-server.js` stdio server
+   is started from the first loaded profile (usually `u-admin`) and lives until
+   the Agent API process dies. `POST /api/profile/switch` is `process_wide=False`
+   on purpose (per-browser cookie), so a View as / new-thread Agent chat tagged
+   `profile: u-marts-editor` still sends the admin MCP bearer. Chat-access policy
+   then `resolveEffectivePolicy(..., actorIsAdmin=true)` → `none()`. The
+   provisioner mirrors the target user's token onto every `deepsql.token` the
+   live process might re-read (`DEEPSQL_TOKEN_FILE` mtime cache in
+   `mcp/deepsql-phase1-lib.js`).
+6. **The agent image build clones two third-party repos over the public internet,
+   unauthenticated.** `agent/Dockerfile` fetches `NousResearch/hermes-agent` and
+   `nesquena/hermes-webui` at build time. GitHub rate-limits unauthenticated
+   requests *per source IP*, and Actions runners share pooled egress addresses, so
+   `docker compose build` intermittently died on `fatal: unable to access ...: The
+   requested URL returned error: 429` (exit 128) — 2 of 15 runs, always on branches
+   whose diff had nothing to do with the agent. Both clones now retry 5x with
+   backoff, and still print FATAL and exit 1 on exhaustion so a genuinely dead
+   upstream cannot yield an image with no runtime in it. Two lessons worth keeping:
+   a CI failure that is *intermittent and unrelated to the diff* is a network or
+   rate-limit signature, not a code defect — read the log before bisecting the
+   branch; and the webui clone's pre-existing `|| git clone` fallback looked like
+   resilience but only ever handled a *moved ref*, re-issuing the identical refused
+   request against a 429. A fallback that fails the same way as the thing it backs
+   up is not a fallback.
 
 ### Verification Anti-Patterns (do not repeat)
 
@@ -377,9 +411,78 @@ broken. Assert the *outcome*, never the attempt:
 - **`set -e` + `read` at EOF aborts silently.** Prompts in `install.sh` use
   `read … || true` so the explicit emptiness checks report the problem. Without it the
   installer exited 1 with no message, after writing generated secrets to `.env`.
+- **Minting an Agent MCP token ≠ Hermes using it.** `/api/agent/session` can mint
+  `u-marts-editor`'s token and `POST /api/profile/switch` can 200 while
+  `execute_sql` still authenticates as admin. Hermes keeps one DeepSQL MCP
+  stdio process (started from the first profile that loaded `mcp_servers`) and
+  `profile/switch` is `process_wide=False`. A new chat thread does not respawn
+  MCP. `probeMcpAuth` only proves the *minted* token works against Spring, not
+  that the live MCP process will send it. The provisioner must mirror the
+  token onto every `deepsql.token` the live process might be watching
+  (`scripts/local-agent-provisioner.py`). Audit: `security_event.user_id` on
+  `EDITOR_QUERY_EXECUTED` with `clientType=mcp`.
 - **Silent-failure rule, concretely:** the CLI rendered an unreachable server as
   `No databases connected yet` because one `catch` covered both the connection fetch
   and decorative extras. An unreachable host must never look like an empty account.
+- **SQL mutation guards must match statement verbs, not identifiers.**
+  `McpSqlGuardService` / `mcp/deepsql-phase1-lib.js` used `\bCOMMENT\b` / `\bCALL\b`,
+  so `SELECT * FROM comment` was rejected as "potentially mutating." Plenty of
+  schemas have a `comment` table. Assert `SELECT * FROM comment` is allowed *and*
+  that `WITH x AS (DELETE …) SELECT …` / `WITH x AS (…) DELETE …` still are not.
+
+### SQL Editor Guard Rules
+
+The Editor (`EditorSection` → `SqlRunnerTab` → `POST /connections/{id}/query` →
+`QueryExecutionPolicyService` → `QueryExecutorService`) is the only surface where a
+user submits arbitrary SQL. Everything below was a live bug, verified by executing
+it against a real database — not a theoretical hardening pass.
+
+- **Never classify SQL by its leading keyword alone.** `WITH x AS (DELETE FROM t
+  RETURNING *) SELECT * FROM x` parses as a `Select` and *every* leading-keyword
+  check calls it read-only — including `isReadOnlyQuery`, which reports anything
+  starting with `WITH` as safe. PostgreSQL executes data-modifying CTEs for real,
+  so a **non-admin** wiped whole tables through the Editor with no confirmation
+  prompt, logged as an ordinary `EDITOR_QUERY_EXECUTED / SUCCESS`. `SELECT … INTO
+  newtab` is the same class of bug (it is DDL). `classifyStatement` now inspects
+  the parse tree (`detectSelectWrite`) **and** runs a text backstop
+  (`detectHiddenWrite`) so an unparseable variant fails closed instead of falling
+  through to the keyword path.
+- **Read-only contexts open read-only JDBC sessions.** `QueryExecutorService` calls
+  `connection.setReadOnly(true)` whenever `mutationMode() == READ_ONLY_ONLY`, so
+  PostgreSQL refuses the write itself even if classification is wrong. Classification
+  is a parser heuristic; this is what keeps the *next* parser gap from being data
+  loss. A driver that rejects the hint raises rather than silently continuing
+  writable. HikariCP resets the flag on return to the pool (verified), so it cannot
+  leak into an admin's later write.
+- **Row caps are enforced with `setMaxRows`, not by appending `LIMIT n`.** The old
+  check skipped its own LIMIT whenever the regex `\blimit\s+\d+` matched anywhere —
+  including inside a comment, a string literal, or a subquery. `WITH a AS (SELECT …
+  LIMIT 100) SELECT * FROM a` is ordinary analyst SQL and returned **200k rows**
+  against a 1,000 cap, straight into an unbounded `ArrayList` and then an
+  unvirtualized table. The SQL `LIMIT` is still appended for simple SELECTs, but
+  only as an optimization — correctness no longer depends on that text match.
+- **Cancel must terminate the query, not just the HTTP request.** `abortController
+  .abort()` only closes the socket; the statement runs on holding one of the pool's
+  10 connections for up to its timeout. The client now sends an `executionId`,
+  `RunningQueryRegistry` maps it to the backend session pid (via the dialect's
+  `getSessionPidQuery()`), and `POST /connections/{id}/query/{executionId}/cancel`
+  terminates exactly that session. The previous UI behavior was worse than nothing:
+  it killed **every** active query on the connection, including other users' work.
+  The cancel endpoint is scoped to the connection *and* the user who started the
+  run, so an execution id is not a kill primitive for someone else's query.
+- **Keep the client timeout under the proxy's.** `docker/nginx/default.conf` gives
+  up at `proxy_read_timeout 300s`; the Editor used to ask for 600s, so a 6-minute
+  query returned an opaque 504 while still running. `QUERY_TIMEOUT_SECONDS = 240`
+  in `SqlRunnerTab.js` — change both together or not at all.
+- **`/api/connections/*/query` is rate-limited in nginx** (`limit_req zone=sqlexec`,
+  30r/m + burst 20, `429` on reject). It is the most expensive authenticated call
+  in the product.
+- **Test the policy against the real providers.** `QueryExecutionPolicyServiceTest`
+  used to stub `isReadOnlyQuery` to always return `false` — the exact opposite of
+  what the shipped providers do for `WITH`. It asserted behavior no deployment had,
+  and `withInsert_isTreatedAsMutation` passed *because* of the stub. It now
+  constructs a real `MySQLQueryExecutionProvider`. Do not reintroduce a stubbed
+  dialect here; the mock is what let the blocker ship.
 
 ### Data Model Rules
 
@@ -390,6 +493,42 @@ broken. Assert the *outcome*, never the attempt:
   does nothing (Spring proxies are bypassed by `this::`). This broke
   `POST /users/admin/reset` on every install that had run `setup-agent.sh`, since that
   mints an admin MCP token on each run.
+
+### Endpoint Authorization Rules
+
+- **Authentication is not authorization.** `SecurityConfig` only asserts
+  `.anyRequest().authenticated()` and `JwtAuthenticationFilter` only resolves a
+  principal — neither looks at a `connectionId`. Connections are **private per user**
+  (`ConnectionAccessService.resolveAccess` keys on `ownerUsername` plus an explicit
+  grant table), so any endpoint taking a caller-supplied `connectionId` **must** call
+  `accessControlService.assertCanReadConnectionContent` (reads) or
+  `assertCanManageConnectionContent` (writes) itself. There is no filter, interceptor
+  or aspect that does this for you.
+- **`BrainController` shipped with 93 of its 116 endpoints unguarded.** Only the first
+  ~15 (`/understanding`, `/notes/*`, `/tasks/*`, `/key-columns/*`,
+  `/inferred-relationships/*`) had the check; every later "Phase" block did not — so an
+  authenticated user could pass someone else's connection id to
+  `/brain/health-scores/{id}`, `/brain/data-sensitivity/{id}` (which names the PII
+  columns), `/brain/cost-attribution/{id}`, `/brain/ml-overview/{id}` and ~90 more and
+  read that user's database intelligence. All 116 are now guarded, and
+  `BrainControllerAuthorizationSafetyTest` fails the build if a new one is not. The
+  misses clustered by **when a section was written**, not by read/write semantics —
+  when adding a controller section, guard it as you write it.
+- **When the path carries some other id** (`simulationId`, `experimentId`, `patternId`,
+  `noteId`, `taskId`), resolve the owning connection first via that service's
+  `getConnectionId(id)` and assert on the result. Do not skip the check because the
+  path has no `connectionId` in it.
+- **An endpoint with no connection scope at all is admin-only.**
+  `POST /brain/column-values/embed-all` spans every connection, so it carries
+  `@PreAuthorize("hasRole('ADMIN')")` — it cannot be authorized against one
+  connection's grants. `@EnableMethodSecurity(prePostEnabled = true)` is on in
+  `SecurityConfig`, so `@PreAuthorize` is live.
+- **Assert inside the `try`, and rethrow `ResponseStatusException` before the
+  catch-all.** Every handler in `BrainController` ends with a
+  `catch (Exception) -> 500`; without the earlier
+  `catch (ResponseStatusException e) { throw e; }` a 403 is swallowed and reported as a
+  server error, so a client cannot tell "not yours" from "broken". The safety test
+  asserts this too.
 
 ### MCP & CLI Release Rules
 

@@ -31,11 +31,14 @@ class UserDataAccessPolicyServiceTest {
     @BeforeEach
     void setUp() {
         service = new UserDataAccessPolicyService(policyService, securityEventService);
-        lenient().when(policyService.buildProtectionDescriptors(anyString(), any(), any(), any()))
-            .thenReturn(Map.of(
-                "customer_profiles",
-                descriptor("customer_profiles", false, "email", "phone_number")
-            ));
+        lenient().when(policyService.buildProtectionDescriptors(any(ConnectionChatAccessPolicyService.EffectivePolicy.class)))
+            .thenAnswer(invocation -> {
+                ConnectionChatAccessPolicyService.EffectivePolicy policy = invocation.getArgument(0);
+                return Map.of(
+                    "customer_profiles",
+                    descriptor(null, "customer_profiles", false, "email", "phone_number")
+                );
+            });
     }
 
     @Test
@@ -59,6 +62,21 @@ class UserDataAccessPolicyServiceTest {
         assertThat(blocked.allowed()).isFalse();
         assertThat(blocked.responseMessage()).contains("protected data");
         assertThat(allowed.allowed()).isTrue();
+    }
+
+    @Test
+    void evaluatePrompt_blocksProtectedColumnMentionEvenWhenAskingForACount() {
+        ConnectionChatAccessPolicyService.EffectivePolicy policy = policy();
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy);
+
+        UserDataAccessPolicyService.PromptDecision blocked = service.evaluatePrompt(
+            "conn-1",
+            "analyst",
+            false,
+            "How many customer emails do we have?"
+        );
+
+        assertThat(blocked.allowed()).isFalse();
     }
 
     @Test
@@ -106,6 +124,474 @@ class UserDataAccessPolicyServiceTest {
         assertThat(decorated).contains("customer segments by month");
     }
 
+    @Test
+    void enforcePreExecution_blocksQueriesOutsideAllowedSchema() {
+        ConnectionChatAccessPolicyService.EffectivePolicy schemaPolicy = new ConnectionChatAccessPolicyService.EffectivePolicy(
+            true,
+            "conn-1",
+            "analyst",
+            Set.of(),
+            Set.of(),
+            Set.of(),
+            Set.of("marts"),
+            true,
+            true,
+            false,
+            "Only schema marts",
+            List.of(),
+            List.of()
+        );
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(schemaPolicy);
+        when(policyService.buildProtectionDescriptors(schemaPolicy)).thenReturn(Map.of());
+
+        UserDataAccessPolicyException exception = assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest("SELECT name FROM crm.customers", null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
+    }
+
+    private ConnectionChatAccessPolicyService.EffectivePolicy martsOnlyPolicy() {
+        return new ConnectionChatAccessPolicyService.EffectivePolicy(
+            true, "conn-1", "analyst",
+            Set.of(), Set.of(), Set.of(), Set.of("marts"),
+            true, true, false, "Only schema marts", List.of(), List.of()
+        );
+    }
+
+    private UserDataAccessPolicyException assertSchemaScopeBlocks(String sql) {
+        ConnectionChatAccessPolicyService.EffectivePolicy schemaPolicy = martsOnlyPolicy();
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(schemaPolicy);
+        lenient().when(policyService.buildProtectionDescriptors(schemaPolicy)).thenReturn(Map.of());
+        return assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest(sql, null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+            )
+        );
+    }
+
+    // The schema allowlist walked only FROM and JOIN, so a forbidden schema
+    // reached through any other syntax position was never enumerated and the
+    // allowlist silently permitted it.
+
+    // Column inspection cannot reach a select nested inside FROM/JOIN/WHERE, so a
+    // protected table referenced there must be refused rather than implicitly allowed.
+
+    @Test
+    void enforcePreExecution_blocksProtectedTableInsideDerivedTable() {
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy());
+
+        UserDataAccessPolicyException exception = assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest("SELECT t.email FROM (SELECT email FROM customer_profiles) t", null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo("POLICY_SQL_BLOCKED");
+    }
+
+    @Test
+    void enforcePreExecution_blocksProtectedTableInsideWhereSubquery() {
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy());
+
+        UserDataAccessPolicyException exception = assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest("SELECT id FROM orders WHERE id IN (SELECT email FROM customer_profiles)", null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo("POLICY_SQL_BLOCKED");
+    }
+
+    // A qualified protection names exactly one table. marts.customer_profiles is a
+    // different table from public.customer_profiles and must not be caught by it.
+    @Test
+    void enforcePreExecution_allowsSameNamedTableInAnotherSchemaWhenProtectionIsQualified() {
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy());
+        when(policyService.buildProtectionDescriptors(any(ConnectionChatAccessPolicyService.EffectivePolicy.class)))
+            .thenReturn(Map.of("public.customer_profiles",
+                descriptor("public", "customer_profiles", false, "email")));
+
+        service.enforcePreExecution(
+            "conn-1",
+            new QueryRequest("SELECT id FROM (SELECT id FROM marts.customer_profiles) t", null, null),
+            new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+        );
+    }
+
+    // The genuinely ambiguous direction is an unqualified REFERENCE, not an
+    // unqualified protection: qualifyTable() stores public.<t> as bare <t>, so a
+    // bare protected name means public, while a bare reference in a query
+    // resolves through search_path and could be any schema. Block that one.
+    @Test
+    void enforcePreExecution_blocksUnqualifiedReferenceBecauseSearchPathIsUnknown() {
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy());
+
+        UserDataAccessPolicyException exception = assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest("SELECT id FROM (SELECT id FROM customer_profiles) t", null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo("POLICY_SQL_BLOCKED");
+    }
+
+    @Test
+    void enforcePreExecution_blocksForbiddenSchemaInsideWhereSubquery() {
+        assertThat(assertSchemaScopeBlocks(
+            "SELECT id FROM marts.orders WHERE total = (SELECT MAX(salary) FROM hr.salaries)"
+        ).getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
+    }
+
+    @Test
+    void enforcePreExecution_blocksForbiddenSchemaInUnionBranch() {
+        assertThat(assertSchemaScopeBlocks(
+            "SELECT id FROM marts.orders UNION ALL SELECT ssn FROM hr.salaries"
+        ).getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
+    }
+
+    // The same fail-open gate skipped protected-column inspection entirely, so a
+    // UNION reached restricted columns even inside an allowed schema.
+    @Test
+    void enforcePreExecution_blocksProtectedColumnsInUnionBranch() {
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy());
+
+        UserDataAccessPolicyException exception = assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest("SELECT 1 AS x UNION ALL SELECT email FROM customer_profiles", null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo("POLICY_SQL_BLOCKED");
+    }
+
+    @Test
+    void enforcePreExecution_blocksForbiddenSchemaInsideCte() {
+        assertThat(assertSchemaScopeBlocks(
+            "WITH leaked AS (SELECT ssn FROM hr.salaries) SELECT * FROM leaked"
+        ).getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
+    }
+
+    @Test
+    void enforcePreExecution_allowsMartsQueriesWhenOtherSchemasHaveProtectedColumns() {
+        ConnectionChatAccessPolicyService.EffectivePolicy schemaPolicy = new ConnectionChatAccessPolicyService.EffectivePolicy(
+            true,
+            "conn-1",
+            "analyst",
+            Set.of(),
+            Set.of(),
+            Set.of("marts.fct_enrollment.amount"),
+            Set.of("marts"),
+            true,
+            true,
+            false,
+            "Only marts; redact amount",
+            List.of(),
+            List.of("marts.fct_enrollment.amount")
+        );
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(schemaPolicy);
+        when(policyService.buildProtectionDescriptors(schemaPolicy)).thenReturn(Map.of(
+            "marts.fct_enrollment",
+            descriptor("marts", "fct_enrollment", false, "amount")
+        ));
+
+        assertThat(service.enforcePreExecution(
+            "conn-1",
+            new QueryRequest("SELECT currency FROM marts.fct_enrollment", null, null),
+            new QueryExecutionContext(QueryExecutionOrigin.CHAT, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, "analyst", false, false)
+        ).policy().allowedSchemas()).containsExactly("marts");
+    }
+
+    @Test
+    void filterDatabaseObjects_keepsOnlyAllowedSchemas() {
+        ConnectionChatAccessPolicyService.EffectivePolicy schemaPolicy = new ConnectionChatAccessPolicyService.EffectivePolicy(
+            true,
+            "conn-1",
+            "analyst",
+            Set.of(),
+            Set.of(),
+            Set.of(),
+            Set.of("marts"),
+            true,
+            true,
+            false,
+            "Only schema marts",
+            List.of(),
+            List.of()
+        );
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(schemaPolicy);
+
+        var marts = new com.dbaagent.model.DatabaseObject("fct_enrollment", "table", "marts", List.of(), 2L, null);
+        var crm = new com.dbaagent.model.DatabaseObject("customers", "table", "crm", List.of(), 2L, null);
+        var sales = new com.dbaagent.model.DatabaseObject("orders", "table", "sales", List.of(), 2L, null);
+
+        assertThat(service.filterDatabaseObjects("conn-1", "analyst", false, List.of(marts, crm, sales)))
+            .extracting(com.dbaagent.model.DatabaseObject::getName)
+            .containsExactly("fct_enrollment");
+    }
+
+    @Test
+    void filterSchemaMetadata_dropsOutOfScopeTablesAndRelationships() {
+        ConnectionChatAccessPolicyService.EffectivePolicy schemaPolicy = new ConnectionChatAccessPolicyService.EffectivePolicy(
+            true,
+            "conn-1",
+            "analyst",
+            Set.of(),
+            Set.of(),
+            Set.of(),
+            Set.of("marts"),
+            true,
+            true,
+            false,
+            "Only schema marts",
+            List.of(),
+            List.of()
+        );
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(schemaPolicy);
+
+        var schema = new com.dbaagent.model.SchemaMetadata();
+        var marts = new com.dbaagent.model.TableMetadata();
+        marts.setSchema("marts");
+        marts.setName("fct_enrollment");
+        var crm = new com.dbaagent.model.TableMetadata();
+        crm.setSchema("crm");
+        crm.setName("customers");
+        schema.setTables(List.of(marts, crm));
+        var relationship = new com.dbaagent.model.RelationshipMetadata();
+        relationship.setFromTable("crm.customers");
+        relationship.setToTable("marts.fct_enrollment");
+        schema.setRelationships(List.of(relationship));
+
+        var filtered = service.filterSchemaMetadata("conn-1", "analyst", false, schema);
+        assertThat(filtered.getTables()).extracting(com.dbaagent.model.TableMetadata::getName)
+            .containsExactly("fct_enrollment");
+        assertThat(filtered.getRelationships()).isEmpty();
+    }
+
+    @Test
+    void assertTableSchemaAllowed_blocksOutOfScopeTableMetadata() {
+        ConnectionChatAccessPolicyService.EffectivePolicy schemaPolicy = new ConnectionChatAccessPolicyService.EffectivePolicy(
+            true,
+            "conn-1",
+            "analyst",
+            Set.of(),
+            Set.of(),
+            Set.of(),
+            Set.of("marts"),
+            true,
+            true,
+            false,
+            "Only schema marts",
+            List.of(),
+            List.of()
+        );
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(schemaPolicy);
+
+        UserDataAccessPolicyException exception = assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.assertTableSchemaAllowed("conn-1", "analyst", false, "crm.customers")
+        );
+        assertThat(exception.getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
+        service.assertTableSchemaAllowed("conn-1", "analyst", false, "marts.fct_enrollment");
+    }
+
+    @Test
+    void enforcePreExecution_blocksUnionAndSubqueryOutsideAllowedSchema() {
+        stubSchemaPolicy();
+
+        assertThat(assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> enforce("SELECT name FROM marts.fct_enrollment UNION SELECT name FROM sales.customers")
+        ).getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
+
+        assertThat(assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> enforce("WITH x AS (SELECT * FROM crm.customers) SELECT * FROM x")
+        ).getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
+
+        assertThat(assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> enforce("SELECT * FROM (SELECT * FROM sales.customers) t")
+        ).getErrorCode()).isEqualTo("POLICY_SCHEMA_BLOCKED");
+    }
+
+    @Test
+    void enforcePreExecution_failsClosedOnUnparseableAndUnhandledSql() {
+        stubSchemaPolicy();
+
+        assertThat(assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> enforce("SELECT FROM")
+        ).getErrorCode()).isEqualTo("POLICY_SQL_UNPARSEABLE");
+
+        assertThat(assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> enforce("ALTER TABLE marts.fct_enrollment RENAME TO fct_enrollment_x")
+        ).getErrorCode()).isEqualTo("POLICY_SQL_UNHANDLED");
+    }
+
+    @Test
+    void enforcePreExecution_failsClosedWhenActorIsMissingExceptInternalOrigins() {
+        assertThat(assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> service.enforcePreExecution(
+                "conn-1",
+                new QueryRequest("SELECT 1", null, null),
+                new QueryExecutionContext(QueryExecutionOrigin.MCP, QueryExecutionContext.MutationMode.READ_ONLY_ONLY, null, false, false)
+            )
+        ).getErrorCode()).isEqualTo("POLICY_ACTOR_REQUIRED");
+
+        assertThat(service.enforcePreExecution(
+            "conn-1",
+            new QueryRequest("SELECT 1", null, null),
+            QueryExecutionContext.internal()
+        ).policy().present()).isFalse();
+    }
+
+    @Test
+    void enforcePreExecution_countStarIsAllowedButCountOfProtectedColumnIsNot() {
+        ConnectionChatAccessPolicyService.EffectivePolicy schemaPolicy = martsAmountPolicy();
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(schemaPolicy);
+        when(policyService.buildProtectionDescriptors(schemaPolicy)).thenReturn(Map.of(
+            "marts.fct_enrollment",
+            descriptor("marts", "fct_enrollment", false, "amount")
+        ));
+
+        assertThat(enforce("SELECT COUNT(*) AS n FROM marts.fct_enrollment").policy().allowedSchemas())
+            .containsExactly("marts");
+
+        assertThat(assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> enforce("SELECT COUNT(amount) FROM marts.fct_enrollment")
+        ).getErrorCode()).isEqualTo("POLICY_SQL_BLOCKED");
+
+        assertThat(assertThrows(
+            UserDataAccessPolicyException.class,
+            () -> enforce("SELECT MIN(amount) FROM marts.fct_enrollment")
+        ).getErrorCode()).isEqualTo("POLICY_SQL_BLOCKED");
+    }
+
+    @Test
+    void redactResult_usesSourceColumnNotOutputAlias() {
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(policy());
+
+        QueryResult aliasHidden = service.redactResult(
+            "conn-1",
+            new QueryResult(
+                List.of("contact"),
+                List.of(List.of("a@example.com")),
+                1,
+                1L,
+                false,
+                12L,
+                "SELECT email AS contact FROM customer_profiles"
+            ),
+            chatContext()
+        );
+        assertThat(aliasHidden.getRows()).containsExactly(List.of("[redacted:13]"));
+
+        QueryResult aliasSafe = service.redactResult(
+            "conn-1",
+            new QueryResult(
+                List.of("email"),
+                List.of(List.of("Hotel One")),
+                1,
+                1L,
+                false,
+                12L,
+                "SELECT customer_name AS email FROM customer_profiles"
+            ),
+            chatContext()
+        );
+        assertThat(aliasSafe.getRows()).containsExactly(List.of("Hotel One"));
+    }
+
+    @Test
+    void filterRagEmbeddings_dropsOutOfScopeDocuments() {
+        stubSchemaPolicy();
+        var inScope = new com.dbaagent.model.TrainingDataEmbedding();
+        inScope.setMetadata("{\"tableName\":\"marts.fct_enrollment\"}");
+        var outOfScope = new com.dbaagent.model.TrainingDataEmbedding();
+        outOfScope.setMetadata("{\"tableName\":\"sales.customers\"}");
+        var unknown = new com.dbaagent.model.TrainingDataEmbedding();
+        unknown.setMetadata("{}");
+
+        assertThat(service.filterRagEmbeddings("conn-1", "analyst", false, List.of(inScope, outOfScope, unknown)))
+            .containsExactly(inScope);
+    }
+
+    private void stubSchemaPolicy() {
+        ConnectionChatAccessPolicyService.EffectivePolicy schemaPolicy = new ConnectionChatAccessPolicyService.EffectivePolicy(
+            true,
+            "conn-1",
+            "analyst",
+            Set.of(),
+            Set.of(),
+            Set.of(),
+            Set.of("marts"),
+            true,
+            true,
+            false,
+            "Only schema marts",
+            List.of(),
+            List.of()
+        );
+        when(policyService.resolveEffectivePolicy("conn-1", "analyst", false)).thenReturn(schemaPolicy);
+        lenient().when(policyService.buildProtectionDescriptors(schemaPolicy)).thenReturn(Map.of());
+    }
+
+    private ConnectionChatAccessPolicyService.EffectivePolicy martsAmountPolicy() {
+        return new ConnectionChatAccessPolicyService.EffectivePolicy(
+            true,
+            "conn-1",
+            "analyst",
+            Set.of(),
+            Set.of(),
+            Set.of("marts.fct_enrollment.amount"),
+            Set.of("marts"),
+            true,
+            true,
+            false,
+            "Only marts; redact amount",
+            List.of(),
+            List.of("marts.fct_enrollment.amount")
+        );
+    }
+
+    private UserDataAccessPolicyService.QueryGuardDecision enforce(String sql) {
+        return service.enforcePreExecution("conn-1", new QueryRequest(sql, null, null), chatContext());
+    }
+
+    private QueryExecutionContext chatContext() {
+        return new QueryExecutionContext(
+            QueryExecutionOrigin.CHAT,
+            QueryExecutionContext.MutationMode.READ_ONLY_ONLY,
+            "analyst",
+            false,
+            false
+        );
+    }
+
     private ConnectionChatAccessPolicyService.EffectivePolicy policy() {
         return new ConnectionChatAccessPolicyService.EffectivePolicy(
             true,
@@ -114,20 +600,27 @@ class UserDataAccessPolicyServiceTest {
             Set.of("PII_MEDIUM"),
             Set.of(),
             Set.of("customer_profiles.email", "customer_profiles.phone_number"),
+            Set.of(),
             true,
             true,
+            false,
             "No PII",
             List.of(),
             List.of("customer_profiles.email", "customer_profiles.phone_number")
         );
     }
 
-    private ConnectionChatAccessPolicyService.ProtectionDescriptor descriptor(String tableName, boolean protectWholeTable, String... columns) {
+    private ConnectionChatAccessPolicyService.ProtectionDescriptor descriptor(
+        String schemaName,
+        String tableName,
+        boolean protectWholeTable,
+        String... columns
+    ) {
         try {
             var constructor = ConnectionChatAccessPolicyService.ProtectionDescriptor.class
-                .getDeclaredConstructor(String.class, boolean.class, Set.class);
+                .getDeclaredConstructor(String.class, String.class, boolean.class, Set.class);
             constructor.setAccessible(true);
-            return constructor.newInstance(tableName, protectWholeTable, new java.util.LinkedHashSet<>(List.of(columns)));
+            return constructor.newInstance(schemaName, tableName, protectWholeTable, new java.util.LinkedHashSet<>(List.of(columns)));
         } catch (ReflectiveOperationException e) {
             throw new RuntimeException(e);
         }
