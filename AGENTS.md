@@ -110,6 +110,27 @@ User Message → ChatController → SpringAIChatService
 - **UI state**: Zustand stores with selector hooks (`useActiveTab`, `useDashboardActions`)
 - **Independent chat threads**: Per-tab, per-connection, stored in localStorage
 
+## Desktop Client (Electron)
+
+`desktop/` is a standalone Electron app (its own `package.json`, not part of the
+root npm project). It is a **thin client**: it never bundles the React frontend,
+it navigates a `WebContentsView` at the real DeepSQL origin, so the UI is always
+the version the server runs. Two transports resolve to that origin — direct TLS,
+or an in-process SSH local forward (`ssh2`, no `ssh` binary needed).
+
+| Path | Purpose |
+|------|---------|
+| `desktop/src/main/transport.js` | Transport manager: connect/disconnect/health per profile |
+| `desktop/src/main/tunnel.js` | SSH local forward, host-key TOFU-then-strict, auto-reconnect |
+| `desktop/src/main/tls.js` | Cert policy (system / pinned / custom CA / TOFU) for Node **and** Chromium |
+| `desktop/src/main/profiles.js` | Connection profiles; secrets only as `safeStorage` ciphertext |
+| `desktop/src/main/windows/workspace.js` | Frameless shell: native chrome + embedded DeepSQL view |
+| `desktop/src/renderer/shared/theme.css` | Mirrors `src/index.css` tokens — keep in step |
+
+No backend change was needed: `docker/nginx/default.conf` already serves the SPA,
+`/api` and `/agent-api` from one origin, which is what makes the thin-client
+model work without CORS or cookie special-casing.
+
 ## Performance & Safety Guardrails
 
 - Log size cap (500MB) via stream wrappers
