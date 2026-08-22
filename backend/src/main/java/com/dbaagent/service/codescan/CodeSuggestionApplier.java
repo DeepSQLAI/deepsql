@@ -82,15 +82,20 @@ public class CodeSuggestionApplier {
         String objectName;
         String parentObject = null;
         String target = suggestion.getTargetObject();
+        // Never silently skip — bulk-decide would report succeeded while nothing
+        // was written, and the Review UI would look like a no-op approval.
         if (target == null || target.isBlank()) {
-            log.warn("SCHEMA_DOC suggestion {} has no targetObject; skipping", suggestion.getId());
-            return;
+            throw new IllegalArgumentException(
+                "SCHEMA_DOC suggestion " + suggestion.getId() + " has no targetObject"
+            );
         }
         if (objectType == SchemaDocumentation.DocumentationType.COLUMN) {
             int dot = target.indexOf('.');
             if (dot <= 0 || dot >= target.length() - 1) {
-                log.warn("SCHEMA_DOC column suggestion {} has malformed target '{}'", suggestion.getId(), target);
-                return;
+                throw new IllegalArgumentException(
+                    "SCHEMA_DOC column suggestion " + suggestion.getId()
+                        + " has malformed target '" + target + "'"
+                );
             }
             parentObject = target.substring(0, dot);
             objectName = target.substring(dot + 1);
