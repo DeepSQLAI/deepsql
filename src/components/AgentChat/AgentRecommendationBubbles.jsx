@@ -48,7 +48,7 @@ export default function AgentRecommendationBubbles({ connectionId, proposal, onD
           onClick={() => setOpen((value) => !value)}
         >
           <BookmarkPlus size={13} />
-          {proposal.bubbleLabel || 'Save definition'}
+          {proposal.bubbleLabel || 'Save correction'}
         </button>
       </div>
       {open && (

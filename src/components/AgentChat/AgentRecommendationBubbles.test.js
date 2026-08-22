@@ -10,12 +10,12 @@ test('proposal payload for a new definition includes excerpt and bubble label', 
     scopeType: 'COLUMN',
     tableName: 'marts.dim_person',
     columnName: 'meditator_count_current',
-    bubbleLabel: 'Save definition: meditator_count_current',
+    bubbleLabel: 'Save correction: meditator_count_current',
     excerpt: 'The correct pinned metric is meditator_count_current from marts.dim_person',
     proposedNoteText: 'For marts.dim_person.meditator_count_current: The correct pinned metric is meditator_count_current from marts.dim_person',
     action: 'NEW',
   }
-  assert.ok(proposal.bubbleLabel.startsWith('Save definition:'))
+  assert.ok(proposal.bubbleLabel.startsWith('Save correction:'))
   assert.ok(proposal.excerpt.length > 20)
   assert.equal(proposal.action, 'NEW')
 })

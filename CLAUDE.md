@@ -275,9 +275,9 @@ The Agent tab must not inherit the admin MCP token. `/api/agent/session` mints a
    without `canManageContent` and then 403'd. `get_brain_context` now stamps
    `callerCapabilities`; if `doNotOffer` includes `save_brain_note`, the
    agent must not mention it. MCP `save_brain_note` also fail-closes before
-   the POST. Admins get a non-blocking suggestion bubble under the answer
-   (`POST /brain/notes/propose` + accept); overlaps with existing notes or
-   business rules merge into one intent.
+   the POST. Admins get a non-blocking suggestion bubble only after they
+   correct or teach the Agent (`POST /brain/notes/propose` + accept) — a
+   clean first answer stays quiet. Overlaps merge into one intent.
 
 ### Verification Anti-Patterns (do not repeat)
 

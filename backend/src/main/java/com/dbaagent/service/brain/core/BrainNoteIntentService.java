@@ -20,12 +20,22 @@ import java.util.regex.Pattern;
 public class BrainNoteIntentService {
 
     private static final Pattern BACKTICK_IDENT = Pattern.compile("`([^`]+)`");
-    private static final Pattern DEFINITION_CUE = Pattern.compile(
-        "\\b(metric|definition|means|pinned|use this|correct|from|count|always|filter|join)\\b",
-        Pattern.CASE_INSENSITIVE
-    );
     private static final Set<String> STOP_TABLES = Set.of(
         "information_schema", "pg_catalog", "mysql", "sys", "performance_schema"
+    );
+    /**
+     * User follow-ups that teach or correct. Phrase contains() — not a fat
+     * regex — so a long Agent transcript cannot ReDoS the propose path.
+     */
+    private static final List<String> FEEDBACK_PHRASES = List.of(
+        "that's wrong", "that is wrong", "that's not", "that is not",
+        "incorrect", "actually ", "instead", "should be", "should use",
+        "you should", "don't use", "do not use", "never use",
+        "always use", "always filter", "always join", "always exclude",
+        "we use", "we always", "we never", "not that", "not the ",
+        "pin this", "pin that", "remember this", "remember:",
+        "save this", "save that", "use this", "use that",
+        "too high", "too low", "off by", "the right "
     );
 
     public record ContextItem(
@@ -50,15 +60,25 @@ public class BrainNoteIntentService {
     ) {}
 
     public Optional<Proposal> proposeFromTurn(String question, String answer, List<ContextItem> existing) {
-        if (answer == null || answer.isBlank()) {
+        return proposeFromTurn(question, answer, existing, null);
+    }
+
+    /**
+     * Only draft a note when the user just corrected or taught after a prior
+     * Agent answer. A clean first-turn definition is not a recommendation.
+     */
+    public Optional<Proposal> proposeFromTurn(
+        String question,
+        String answer,
+        List<ContextItem> existing,
+        String priorAnswer
+    ) {
+        if (!isCorrectionTurn(question, priorAnswer)) {
             return Optional.empty();
         }
-        String cleaned = stripMarkdownNoise(answer);
-        if (cleaned.length() < 24) {
-            return Optional.empty();
-        }
-        String combined = (question == null ? "" : question) + "\n" + cleaned;
-        if (!DEFINITION_CUE.matcher(combined).find() && !looksLikePinnedDefinition(cleaned)) {
+        String cleaned = stripMarkdownNoise(nvl(answer));
+        String combined = nvl(question) + "\n" + cleaned;
+        if (combined.trim().length() < 24) {
             return Optional.empty();
         }
 
@@ -68,13 +88,13 @@ public class BrainNoteIntentService {
         }
         String tableName = target.get()[0];
         String columnName = target.get()[1];
-        String excerpt = excerpt(cleaned);
+        String excerpt = excerpt(nvl(question) + (cleaned.isBlank() ? "" : " " + cleaned));
         String proposed = columnName != null
             ? "For " + tableName + "." + columnName + ": " + excerpt
             : "For " + tableName + ": " + excerpt;
         String label = columnName != null
-            ? "Save definition: " + columnName
-            : "Save definition: " + tableName;
+            ? "Save correction: " + columnName
+            : "Save correction: " + tableName;
 
         Proposal draft = new Proposal(
             columnName != null ? "COLUMN" : "TABLE",
@@ -89,6 +109,30 @@ public class BrainNoteIntentService {
             null
         );
         return Optional.of(resolveOverlap(draft, existing == null ? List.of() : existing));
+    }
+
+    public boolean isCorrectionTurn(String question, String priorAnswer) {
+        if (priorAnswer == null || priorAnswer.isBlank()) {
+            return false;
+        }
+        return looksLikeUserFeedback(question);
+    }
+
+    public boolean looksLikeUserFeedback(String question) {
+        if (question == null || question.isBlank()) {
+            return false;
+        }
+        String q = question.toLowerCase(Locale.ROOT).trim();
+        if (q.startsWith("no,") || q.startsWith("no ") || q.startsWith("no-")
+            || q.startsWith("no—") || q.startsWith("nope")) {
+            return true;
+        }
+        for (String phrase : FEEDBACK_PHRASES) {
+            if (q.contains(phrase)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public Proposal resolveOverlap(Proposal draft, List<ContextItem> existing) {
@@ -333,9 +377,8 @@ public class BrainNoteIntentService {
         return false;
     }
 
-    private boolean looksLikePinnedDefinition(String answer) {
-        return answer.toLowerCase(Locale.ROOT).contains("pinned")
-            || answer.toLowerCase(Locale.ROOT).contains("correct");
+    private static String nvl(String value) {
+        return value == null ? "" : value;
     }
 
     private String excerpt(String text) {

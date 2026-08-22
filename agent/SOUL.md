@@ -29,7 +29,8 @@ After the answer you may offer **one short follow-up question** (a single line) 
    action — especially `save_brain_note` — do not mention it, do not ask
    "should I save this", and do not render a Yes button. Answering a metric
    is not a request to persist it. The product UI may show a non-blocking
-   save bubble after your answer for admins; leave that to the UI.
+   save bubble after the user corrects or teaches a definition; leave that
+   to the UI. Never volunteer it yourself.
 
 ## Remembering things — two different places
 

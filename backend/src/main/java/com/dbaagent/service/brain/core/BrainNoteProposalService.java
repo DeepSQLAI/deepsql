@@ -29,7 +29,12 @@ public class BrainNoteProposalService {
             return Optional.empty();
         }
         List<BrainNoteIntentService.ContextItem> context = loadContext(request.getConnectionId());
-        return intentService.proposeFromTurn(request.getQuestion(), request.getAnswer(), context)
+        return intentService.proposeFromTurn(
+                request.getQuestion(),
+                request.getAnswer(),
+                context,
+                request.getPriorAnswer()
+            )
             .filter(proposal -> !"SKIP".equals(proposal.action()))
             .map(this::toResponse);
     }

@@ -7,6 +7,11 @@ import { brainAPI } from '@/lib/api/client'
 import AgentMarkdown from './AgentMarkdown'
 import AgentRecommendationBubbles from './AgentRecommendationBubbles'
 import { sanitizeAssistantAnswer } from './sanitizeAssistantAnswer'
+import {
+  isSuppressedProposal,
+  proposalTargetKey,
+  shouldOfferBrainSuggestion,
+} from './shouldOfferBrainSuggestion'
 import styles from './AgentChatPanel.module.css'
 
 function updateLast(messages, updater) {
@@ -14,6 +19,15 @@ function updateLast(messages, updater) {
   const copy = messages.slice()
   copy[copy.length - 1] = updater(copy[copy.length - 1])
   return copy
+}
+
+function findPriorAssistant(messages) {
+  for (let i = messages.length - 3; i >= 0; i--) {
+    if (messages[i]?.role === 'assistant' && messages[i].content) {
+      return messages[i]
+    }
+  }
+  return null
 }
 
 function toolLabel(d) {
@@ -60,6 +74,7 @@ export default function AgentChatPanel({ connectionId, connectionName, canManage
   const streamIdRef = useRef(null)
   const listRef = useRef(null)
   const firstMsgRef = useRef(true)
+  const suppressedTargetsRef = useRef(new Set())
   const profileRef = useRef(null)   // resolved agent profile (for new sessions)
   const convIdRef = useRef(null)    // backend conversation id (the per-user index row)
   const restoredRef = useRef(false) // guards the persist effect until boot finishes
@@ -170,8 +185,8 @@ export default function AgentChatPanel({ connectionId, connectionName, canManage
           setMessages((m) => updateLast(m, (a) => ({ ...a, streaming: false })))
           setSending(false)
           esRef.current = null
-          // Recommendation bubbles load after the turn so the composer is
-          // already free. Failures here must never block chat.
+          // Correction chips load after the turn so the composer is already
+          // free. Clean first answers stay quiet. Failures never block chat.
           if (canManageContent) {
             queueMicrotask(() => proposeFromLastTurn())
           }
@@ -187,15 +202,30 @@ export default function AgentChatPanel({ connectionId, connectionName, canManage
   const proposeFromLastTurn = () => {
     setMessages((current) => {
       const last = current[current.length - 1]
-      const prev = current[current.length - 2]
+      const user = current[current.length - 2]
       if (!last || last.role !== 'assistant' || last.error || last.proposal) {
         return current
       }
+      const priorAssistant = findPriorAssistant(current)
+      const hasUnsavedProposal = current.some((m) => m.proposal && !m.proposal.status)
+      if (!shouldOfferBrainSuggestion({
+        userText: user?.role === 'user' ? user.content : '',
+        priorAssistantText: priorAssistant?.content || '',
+        hasUnsavedProposal,
+      })) {
+        return current
+      }
       const answer = sanitizeAssistantAnswer(last.content || '')
-      const question = prev?.role === 'user' ? prev.content : ''
-      brainAPI.proposeNoteFromTurn({ connectionId, question, answer })
+      const question = user?.role === 'user' ? user.content : ''
+      brainAPI.proposeNoteFromTurn({
+        connectionId,
+        question,
+        answer,
+        priorAnswer: priorAssistant.content,
+      })
         .then((proposal) => {
           if (!proposal) return
+          if (isSuppressedProposal(proposal, [...suppressedTargetsRef.current])) return
           setMessages((msgs) => updateLast(msgs, (assistant) => (
             assistant.proposal ? assistant : { ...assistant, proposal }
           )))
@@ -205,7 +235,9 @@ export default function AgentChatPanel({ connectionId, connectionName, canManage
     })
   }
 
-  const patchLastProposal = (patch) => {
+  const suppressAndPatch = (proposal, patch) => {
+    const key = proposalTargetKey(proposal)
+    if (key) suppressedTargetsRef.current.add(key)
     setMessages((m) => updateLast(m, (a) => (
       a.proposal ? { ...a, proposal: { ...a.proposal, ...patch } } : a
     )))
@@ -290,8 +322,8 @@ export default function AgentChatPanel({ connectionId, connectionName, canManage
                   <AgentRecommendationBubbles
                     connectionId={connectionId}
                     proposal={m.proposal}
-                    onDismiss={() => patchLastProposal({ status: 'dismissed' })}
-                    onAccepted={() => patchLastProposal({ status: 'saved' })}
+                    onDismiss={() => suppressAndPatch(m.proposal, { status: 'dismissed' })}
+                    onAccepted={() => suppressAndPatch(m.proposal, { status: 'saved' })}
                   />
                 )}
               </div>

@@ -9,34 +9,66 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class BrainNoteIntentServiceTest {
 
+    private static final String PRIOR_WRONG =
+        "There are 12,004 people in dim_person.";
+    private static final String CORRECTION =
+        "No, that's wrong — the pinned metric is `meditator_count_current` from `marts.dim_person`.";
+    private static final String AGENT_AFTER = "290066 meditators on that pinned metric.";
+
     private final BrainNoteIntentService service = new BrainNoteIntentService();
 
     @Test
-    void proposeFromTurn_extractsQualifiedTableAndDefinition() {
+    void proposeFromTurn_staysQuietWhenTheFirstAnswerNeedsNoFeedback() {
         Optional<BrainNoteIntentService.Proposal> proposal = service.proposeFromTurn(
             "what is the meditator count?",
             "The correct pinned metric is `meditator_count_current` from `marts.dim_person`, totaling 290066 meditators.",
-            List.of()
+            List.of(),
+            null
+        );
+
+        assertThat(proposal).isEmpty();
+    }
+
+    @Test
+    void proposeFromTurn_staysQuietWhenTheUserJustThanksTheAgent() {
+        Optional<BrainNoteIntentService.Proposal> proposal = service.proposeFromTurn(
+            "thanks, that's right",
+            "Glad it helped.",
+            List.of(),
+            "The correct pinned metric is `meditator_count_current` from `marts.dim_person`."
+        );
+
+        assertThat(proposal).isEmpty();
+    }
+
+    @Test
+    void proposeFromTurn_offersAfterUserCorrectsTheAgent() {
+        Optional<BrainNoteIntentService.Proposal> proposal = service.proposeFromTurn(
+            CORRECTION,
+            AGENT_AFTER,
+            List.of(),
+            PRIOR_WRONG
         );
 
         assertThat(proposal).isPresent();
         assertThat(proposal.get().action()).isEqualTo("NEW");
         assertThat(proposal.get().tableName()).isEqualTo("marts.dim_person");
         assertThat(proposal.get().columnName()).isEqualTo("meditator_count_current");
-        assertThat(proposal.get().bubbleLabel()).contains("meditator_count_current");
-        assertThat(proposal.get().excerpt()).contains("pinned metric");
+        assertThat(proposal.get().bubbleLabel()).contains("correction");
+        assertThat(proposal.get().excerpt()).contains("meditator_count_current");
         assertThat(proposal.get().proposedNoteText()).contains("marts.dim_person");
     }
 
     @Test
     void proposeFromTurn_skipsWhenExistingNoteIsSameIntent() {
-        String existing = "For marts.dim_person.meditator_count_current: The correct pinned metric is meditator_count_current from marts.dim_person";
+        String existing = "For marts.dim_person.meditator_count_current: No, that's wrong — the pinned metric is meditator_count_current from marts.dim_person. 290066 meditators on that pinned metric.";
         Optional<BrainNoteIntentService.Proposal> proposal = service.proposeFromTurn(
-            "what is the meditator count?",
-            "The correct pinned metric is `meditator_count_current` from `marts.dim_person`.",
+            CORRECTION,
+            AGENT_AFTER,
             List.of(new BrainNoteIntentService.ContextItem(
                 "note-1", "marts.dim_person", "meditator_count_current", existing, "brain note"
-            ))
+            )),
+            PRIOR_WRONG
         );
 
         assertThat(proposal).isPresent();
@@ -47,15 +79,16 @@ class BrainNoteIntentServiceTest {
     @Test
     void proposeFromTurn_mergesOverlappingContextIntoOneIntent() {
         Optional<BrainNoteIntentService.Proposal> proposal = service.proposeFromTurn(
-            "what is the meditator count?",
-            "The correct pinned metric is `meditator_count_current` from `marts.dim_person`, excluding ambiguous matches.",
+            "No, that's wrong — the pinned metric is `meditator_count_current` from `marts.dim_person`, excluding ambiguous matches.",
+            AGENT_AFTER,
             List.of(new BrainNoteIntentService.ContextItem(
                 "note-1",
                 "marts.dim_person",
                 "meditator_count_current",
                 "dim_person is the person dimension used for IRC region rollups.",
                 "brain note"
-            ))
+            )),
+            PRIOR_WRONG
         );
 
         assertThat(proposal).isPresent();
@@ -68,15 +101,16 @@ class BrainNoteIntentServiceTest {
     @Test
     void proposeFromTurn_matchesBareTableNameAgainstQualifiedContext() {
         Optional<BrainNoteIntentService.Proposal> proposal = service.proposeFromTurn(
-            "what is the meditator count?",
-            "The correct pinned metric is `meditator_count_current` from `marts.dim_person`, excluding ambiguous matches.",
+            "No, that's wrong — the pinned metric is `meditator_count_current` from `marts.dim_person`, excluding ambiguous matches.",
+            AGENT_AFTER,
             List.of(new BrainNoteIntentService.ContextItem(
                 "rule-1",
                 "dim_person",
                 "meditator_count_current",
                 "dim_person is the person dimension used for IRC region rollups.",
                 "business rule"
-            ))
+            )),
+            PRIOR_WRONG
         );
 
         assertThat(proposal).isPresent();
