@@ -39,7 +39,10 @@ const EXPLAIN_PREFIX_PATTERN = /^EXPLAIN(?:\s*\([^)]*\))?/;
 const TOOL_DEFINITIONS = [
   {
     name: "list_connections",
-    description: "List DeepSQL database connections available to this user.",
+    description:
+      "List DeepSQL database connections available to this user. Each row includes "
+      + "canManageContent / canManageConfig — if canManageContent is false, do not "
+      + "offer save_brain_note, APPLY index changes, or other writes on that connection.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -79,7 +82,10 @@ const TOOL_DEFINITIONS = [
   {
     name: "get_brain_context",
     description:
-      "Retrieve DeepSQL's brain context for a question: relevant tables, columns, FKs, training docs, business rules, anti-patterns, and embedding-ranked snippets. Use this to give your own coding agent the same retrieval context the DeepSQL agent uses, then have your agent generate the SQL/answer.",
+      "Retrieve DeepSQL's brain context for a question: relevant tables, columns, FKs, training docs, business rules, anti-patterns, and embedding-ranked snippets. "
+      + "The result also includes callerCapabilities for this connection — read doNotOffer "
+      + "before suggesting any write (shared brain notes, APPLY indexes, SQL DML/DDL). "
+      + "Never volunteer an action listed there.",
     inputSchema: {
       type: "object",
       properties: {
@@ -157,7 +163,10 @@ const TOOL_DEFINITIONS = [
   {
     name: "list_brain_recommendations",
     description:
-      "List the brain's AI-proposed recommendations for a connection — high-value tables/columns DeepSQL suggests documenting, each with a priority (P0/P1…), the reason, supporting indicators, and a suggested prompt to explore. This is the company-context review queue: an admin reviews these and accepts the good ones with save_brain_note. Returns { suggestions, totalCount } (totalCount reflects the requested limit, not an absolute total).",
+      "List the brain's AI-proposed recommendations for a connection — high-value tables/columns DeepSQL suggests documenting, each with a priority (P0/P1…), the reason, supporting indicators, and a suggested prompt to explore. "
+      + "This is an admin review queue. Do not present it as something the current user can accept "
+      + "unless callerCapabilities.canWriteSharedBrainNotes is true (from get_brain_context / list_connections). "
+      + "Returns { suggestions, totalCount } (totalCount reflects the requested limit, not an absolute total).",
     inputSchema: {
       type: "object",
       properties: {
@@ -171,7 +180,12 @@ const TOOL_DEFINITIONS = [
   {
     name: "save_brain_note",
     description:
-      "Accept/save a fact into the connection's BRAIN — shared, company-level context that grounds EVERY future answer for this connection (not a per-user preference). Use this to accept a recommendation from list_brain_recommendations, or to record any durable fact about a table/column. Scope is TABLE (tableName only) or COLUMN (tableName + columnName). Requires manage-content permission on the connection (admin) — the backend enforces and audits it. NOTE: an individual's personal preference (how *they* like answers formatted, a private shortcut) belongs in a DeepSQL skill on their own profile, NOT here — this writes to the shared brain everyone sees.",
+      "Accept/save a fact into the connection's BRAIN — shared, company-level context that grounds EVERY future answer for this connection (not a per-user preference). "
+      + "ONLY call this when the user explicitly asked to remember/pin a team definition AND "
+      + "list_connections.canManageContent / get_brain_context.callerCapabilities.canWriteSharedBrainNotes is true. "
+      + "Never volunteer this after answering a data question. Never ask 'should I save this as a shared brain note' "
+      + "when the caller cannot write. Scope is TABLE (tableName only) or COLUMN (tableName + columnName). "
+      + "Personal preferences belong in a DeepSQL skill, not here.",
     inputSchema: {
       type: "object",
       properties: {
@@ -589,9 +603,9 @@ const TOOL_DEFINITIONS = [
     name: "get_current_user",
     description:
       "Return the authenticated user behind the current MCP token: username, role, "
-      + "and the DeepSQL host this MCP server is bound to. Use this when the agent "
-      + "needs to know whether the caller is admin-capable before suggesting a "
-      + "DDL/DML run, or when explaining role-based restrictions to the user.",
+      + "permissions, and callerCapabilities (what this user can actually enforce). "
+      + "Read doNotOffer before suggesting a write. Role ADMIN can mutate SQL; "
+      + "shared brain notes and APPLY indexes also need canManageContent on the connection.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -1359,15 +1373,86 @@ async function callDeepSqlApi(config, path, options = {}) {
   return payload;
 }
 
+function asConnectionList(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.items)) return payload.items;
+  return [];
+}
+
+function findConnection(payload, connectionId) {
+  const id = String(connectionId || "").trim();
+  if (!id) return null;
+  return asConnectionList(payload).find((connection) =>
+    (connection.id || connection.connectionId) === id
+  ) || null;
+}
+
+function isTruthyFlag(value) {
+  return value === true || value === "true";
+}
+
+/**
+ * What the current caller can actually enforce on one connection.
+ * Fail closed when the connection row is missing: offering a write the
+ * backend will 403 is worse than staying silent.
+ */
+function buildCallerCapabilities(connection, user = null) {
+  const role = user?.role != null ? String(user.role).toUpperCase() : null;
+  const canManageContent = isTruthyFlag(connection?.canManageContent);
+  const canManageConfig = isTruthyFlag(connection?.canManageConfig);
+  const canMutateSql = role === "ADMIN";
+  const doNotOffer = [];
+  if (!canManageContent) {
+    doNotOffer.push(
+      "save_brain_note",
+      "accept list_brain_recommendations",
+      "apply_index_recommendation APPLY",
+      "reinit_connection_brain",
+    );
+  }
+  if (!canManageConfig) {
+    doNotOffer.push("set_growth_config");
+  }
+  if (!canMutateSql) {
+    doNotOffer.push("SQL DML", "SQL DDL");
+  }
+  return {
+    username: user?.username || null,
+    role,
+    connectionId: connection?.id || connection?.connectionId || null,
+    accessLevel: connection?.accessLevel || null,
+    canManageContent,
+    canManageConfig,
+    canWriteSharedBrainNotes: canManageContent,
+    canMutateSql,
+    doNotOffer,
+  };
+}
+
+function summarizeCallerCapabilities(caps) {
+  if (!caps) return "";
+  if (caps.canWriteSharedBrainNotes && caps.canMutateSql) {
+    return "Caller can write shared brain notes and mutate SQL on this connection.";
+  }
+  const banned = (caps.doNotOffer || []).join("; ");
+  return (
+    `Caller cannot enforce write actions on this connection `
+    + `(manage-content=${caps.canManageContent ? "yes" : "no"}, role=${caps.role || "unknown"}). `
+    + `Do not offer: ${banned}.`
+  );
+}
+
 function summarizeConnections(connections) {
-  const lines = connections.map((connection) => {
+  const list = asConnectionList(connections);
+  const lines = list.map((connection) => {
     const name = connection.connectionName || connection.name || connection.id;
     const type = connection.dbType || "unknown";
-    return `- ${name} (${type}) — ${connection.id}`;
+    const content = isTruthyFlag(connection.canManageContent) ? "manage-content" : "read-only content";
+    return `- ${name} (${type}) — ${connection.id} [${content}]`;
   });
 
   return lines.length
-    ? `Found ${connections.length} connection(s):\n${lines.join("\n")}`
+    ? `Found ${list.length} connection(s):\n${lines.join("\n")}`
     : "No connections were returned by DeepSQL.";
 }
 
@@ -1401,7 +1486,8 @@ function summarizeBrainContext(payload) {
     const total =
       payload.totalResults ?? (Array.isArray(payload.results) ? payload.results.length : 0);
     const tableCount = Array.isArray(payload.tablesCovered) ? payload.tablesCovered.length : 0;
-    return `Retrieved ${total} ranked snippet(s) covering ${tableCount} table(s).`;
+    const caps = summarizeCallerCapabilities(payload.callerCapabilities);
+    return `Retrieved ${total} ranked snippet(s) covering ${tableCount} table(s).${caps ? ` ${caps}` : ""}`;
   }
   // /training/context rich shape (RetrievedContextResult)
   const tables = Array.isArray(payload.ragTableNames)
@@ -1414,7 +1500,9 @@ function summarizeBrainContext(payload) {
     : "";
   const intent = payload.retrievalIntent || "n/a";
   const skipped = payload.skipped ? ` (skipped: ${payload.skipReason || "?"})` : "";
-  return `Brain context: intent=${intent}, topK=${payload.retrievalTopK ?? "?"}, results=${payload.resultCount ?? 0}, tables=${tables}${types ? `, types[${types}]` : ""}${skipped}.`;
+  const caps = summarizeCallerCapabilities(payload.callerCapabilities);
+  const capLine = caps ? ` ${caps}` : "";
+  return `Brain context: intent=${intent}, topK=${payload.retrievalTopK ?? "?"}, results=${payload.resultCount ?? 0}, tables=${tables}${types ? `, types[${types}]` : ""}${skipped}.${capLine}`;
 }
 
 function summarizeBusinessRules(payload) {
@@ -1429,13 +1517,35 @@ function summarizeRelationships(payload) {
   return `${list.length} relationship(s) (${high} high-confidence).`;
 }
 
+function summarizeCurrentUser(payload) {
+  if (!payload || typeof payload !== "object") {
+    return "Current user unavailable.";
+  }
+  const name = payload.username || payload.email || "unknown";
+  const role = payload.role || "unknown";
+  const caps = summarizeCallerCapabilities(payload.callerCapabilities);
+  if (caps) {
+    return `Authenticated as ${name} (role ${role}). ${caps}`;
+  }
+  return `Authenticated as ${name} (role ${role}). Check list_connections.canManageContent before offering writes.`;
+}
+
 function summarizeBrainRecommendations(payload) {
   const list = (payload && payload.suggestions) || [];
-  if (!list.length) return "No brain recommendations pending review for this connection.";
+  const caps = payload && payload.callerCapabilities;
+  const suffix = caps && !caps.canWriteSharedBrainNotes
+    ? " This caller cannot accept them — do not offer save_brain_note."
+    : "";
+  if (!list.length) {
+    return `No brain recommendations pending review for this connection.${suffix}`;
+  }
   const top = list
     .slice(0, 5)
     .map((s) => `${s.priority || ""} ${s.columnName ? `${s.tableName}.${s.columnName}` : s.tableName}`.trim());
-  return `${payload.totalCount ?? list.length} recommendation(s) to review. Top: ${top.join("; ")}. Accept the good ones with save_brain_note.`;
+  const accept = suffix
+    ? suffix
+    : " Accept the good ones with save_brain_note.";
+  return `${payload.totalCount ?? list.length} recommendation(s) to review. Top: ${top.join("; ")}.${accept}`;
 }
 
 function summarizeBrainNoteSaved(payload) {
@@ -1805,6 +1915,9 @@ function buildToolResult(name, payload, extra = {}) {
     case "list_connections":
       summary = summarizeConnections(payload);
       break;
+    case "get_current_user":
+      summary = summarizeCurrentUser(payload);
+      break;
     case "get_schema":
       summary = summarizeSchema(payload);
       break;
@@ -1910,9 +2023,19 @@ function buildToolError(message, extra = {}) {
 // list changes rarely; a 30s TTL keeps it fresh enough.
 const CONNECTIONS_CACHE_TTL_MS = 30000;
 let _connectionsCache = null; // { key, ts, payload }
+let _currentUserCache = null; // { key, ts, payload }
+
+function resetToolCaches() {
+  _connectionsCache = null;
+  _currentUserCache = null;
+}
+
+function cacheKey(config) {
+  return `${(config && config.baseUrl) || ""}|${getAuthToken(config)}`;
+}
 
 async function fetchConnectionsCached(config) {
-  const key = `${(config && config.baseUrl) || ""}|${getAuthToken(config)}`;
+  const key = cacheKey(config);
   if (_connectionsCache && _connectionsCache.key === key
       && Date.now() - _connectionsCache.ts < CONNECTIONS_CACHE_TTL_MS) {
     return _connectionsCache.payload;
@@ -1920,6 +2043,41 @@ async function fetchConnectionsCached(config) {
   const payload = await callDeepSqlApi(config, "/connections");
   _connectionsCache = { key, ts: Date.now(), payload };
   return payload;
+}
+
+async function fetchCurrentUserCached(config) {
+  const key = cacheKey(config);
+  if (_currentUserCache && _currentUserCache.key === key
+      && Date.now() - _currentUserCache.ts < CONNECTIONS_CACHE_TTL_MS) {
+    return _currentUserCache.payload;
+  }
+  try {
+    const payload = await callDeepSqlApi(config, "/auth/me");
+    _currentUserCache = { key, ts: Date.now(), payload };
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveCallerCapabilities(config, connectionId) {
+  const [connections, user] = await Promise.all([
+    fetchConnectionsCached(config).catch(() => []),
+    fetchCurrentUserCached(config),
+  ]);
+  const connection = findConnection(connections, connectionId);
+  return buildCallerCapabilities(connection, user);
+}
+
+function attachCallerCapabilities(payload, caps) {
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    payload.callerCapabilities = caps;
+    return payload;
+  }
+  return {
+    result: payload,
+    callerCapabilities: caps,
+  };
 }
 
 async function handleToolCall(config, name, args = {}) {
@@ -1969,7 +2127,8 @@ async function handleToolCall(config, name, args = {}) {
           { method: "POST", json: { question } },
         );
       }
-      return buildToolResult(name, payload);
+      const caps = await resolveCallerCapabilities(config, connectionId);
+      return buildToolResult(name, attachCallerCapabilities(payload, caps));
     }
 
     case "list_business_rules": {
@@ -2018,7 +2177,8 @@ async function handleToolCall(config, name, args = {}) {
         config,
         `/brain/notes/suggestions/${encodeURIComponent(connectionId)}?limit=${limit}`,
       );
-      return buildToolResult(name, payload);
+      const caps = await resolveCallerCapabilities(config, connectionId);
+      return buildToolResult(name, attachCallerCapabilities(payload, caps));
     }
 
     case "save_brain_note": {
@@ -2029,7 +2189,14 @@ async function handleToolCall(config, name, args = {}) {
       if (!tableName) return buildToolError("tableName is required.");
       if (!noteText) return buildToolError("noteText is required.");
       const columnName = args.columnName ? String(args.columnName).trim() : null;
-      // Backend enforces manage-content permission (admin) + audits the write.
+      const caps = await resolveCallerCapabilities(config, connectionId);
+      if (!caps.canWriteSharedBrainNotes) {
+        return buildToolError(
+          "This account cannot write shared DeepSQL brain notes on this connection. "
+            + "Do not offer to save a shared brain note and do not ask the user if they want one.",
+          { errorCode: "POLICY_CONTENT_WRITE_DENIED", callerCapabilities: caps },
+        );
+      }
       const payload = await callDeepSqlApi(config, "/brain/notes", {
         method: "POST",
         json: {
@@ -2285,7 +2452,22 @@ async function handleToolCall(config, name, args = {}) {
 
     case "get_current_user": {
       const payload = await callDeepSqlApi(config, "/auth/me");
-      return buildToolResult(name, payload);
+      let connections = [];
+      try {
+        connections = asConnectionList(await fetchConnectionsCached(config));
+      } catch {
+        connections = [];
+      }
+      const writable = connections.filter((c) => isTruthyFlag(c.canManageContent));
+      const caps = buildCallerCapabilities(writable[0] || connections[0] || null, payload);
+      if (connections.length > 0 && writable.length === 0) {
+        caps.canWriteSharedBrainNotes = false;
+        caps.canManageContent = false;
+        if (!caps.doNotOffer.includes("save_brain_note")) {
+          caps.doNotOffer.unshift("save_brain_note");
+        }
+      }
+      return buildToolResult(name, attachCallerCapabilities(payload, caps));
     }
 
     case "test_connection": {
@@ -2553,5 +2735,10 @@ module.exports = {
   summarizeSlowQueryOptimization,
   summarizeTableGrowth,
   summarizeTrackedQueries,
+  summarizeCallerCapabilities,
+  summarizeConnections,
+  summarizeCurrentUser,
+  buildCallerCapabilities,
+  resetToolCaches,
   validateReadOnlySql,
 };

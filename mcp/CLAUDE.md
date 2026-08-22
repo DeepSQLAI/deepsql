@@ -60,7 +60,7 @@ in this version; ask before mid-session admin work.
 
 | Tool | Purpose |
 |---|---|
-| `list_connections` | List databases the user has access to. Always call this first — you need IDs for everything else. |
+| `list_connections` | List databases the user has access to. Always call this first — you need IDs for everything else. Each row includes `canManageContent`; if false, do not offer writes on that connection. |
 | `get_schema` | Cached schema metadata (tables, columns, FKs, types). Cheap and fast — call freely. |
 | `get_database_objects` | Tables, views, functions, procedures. Use when you need DDL-level objects, not just columns. |
 | `get_brain_context` | **Your primary retrieval tool.** Given a question, returns the tables/columns/FKs/training docs/business rules/anti-patterns most relevant to it. |
@@ -68,7 +68,7 @@ in this version; ask before mid-session admin work.
 | `get_relationships` | Inferred + validated foreign keys with confidence scores. Many real DBs lack declared FKs; this fills the gap. |
 | `get_anti_patterns` | Schema-level (`kind=table`) or query-level (`kind=query`) anti-patterns. |
 | `list_brain_recommendations` | The brain's AI-proposed notes to review for a connection (priority, reason, indicators, suggested prompt). The company-context review queue. |
-| `save_brain_note` | **Accept/save a fact into the shared brain** — grounds every future answer for the connection. TABLE- or COLUMN-scoped. Admin (manage-content), audited. Personal preferences belong in a DeepSQL skill, not here. |
+| `save_brain_note` | **Accept/save a fact into the shared brain** — only when the user asked to remember it AND `callerCapabilities.canWriteSharedBrainNotes` is true. Never volunteer after answering a question. |
 | `list_brain_notes` | Knowledge already saved to the brain (filter by table/column; can be thousands). |
 | `analyze_slow_queries` | Recent slow queries with fingerprints, durations, examples. Read-only; doesn't trigger new work. |
 | `get_slow_query_timeline` | Day-by-day timeline for one query from the 30-day analytics store — call count, mean/max time, regression factor per day. Identify the query by its fingerprint (the `queryId` from `analyze_slow_queries`). Answers "is this query getting slower". |

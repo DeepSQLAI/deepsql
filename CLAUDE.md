@@ -269,6 +269,13 @@ The Agent tab must not inherit the admin MCP token. `/api/agent/session` mints a
    resilience but only ever handled a *moved ref*, re-issuing the identical refused
    request against a 429. A fallback that fails the same way as the thing it backs
    up is not a fallback.
+7. **Never offer a write the caller cannot enforce.** `SOUL.md` once asked
+   "Should everyone on this database see this?" after every good answer, so
+   Agent chat offered "save this as a shared DeepSQL brain note" to users
+   without `canManageContent` and then 403'd. `get_brain_context` now stamps
+   `callerCapabilities`; if `doNotOffer` includes `save_brain_note`, the
+   agent must not mention it. MCP `save_brain_note` also fail-closes before
+   the POST.
 
 ### Verification Anti-Patterns (do not repeat)
 
