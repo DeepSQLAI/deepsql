@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; script-src 'self'; connect-src 'none'"
+    />
+    <title>DeepSQL</title>
+    <link rel="stylesheet" href="../shared/theme.css" />
+    <link rel="stylesheet" href="chrome.css" />
+  </head>
+  <body>
+    <div id="bar" class="bar">
+      <div id="mac-inset" class="mac-inset" hidden></div>
+
+      <div class="nav">
+        <button id="back" class="icon-btn" title="Back">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
+        <button id="forward" class="icon-btn" title="Forward">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+        </button>
+        <button id="reload" class="icon-btn" title="Reload">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+            <path d="M21 3v6h-6" />
+          </svg>
+        </button>
+      </div>
+
+      <button id="identity" class="identity" title="Switch connection">
+        <span class="identity-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#fff"
+               stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <ellipse cx="12" cy="5" rx="9" ry="3" />
+            <path d="M3 5V19A9 3 0 0 0 21 19V5" />
+            <path d="M3 12A9 3 0 0 0 21 12" />
+          </svg>
+        </span>
+        <span id="identity-name" class="identity-name">DeepSQL</span>
+        <span id="transport-tag" class="tag">TLS</span>
+        <svg class="chevron" viewBox="0 0 24 24" width="13" height="13" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
+      <div id="health" class="health" title="Round-trip time to the DeepSQL health endpoint">
+        <span id="health-dot" class="health-dot"></span>
+        <span id="health-text" class="health-text">checking…</span>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="actions">
+        <button id="open-external" class="icon-btn" title="Open in browser">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            <path d="M15 3h6v6" />
+            <path d="M10 14L21 3" />
+          </svg>
+        </button>
+        <button id="disconnect" class="text-btn" title="Disconnect and return to connections">
+          Disconnect
+        </button>
+      </div>
+
+      <div id="window-controls" class="window-controls" hidden>
+        <button id="win-min" class="win-btn" title="Minimise">
+          <svg viewBox="0 0 12 12" width="11" height="11"><path d="M2 6h8" stroke="currentColor" stroke-width="1.2" /></svg>
+        </button>
+        <button id="win-max" class="win-btn" title="Maximise">
+          <svg viewBox="0 0 12 12" width="11" height="11"><rect x="2.5" y="2.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.2" /></svg>
+        </button>
+        <button id="win-close" class="win-btn win-close" title="Close">
+          <svg viewBox="0 0 12 12" width="11" height="11"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.2" /></svg>
+        </button>
+      </div>
+    </div>
+
+    <div id="banner" class="banner" hidden>
+      <span id="banner-text"></span>
+      <button id="banner-retry" class="banner-action">Retry</button>
+    </div>
+
+    <script src="chrome.js"></script>
+  </body>
+</html>

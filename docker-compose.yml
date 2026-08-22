@@ -94,8 +94,12 @@ services:
       ENCRYPTION_KEYS: ${ENCRYPTION_KEYS:-}
       ENCRYPTION_KEY_ID: ${ENCRYPTION_KEY_ID:-}
 
-      # CORS — allow the frontend service (and optional custom domain)
-      cors.allowed.origins: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      # CORS — allow the frontend service (and optional custom domain).
+      # Keep the loopback patterns when you set CORS_ALLOWED_ORIGINS: this
+      # variable REPLACES the list, and the desktop client's SSH tunnel serves
+      # the app from http://127.0.0.1:<sticky port>. Dropping them makes every
+      # tunnel login fail with a bare 403 "Invalid CORS request".
+      cors.allowed.origins: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:*,http://localhost:*}
 
       # DeepSQL Agent — compose-network URLs (Agent tab, dashboards, Slack/CLI)
       AGENT_WEBUI_URL: ${AGENT_WEBUI_URL:-http://deepsql-agent:8787}

@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; script-src 'self'; connect-src 'none'"
+    />
+    <title>DeepSQL</title>
+    <link rel="stylesheet" href="../shared/theme.css" />
+    <link rel="stylesheet" href="launcher.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <!-- ── Sidebar ─────────────────────────────────────────────────── -->
+      <aside class="sidebar">
+        <div class="drag-strip"></div>
+        <header class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#fff"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <ellipse cx="12" cy="5" rx="9" ry="3" />
+              <path d="M3 5V19A9 3 0 0 0 21 19V5" />
+              <path d="M3 12A9 3 0 0 0 21 12" />
+            </svg>
+          </span>
+          <span class="brand-text">DeepSQL</span>
+        </header>
+
+        <div class="rail-label">Connections</div>
+        <nav id="profile-list" class="profile-list" aria-label="Saved connections"></nav>
+
+        <div class="sidebar-footer">
+          <button id="new-connection" class="new-connection">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            New connection
+          </button>
+          <div id="app-meta" class="app-meta"></div>
+        </div>
+      </aside>
+
+      <!-- ── Detail pane ─────────────────────────────────────────────── -->
+      <main class="pane">
+        <div class="drag-strip pane-drag"></div>
+
+        <section id="empty-state" class="empty-state">
+          <span class="empty-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#9ca3af"
+                 stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <ellipse cx="12" cy="5" rx="9" ry="3" />
+              <path d="M3 5V19A9 3 0 0 0 21 19V5" />
+              <path d="M3 12A9 3 0 0 0 21 12" />
+            </svg>
+          </span>
+          <h1>Connect to your DeepSQL server</h1>
+          <p>
+            DeepSQL runs on your own VM or hardware. Point this client at it over TLS, or
+            tunnel in over SSH when the ports are closed to the internet.
+          </p>
+          <button id="empty-new" class="btn-primary">Add a connection</button>
+        </section>
+
+        <form id="editor" class="editor" hidden autocomplete="off">
+          <header class="editor-head">
+            <div class="editor-title-row">
+              <input
+                id="f-name"
+                class="title-input"
+                placeholder="Connection name"
+                maxlength="60"
+                spellcheck="false"
+              />
+              <span id="status-pill" class="pill pill-idle">Not connected</span>
+            </div>
+            <p id="editor-subtitle" class="editor-subtitle"></p>
+          </header>
+
+          <div class="editor-body">
+            <!-- Transport -->
+            <div class="card">
+              <div class="card-head">
+                <h2>How this client reaches the VM</h2>
+              </div>
+              <div class="segmented" role="tablist">
+                <button type="button" role="tab" class="seg" data-transport="direct">
+                  <strong>Direct over TLS</strong>
+                  <span>The VM is published on a hostname with HTTPS.</span>
+                </button>
+                <button type="button" role="tab" class="seg" data-transport="tunnel">
+                  <strong>SSH tunnel</strong>
+                  <span>Ports stay closed; traffic rides an SSH session.</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Direct / TLS -->
+            <div class="card" data-panel="direct">
+              <div class="card-head">
+                <h2>Server</h2>
+              </div>
+              <label class="field">
+                <span class="field-label">DeepSQL URL</span>
+                <input id="f-url" placeholder="https://deepsql.your-company.com" spellcheck="false" />
+                <span class="field-hint">
+                  The origin that serves the DeepSQL UI. It proxies <code>/api</code> to the
+                  backend, so this one URL is all the client needs.
+                </span>
+              </label>
+
+              <label class="field">
+                <span class="field-label">Certificate verification</span>
+                <select id="f-tls-mode">
+                  <option value="system">Publicly trusted certificate (recommended)</option>
+                  <option value="pinned">Pinned certificate (self-signed or IP address)</option>
+                  <option value="custom-ca">Private CA bundle</option>
+                  <option value="insecure">Trust on first use — accept any certificate</option>
+                </select>
+              </label>
+
+              <label class="field" data-tls="pinned">
+                <span class="field-label">SHA-256 fingerprint</span>
+                <input id="f-tls-fingerprint" class="mono" placeholder="Pinned on first connection" spellcheck="false" />
+                <span class="field-hint">
+                  Leave blank to pin whatever the server presents the first time. Verify it on
+                  the VM with
+                  <code>openssl x509 -in cert.pem -noout -fingerprint -sha256</code>.
+                </span>
+              </label>
+
+              <div class="field" data-tls="custom-ca">
+                <span class="field-label">CA bundle</span>
+                <div class="file-row">
+                  <input id="f-tls-ca" class="mono" placeholder="/path/to/ca.pem" spellcheck="false" />
+                  <button type="button" id="browse-ca" class="btn-secondary">Browse…</button>
+                </div>
+              </div>
+
+              <div class="notice notice-danger" data-tls="insecure">
+                Certificates are not verified until the first one is pinned. Anyone who can
+                intercept this network can read the session. Use it to bootstrap, then switch
+                to <strong>Pinned certificate</strong>.
+              </div>
+            </div>
+
+            <!-- SSH tunnel -->
+            <div class="card" data-panel="tunnel">
+              <div class="card-head">
+                <h2>SSH</h2>
+              </div>
+              <div class="grid-3">
+                <label class="field">
+                  <span class="field-label">Host</span>
+                  <input id="f-ssh-host" placeholder="20.29.48.144" spellcheck="false" />
+                </label>
+                <label class="field">
+                  <span class="field-label">Port</span>
+                  <input id="f-ssh-port" type="number" min="1" max="65535" value="22" />
+                </label>
+                <label class="field">
+                  <span class="field-label">User</span>
+                  <input id="f-ssh-user" placeholder="ubuntu" spellcheck="false" />
+                </label>
+              </div>
+
+              <label class="field">
+                <span class="field-label">Authentication</span>
+                <select id="f-ssh-auth">
+                  <option value="key">Private key file</option>
+                  <option value="agent">SSH agent</option>
+                  <option value="password">Password</option>
+                </select>
+              </label>
+
+              <div class="field" data-auth="key">
+                <span class="field-label">Private key</span>
+                <div class="file-row">
+                  <input id="f-ssh-key" class="mono" placeholder="~/.ssh/dba-agent-self-host-vm-key2.pem" spellcheck="false" />
+                  <button type="button" id="browse-key" class="btn-secondary">Browse…</button>
+                </div>
+              </div>
+
+              <label class="field" data-auth="key">
+                <span class="field-label">Key passphrase <em>optional</em></span>
+                <input id="f-ssh-passphrase" type="password" placeholder="Only if the key is encrypted" />
+                <span id="secret-hint" class="field-hint"></span>
+              </label>
+
+              <label class="field" data-auth="password">
+                <span class="field-label">Password</span>
+                <input id="f-ssh-password" type="password" />
+              </label>
+
+              <div class="notice notice-muted" data-auth="agent">
+                Uses the key already loaded in your SSH agent
+                (<code class="mono">SSH_AUTH_SOCK</code>, or Pageant on Windows). Nothing is
+                stored by this app.
+              </div>
+
+              <div class="card-head card-head-inner">
+                <h2>Forwarding</h2>
+              </div>
+              <div class="grid-3">
+                <label class="field">
+                  <span class="field-label">Remote host</span>
+                  <input id="f-remote-host" value="127.0.0.1" spellcheck="false" />
+                </label>
+                <label class="field">
+                  <span class="field-label">Remote port</span>
+                  <input id="f-remote-port" type="number" min="1" max="65535" value="3000" />
+                </label>
+                <label class="field">
+                  <span class="field-label">Local port</span>
+                  <input id="f-local-port" type="number" min="0" max="65535" value="0" />
+                </label>
+              </div>
+              <p class="field-hint">
+                Forwards to DeepSQL as seen from inside the VM. Use <strong>3000</strong>, the
+                frontend container — a host reverse proxy on port 80 usually matches on
+                hostname and will answer a tunnel with 404, because the tunnel's Host header is
+                <code>127.0.0.1</code>. Local port 0 picks a free port and reuses it next time.
+              </p>
+
+              <div id="host-key-row" class="host-key" hidden>
+                <div>
+                  <span class="field-label">Pinned host key</span>
+                  <code id="host-key-value" class="mono"></code>
+                </div>
+                <button type="button" id="clear-host-key" class="btn-danger">Clear</button>
+              </div>
+            </div>
+          </div>
+
+          <footer class="editor-foot">
+            <div class="foot-left">
+              <button type="button" id="delete-profile" class="btn-danger">Delete</button>
+            </div>
+            <div id="feedback" class="feedback" role="status" aria-live="polite"></div>
+            <div class="foot-right">
+              <button type="button" id="test-connection" class="btn-secondary">Test</button>
+              <button type="submit" id="connect" class="btn-primary">Connect</button>
+            </div>
+          </footer>
+        </form>
+      </main>
+    </div>
+
+    <script src="launcher.js"></script>
+  </body>
+</html>

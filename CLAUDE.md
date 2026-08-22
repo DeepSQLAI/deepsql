@@ -122,6 +122,125 @@ mcp/                # DeepSQL Phase 1 MCP server (Node stdio wrapper around back
 agent/              # DeepSQL Agent (persona, skills, skins, Dockerfile for the Compose service)
 ```
 
+## Desktop Client (`desktop/`)
+
+Cross-platform Electron client for a self-hosted DeepSQL VM. **Separate npm
+project** — `cd desktop && npm install`, not part of the root `package.json`.
+
+```bash
+cd desktop
+npm start                 # run     npm run dev          # run with DevTools
+npm test                  # drift guard for the DevTools kill switch
+npm run dist:mac          # dmg + zip (arm64 + x64), also :win / :linux
+npm run smoke -- --url https://deepsql.example.com   # headless connection check
+npm run selftest:tunnel   # end-to-end SSH tunnel test (in-process SSH server)
+npm run selftest:settings # proves an edited setting reaches the live connection
+```
+
+**A saved profile edit rebuilds the live connection; saving alone was never the
+bug.** The launcher persists the form before every Connect and Test, so
+`profiles.json` was always correct — but `transport.connect()` reused any live
+connection unconditionally, so changing a tunnel's remote port and pressing
+Connect did nothing, and Test reported a confident pass for settings the user had
+just replaced. `profiles.transportFingerprint()` now decides whether a live
+connection still *is* the connection being asked for; `transport.reconcile()`
+rebuilds it on save (`ipc.saveAndReconcile`), and `Workspace.updateProfile()`
+re-points the window, since a rebuilt tunnel binds a different local port and so
+changes the origin. The fingerprint deliberately excludes `name` (a rename must
+not drop a tunnel) and `stickyLocalPort` (chosen by us and rewritten every
+connect — including it would make a connection differ from itself). A failed
+rebuild does **not** restore the old connection: it was built from settings that
+no longer exist, so it stays closed and the failure is reported. Entries also
+store a profile re-read *after* the connect path's trust-on-first-use writes, or
+the next connect would see a mismatch it caused itself.
+
+**DevTools are disabled in packaged builds, and `IS_DEV` is the wrong switch for
+it.** Every window passes `webPreferences.devTools: DEVTOOLS_ENABLED`, defined in
+`config.js` as `!app.isPackaged` and nothing else. Do not "simplify" it to
+`IS_DEV`: `IS_DEV` is also true when `DEEPSQL_DESKTOP_DEV=1`, which any user can
+export against the shipped app — that is precisely the hole this closes, and it
+used to open DevTools automatically on both windows with no menu item involved.
+`devTools: false` is the load-bearing part (Chromium then refuses to attach at
+all, making `openDevTools()` a no-op); removing the menu item only hides the
+door, though it also drops the `Alt+Cmd+I`/`Ctrl+Shift+I` binding, since a custom
+`Menu.setApplicationMenu` means Electron contributes no `toggleDevTools` role.
+Separately, `index.js` exits on `--remote-debugging-port` and friends: those open
+a DevTools *protocol* endpoint that `devTools: false` does not cover. Verified
+behaviourally on Electron 43 (`devTools:false` → `isDevToolsOpened()` stays false
+after `openDevTools()`; a `devTools:true` control opens, so the check is not
+vacuous). `desktop/src/main/devtools.test.js` fails the build if a new
+`webPreferences` block omits `devTools` — the regression is otherwise silent,
+since Chromium's default is *enabled*.
+
+**It is a thin client and deliberately does not bundle the React frontend.** It
+navigates a `WebContentsView` at the real DeepSQL origin, so the UI is always the
+version the VM is running — no bundle/backend skew, and no second copy of 40+
+tabs to maintain. `docker/nginx/default.conf` already serves the SPA, `/api` and
+`/agent-api` from one origin, so cookies and SSE behave exactly as in a browser.
+Do not "improve" this by bundling `dist/` — that reintroduces `SameSite` and
+version-skew problems the current design does not have.
+
+**It needs exactly one piece of backend configuration, and CORS is it.** The
+"zero backend changes" claim that used to sit here was wrong, and cost a long
+debugging session. Over a tunnel the origin is `http://127.0.0.1:<sticky port>`,
+not the VM's hostname, so a deployment whose `CORS_ALLOWED_ORIGINS` names only
+its public hostname rejects the desktop client. The failure is maximally
+misleading: Chromium omits `Origin` on same-origin GETs, so the health probe,
+the SPA and every read succeed, and the *first POST* — the login — comes back
+`403` with the plain-text body `Invalid CORS request`. That body has no
+`message` field, so `client.js`'s axios interceptor falls through to axios's own
+wording and the user sees **"Request failed with status code 403"**, which names
+neither CORS nor the origin. Fix: keep loopback patterns in the allowlist —
+`CORS_ALLOWED_ORIGINS=https://your-host,http://127.0.0.1:*,http://localhost:*`.
+Port wildcards work only because `SecurityConfig` uses
+`setAllowedOriginPatterns`; `setAllowedOrigins` would reject `*` alongside
+`allowCredentials(true)`. `probe.js` now sends an `Origin` header for exactly
+this reason, so the rejection is caught at connect time and named.
+
+**Two transports, one abstraction.** Both resolve to an *origin*, so nothing
+downstream of `desktop/src/main/transport.js` knows which is in use:
+
+- **Direct TLS** — the VM's HTTPS origin. Four certificate modes (`system`,
+  `pinned`, `custom-ca`, `insecure`/TOFU), applied to **both** the Node health
+  probe and the Chromium session (`tls.applyToSession`). Applying it to only one
+  gives a connection that tests green but renders a certificate error.
+- **SSH tunnel** — `ssh2` local forward, loopback-bound, no `ssh` binary needed.
+  The local port is *sticky* across launches on purpose: the origin includes the
+  port, and a fresh random port would silently reset the web app's
+  `localStorage`. `http://127.0.0.1:*` is a Chromium secure context, so the
+  backend's `Secure` cookies still work over the tunnel. **Forward to the
+  frontend container (3000), not a host reverse proxy on :80** — that proxy
+  matches on `server_name`, a tunnel arrives with `Host: 127.0.0.1:<port>`,
+  and the request lands on the default vhost as a 404 that reads like a broken
+  backend. The container's nginx uses `server_name _` and answers any Host.
+
+Three non-obvious things, all found the hard way:
+
+1. **`Client.connect({ privateKey })` must get the raw key material, not the
+   object `sshUtils.parseKey` returns.** Handed a parsed key, ssh2 silently
+   never offers the publickey method and the server replies with a bare
+   authentication failure — a symptom that points at the VM's `authorized_keys`
+   rather than at a type mismatch on our side. `loadPrivateKey` parses only to
+   produce good error messages and returns the buffer.
+2. **Authentication succeeding says nothing about forwarding being allowed.**
+   A hardened sshd (`AllowTcpForwarding no`) accepts the login and refuses every
+   `direct-tcpip` channel; the failure otherwise surfaces as "socket hang up" on
+   the first browser request, pointing nowhere near sshd. `verifyForwarding()`
+   opens and closes one channel right after auth and classifies the refusal by
+   SSH reason code — 1 (`ADMINISTRATIVELY_PROHIBITED`, verified against real
+   OpenSSH) names `AllowTcpForwarding`, 2 (`CONNECT_FAILED`) means nothing is
+   listening on the remote port.
+3. **Only a session that once reached `ready` may be reconnected.** Gating
+   reconnects on `everReady` is what stops a connect that fails on
+   authentication from retrying forever behind a caller that already surfaced
+   the error.
+
+Secrets (key passphrases, SSH passwords) are stored as `safeStorage` ciphertext;
+where no OS keychain exists nothing is written to disk and the launcher says so.
+Each profile gets its own session partition, so two DeepSQL servers never share
+cookies. `.github/workflows/desktop-release.yml` builds all three platforms on
+their native runners. See `desktop/README.md` for the full picture.
+
 ## MCP Server
 
 - `mcp/deepsql-phase1-server.js` implements a Phase 1 stdio MCP server for internal rollout.
