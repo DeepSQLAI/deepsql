@@ -19,9 +19,6 @@ import java.util.regex.Pattern;
 @Service
 public class BrainNoteIntentService {
 
-    private static final Pattern QUALIFIED_TABLE = Pattern.compile(
-        "(?<![\\w.])([a-zA-Z_][\\w]*)\\.([a-zA-Z_][\\w]*)(?![\\w.])"
-    );
     private static final Pattern BACKTICK_IDENT = Pattern.compile("`([^`]+)`");
     private static final Pattern DEFINITION_CUE = Pattern.compile(
         "\\b(metric|definition|means|pinned|use this|correct|from|count|always|filter|join)\\b",
@@ -242,16 +239,76 @@ public class BrainNoteIntentService {
         if (table != null) {
             return Optional.of(new String[] { table, column });
         }
-        Matcher tables = QUALIFIED_TABLE.matcher(text);
-        while (tables.find()) {
-            String schema = tables.group(1);
-            String name = tables.group(2);
+        String[] prose = findFirstQualifiedTable(text);
+        if (prose != null) {
+            return Optional.of(new String[] { prose[0] + "." + prose[1], column });
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Linear scan for {@code schema.table} (not {@code a.b.c}). Avoids the
+     * backtracking {@code [\w]*\.[\w]*} pattern CodeQL flags as ReDoS on
+     * attacker-controlled Agent answers.
+     */
+    static String[] findFirstQualifiedTable(String text) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+        int n = text.length();
+        int i = 0;
+        while (i < n) {
+            char c = text.charAt(i);
+            if (!isIdentStart(c)) {
+                i++;
+                continue;
+            }
+            if (i > 0) {
+                char prev = text.charAt(i - 1);
+                if (isIdentPart(prev) || prev == '.') {
+                    i++;
+                    continue;
+                }
+            }
+            int schemaStart = i;
+            i++;
+            while (i < n && isIdentPart(text.charAt(i))) {
+                i++;
+            }
+            if (i >= n || text.charAt(i) != '.') {
+                continue;
+            }
+            int schemaEnd = i;
+            i++;
+            if (i >= n || !isIdentStart(text.charAt(i))) {
+                continue;
+            }
+            int nameStart = i;
+            i++;
+            while (i < n && isIdentPart(text.charAt(i))) {
+                i++;
+            }
+            if (i < n) {
+                char next = text.charAt(i);
+                if (isIdentPart(next) || next == '.') {
+                    continue;
+                }
+            }
+            String schema = text.substring(schemaStart, schemaEnd);
             if (STOP_TABLES.contains(schema.toLowerCase(Locale.ROOT))) {
                 continue;
             }
-            return Optional.of(new String[] { schema + "." + name, column });
+            return new String[] { schema, text.substring(nameStart, i) };
         }
-        return Optional.empty();
+        return null;
+    }
+
+    private static boolean isIdentStart(char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
+    }
+
+    private static boolean isIdentPart(char c) {
+        return isIdentStart(c) || (c >= '0' && c <= '9');
     }
 
     /**

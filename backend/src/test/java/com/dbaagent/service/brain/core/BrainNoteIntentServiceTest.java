@@ -95,6 +95,15 @@ class BrainNoteIntentServiceTest {
     }
 
     @Test
+    void findFirstQualifiedTable_skipsTripleQualifiedAndCatalogSchemas() {
+        assertThat(BrainNoteIntentService.findFirstQualifiedTable("see marts.dim_person.col then crm.accounts"))
+            .containsExactly("crm", "accounts");
+        assertThat(BrainNoteIntentService.findFirstQualifiedTable("pg_catalog.pg_class")).isNull();
+        assertThat(BrainNoteIntentService.findFirstQualifiedTable("A".repeat(20_000) + " marts.dim_person"))
+            .containsExactly("marts", "dim_person");
+    }
+
+    @Test
     void mergeTexts_doesNotDuplicateTheSameSentence() {
         String merged = service.mergeTexts(
             "Always filter cancelled bookings.",
