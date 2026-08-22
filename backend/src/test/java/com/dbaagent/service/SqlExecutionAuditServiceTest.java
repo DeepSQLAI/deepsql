@@ -129,6 +129,46 @@ class SqlExecutionAuditServiceTest {
     }
 
     @Test
+    void record_cancelled_logsSuccessWithSessionPidAndExecutionId() {
+        // Before this event type existed, a successful cancel was only visible
+        // as an accidental EDITOR_QUERY_FAILED thrown by the killed query's own
+        // thread when pg_terminate_backend severed it — indistinguishable from
+        // an ordinary query failure, and with no executionId to tie it back to
+        // the run the user actually meant to stop.
+        givenActor("alice@example.com", 1L);
+
+        audit.record(SqlExecutionAuditService.AuditRecord.cancelled("8642")
+            .connectionId("conn-1")
+            .executionId("exec-abc-123")
+            .client(ClientContext.unknown()));
+
+        SecurityEventService.EventRequest event = captureLoggedEvent();
+        assertThat(event.eventType()).isEqualTo(SecurityEventType.EDITOR_QUERY_CANCELLED);
+        assertThat(event.outcome()).isEqualTo(SecurityEventOutcome.SUCCESS);
+        assertThat(event.reason()).contains("8642");
+        assertThat(event.metadata()).containsEntry("operation", "cancel");
+        assertThat(event.metadata()).containsEntry("executionId", "exec-abc-123");
+    }
+
+    @Test
+    void record_cancelNoOp_logsInfoOutcomeNotSilence() {
+        // A cancel that misses its target (already finished, or a guessed/
+        // replayed executionId) must still leave a trace — previously it left
+        // none at all, so "did anyone try to cancel this?" was unanswerable.
+        givenActor("alice@example.com", 1L);
+
+        audit.record(SqlExecutionAuditService.AuditRecord.cancelNoOp()
+            .connectionId("conn-1")
+            .executionId("exec-already-done")
+            .client(ClientContext.unknown()));
+
+        SecurityEventService.EventRequest event = captureLoggedEvent();
+        assertThat(event.eventType()).isEqualTo(SecurityEventType.EDITOR_QUERY_CANCELLED);
+        assertThat(event.outcome()).isEqualTo(SecurityEventOutcome.INFO);
+        assertThat(event.metadata()).containsEntry("executionId", "exec-already-done");
+    }
+
+    @Test
     void record_analyzePlan_carriesPlanSignalsInsteadOfRowCount() {
         givenActor("alice@example.com", 1L);
 
