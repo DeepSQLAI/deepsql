@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import urllib.error
 from http.cookiejar import CookieJar
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from urllib.request import HTTPCookieProcessor, Request, build_opener
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import vaultdb  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 ENV = ROOT / ".env"
@@ -93,14 +96,10 @@ def main() -> int:
     check("has KNOWLEDGE_ENTRY pending", len(knowledge) >= 1, f"n={len(knowledge)}")
 
     # ── 2. Constraint bootstrap: CODE_DERIVED must be allowed ──────────────
-    constraint = subprocess.check_output(
-        [
-            "sudo", "-u", "postgres", "psql", "-d", "dba_agent", "-At", "-c",
-            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
-            "WHERE conname='schema_documentation_source_check'",
-        ],
-        text=True,
-    ).strip()
+    constraint = vaultdb.query(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+        "WHERE conname='schema_documentation_source_check'"
+    )
     check("CODE_DERIVED in source CHECK", "CODE_DERIVED" in constraint, constraint)
 
     # ── 3. Approve SCHEMA_DOC (the customer failure path) ──────────────────
@@ -195,22 +194,25 @@ def main() -> int:
     check("knowledge approvals applied", len(knowledge_ok) >= 1, f"n={len(knowledge_ok)}")
 
     # ── 10. Simulate missing CODE_DERIVED then ensure repair path works ────
-    # Existing CODE_DERIVED rows block shrinking the CHECK, so park them first.
-    subprocess.check_call([
-        "sudo", "-u", "postgres", "psql", "-d", "dba_agent", "-c",
-        "UPDATE schema_documentation SET source='USER' WHERE source='CODE_DERIVED'; "
+    # Existing CODE_DERIVED rows block shrinking the CHECK, so park them first —
+    # in a scratch table, not by rewriting source in place. The original version
+    # flipped every real CODE_DERIVED row to USER and never restored it, so a run
+    # against a live install silently relabelled the user's approved code-derived
+    # docs; it would also collide with V116's unique index the moment a user-written
+    # doc existed for the same column.
+    vaultdb.execute(
+        "DROP TABLE IF EXISTS e2e_parked_code_derived; "
+        "CREATE TABLE e2e_parked_code_derived AS "
+        "  SELECT * FROM schema_documentation WHERE source='CODE_DERIVED'; "
+        "DELETE FROM schema_documentation WHERE source='CODE_DERIVED'; "
         "ALTER TABLE schema_documentation DROP CONSTRAINT IF EXISTS schema_documentation_source_check; "
         "ALTER TABLE schema_documentation ADD CONSTRAINT schema_documentation_source_check "
         "CHECK (source::text = ANY (ARRAY['USER','AI_GENERATED','CSV_IMPORT']::text[]));",
-    ])
-    broken = subprocess.check_output(
-        [
-            "sudo", "-u", "postgres", "psql", "-d", "dba_agent", "-At", "-c",
-            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
-            "WHERE conname='schema_documentation_source_check'",
-        ],
-        text=True,
-    ).strip()
+    )
+    broken = vaultdb.query(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+        "WHERE conname='schema_documentation_source_check'"
+    )
     check("can break CHECK for simulation", "CODE_DERIVED" not in broken)
 
     page6 = req(f"{backend}/code-scan/suggestions?connectionId={conn}&status=PENDING&page=0&size=20")
@@ -233,21 +235,37 @@ def main() -> int:
     else:
         check("broken CHECK yields failed bulk with error detail", False, "no pending SCHEMA_DOC")
 
-    # Repair CHECK the same way the startup initializer does (without restart).
-    subprocess.check_call([
-        "sudo", "-u", "postgres", "psql", "-d", "dba_agent", "-c",
+    # Repair CHECK the same way the startup initializer does (without restart),
+    # then un-park every row the simulation removed. The NOT EXISTS guard skips a
+    # row the post-repair retry has meanwhile recreated under the same key, which
+    # the unique index would otherwise reject.
+    vaultdb.execute(
         "ALTER TABLE schema_documentation DROP CONSTRAINT IF EXISTS schema_documentation_source_check; "
         "ALTER TABLE schema_documentation ADD CONSTRAINT schema_documentation_source_check "
         "CHECK (source::text = ANY (ARRAY['USER','AI_GENERATED','CSV_IMPORT','CODE_DERIVED']::text[]));",
-    ])
-    repaired = subprocess.check_output(
-        [
-            "sudo", "-u", "postgres", "psql", "-d", "dba_agent", "-At", "-c",
-            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
-            "WHERE conname='schema_documentation_source_check'",
-        ],
-        text=True,
-    ).strip()
+    )
+    parked_count = vaultdb.query("SELECT count(*) FROM e2e_parked_code_derived")
+    vaultdb.execute(
+        "INSERT INTO schema_documentation SELECT p.* FROM e2e_parked_code_derived p "
+        "WHERE NOT EXISTS (SELECT 1 FROM schema_documentation d WHERE d.id = p.id) "
+        "  AND NOT EXISTS (SELECT 1 FROM schema_documentation d "
+        "                  WHERE d.connection_id = p.connection_id "
+        "                    AND d.object_type = p.object_type "
+        "                    AND d.object_name = p.object_name "
+        "                    AND coalesce(d.parent_object,'') = coalesce(p.parent_object,'') "
+        "                    AND d.source = p.source); "
+        "DROP TABLE e2e_parked_code_derived;",
+    )
+    restored = vaultdb.query("SELECT count(*) FROM schema_documentation WHERE source='CODE_DERIVED'")
+    check(
+        "parked CODE_DERIVED rows restored",
+        int(restored) >= int(parked_count),
+        f"parked={parked_count} now={restored}",
+    )
+    repaired = vaultdb.query(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+        "WHERE conname='schema_documentation_source_check'"
+    )
     check("CHECK repaired with CODE_DERIVED", "CODE_DERIVED" in repaired)
 
     if schema_pending:
@@ -259,6 +277,169 @@ def main() -> int:
             "approve SCHEMA_DOC after CHECK repair",
             retry.get("status") == "APPROVED" and bool(retry.get("appliedDocId")),
             f"status={retry.get('status')}",
+        )
+
+    # ── 11. Duplicate schema_documentation rows must not wedge approve ─────
+    # The customer's "APPROVED 0 OF 2" was two IncorrectResultSizeDataAccessException
+    # ("Query did not return a unique result: 2 results were returned") thrown by the
+    # upsert lookup in CodeSuggestionApplier.applySchemaDoc against duplicate rows a
+    # double-submitted bulk approve had left behind.
+    #
+    # Approve once to learn the exact key the applier writes (it database-qualifies
+    # parent_object via resolveDatabaseName, so guessing it from existing rows picks
+    # the wrong prefix and the test silently exercises nothing), then reset the
+    # suggestion, plant an older duplicate under that key, and approve again.
+    page7 = req(f"{backend}/code-scan/suggestions?connectionId={conn}&status=PENDING&page=0&size=50")
+    dup_target = next(
+        (s for s in (page7.get("content") or [])
+         if s.get("targetKind") == "SCHEMA_DOC" and "." in (s.get("targetObject") or "")),
+        None,
+    )
+    if not dup_target:
+        check("duplicate rows collapse on approve", False, "no pending column SCHEMA_DOC")
+    else:
+        first = req(
+            f"{backend}/code-scan/suggestions/{dup_target['id']}/decide?connectionId={conn}",
+            {"decision": "APPROVED"},
+        )
+        doc_id = first.get("appliedDocId")
+        check("duplicate-test baseline approve", bool(doc_id), json.dumps(first)[:120])
+
+        key = vaultdb.query(
+            "SELECT object_name || '|' || coalesce(parent_object,'') "
+            f"FROM schema_documentation WHERE id='{doc_id}'"
+        )
+        column, _, qualified = key.partition("|")
+        # Anchor the planted row's timestamp to the real one: approve UPDATES the
+        # row an earlier scan wrote, so its created_at is historical, and a
+        # hardcoded "old" date can easily be the newer of the two.
+        baseline_created = vaultdb.query(
+            f"SELECT created_at FROM schema_documentation WHERE id='{doc_id}'"
+        )
+        where = (
+            f"connection_id='{conn}' AND object_type='COLUMN' AND object_name='{column}' "
+            f"AND coalesce(parent_object,'')='{qualified}' AND source='CODE_DERIVED'"
+        )
+
+        # The unique index is what stops this happening for real, so drop it for the
+        # simulation. restore_unique_index() runs even if an assertion below throws —
+        # leaving the install without the constraint would be worse than a failed test.
+        vaultdb.execute("DROP INDEX IF EXISTS ux_schema_doc_target")
+        try:
+            vaultdb.execute(
+                "INSERT INTO schema_documentation "
+                "(id, connection_id, object_type, object_name, parent_object, description, "
+                " source, created_at) "
+                f"VALUES ('e2e-dup-older', '{conn}', 'COLUMN', '{column}', '{qualified}', "
+                f"'stale duplicate', 'CODE_DERIVED', TIMESTAMP '{baseline_created}' - INTERVAL '1 hour')"
+            )
+            vaultdb.execute(
+                "UPDATE code_knowledge_suggestion SET status='PENDING', applied_doc_id=NULL, "
+                f"decided_at=NULL, decided_by=NULL WHERE id='{dup_target['id']}'"
+            )
+            # A second, already-approved suggestion pointing at the row that is about
+            # to be deleted — its reference must follow the survivor, not dangle.
+            vaultdb.execute(
+                "UPDATE code_knowledge_suggestion SET applied_doc_id='e2e-dup-older' "
+                f"WHERE id = (SELECT id FROM code_knowledge_suggestion WHERE connection_id='{conn}' "
+                f"  AND status='APPROVED' AND id <> '{dup_target['id']}' LIMIT 1)"
+            )
+            before = vaultdb.query(f"SELECT count(*) FROM schema_documentation WHERE {where}")
+            check("duplicate pair seeded", before == "2", f"rows={before}")
+
+            dup_bulk = req(
+                f"{backend}/code-scan/suggestions/bulk-decide?connectionId={conn}",
+                {"ids": [dup_target["id"]], "decision": "APPROVED"},
+            )
+            check(
+                "duplicate rows collapse on approve",
+                dup_bulk.get("succeeded") == 1 and dup_bulk.get("failed") == 0,
+                json.dumps(dup_bulk),
+            )
+            after = vaultdb.query(f"SELECT count(*) FROM schema_documentation WHERE {where}")
+            check("collapsed to a single row", after == "1", f"rows={after}")
+            survivor = vaultdb.query(f"SELECT id FROM schema_documentation WHERE {where}")
+            # Newest wins — the row applied_doc_id already pointed at.
+            check("newest duplicate survived", survivor == doc_id, f"{survivor} vs {doc_id}")
+            content = vaultdb.query(
+                f"SELECT description FROM schema_documentation WHERE id='{survivor}'"
+            )
+            check("survivor holds approved content", "stale duplicate" not in content, content[:60])
+            gone = vaultdb.query(
+                "SELECT count(*) FROM schema_documentation WHERE id='e2e-dup-older'"
+            )
+            check("older duplicate deleted", gone == "0", gone)
+            embedding = vaultdb.query("SELECT count(*) FROM rag_documents WHERE id='e2e-dup-older'")
+            check("loser embedding removed", embedding == "0", embedding)
+            dangling = vaultdb.query(
+                "SELECT count(*) FROM code_knowledge_suggestion WHERE applied_doc_id='e2e-dup-older'"
+            )
+            check("applied_doc_id repointed off the deleted row", dangling == "0", dangling)
+            orphans = vaultdb.query(
+                "SELECT count(*) FROM code_knowledge_suggestion s WHERE s.applied_doc_id IS NOT NULL "
+                "AND NOT EXISTS (SELECT 1 FROM schema_documentation d WHERE d.id = s.applied_doc_id)"
+            )
+            check("no dangling applied_doc_id anywhere", orphans == "0", orphans)
+        finally:
+            # Only ever remove the planted row, and only while nothing points at it.
+            # An earlier version deleted it unconditionally, which destroyed real
+            # approved content on the run where collapse had chosen it as survivor.
+            vaultdb.execute(
+                "DELETE FROM schema_documentation d WHERE d.id='e2e-dup-older' "
+                "AND NOT EXISTS (SELECT 1 FROM code_knowledge_suggestion s "
+                "                WHERE s.applied_doc_id = d.id)"
+            )
+            vaultdb.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_schema_doc_target ON schema_documentation "
+                "(connection_id, object_type, object_name, coalesce(parent_object, ''), source)"
+            )
+
+    # ── 12. The unique index refuses a second row for the same key ─────────
+    idx = vaultdb.query(
+        "SELECT count(*) FROM pg_indexes WHERE indexname='ux_schema_doc_target'"
+    )
+    check("unique index present", idx == "1", idx)
+    try:
+        vaultdb.execute(
+            "INSERT INTO schema_documentation "
+            "(id, connection_id, object_type, object_name, parent_object, description, source, created_at) "
+            "SELECT 'e2e-dup-clash', connection_id, object_type, object_name, parent_object, "
+            "       description, source, now() "
+            "FROM schema_documentation LIMIT 1"
+        )
+        vaultdb.execute("DELETE FROM schema_documentation WHERE id='e2e-dup-clash'")
+        check("unique index rejects a duplicate key", False, "insert succeeded")
+    except Exception as e:  # noqa: BLE001 - psql exiting non-zero IS the assertion
+        check("unique index rejects a duplicate key", True, type(e).__name__)
+
+    # ── 13. Concurrent approve of one suggestion writes exactly one doc row ─
+    # Two bulk approves racing on the same PENDING row is what created the
+    # duplicates in the first place; approve now loads the suggestion FOR UPDATE.
+    page8 = req(f"{backend}/code-scan/suggestions?connectionId={conn}&status=PENDING&page=0&size=50")
+    race_target = next(
+        (s for s in (page8.get("content") or [])
+         if s.get("targetKind") == "SCHEMA_DOC" and "." in (s.get("targetObject") or "")),
+        None,
+    )
+    if not race_target:
+        check("concurrent approve writes one row", False, "no pending column SCHEMA_DOC")
+    else:
+        url = f"{backend}/code-scan/suggestions/bulk-decide?connectionId={conn}"
+        payload = {"ids": [race_target["id"]], "decision": "APPROVED"}
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = [f.result() for f in
+                       [pool.submit(req, url, payload), pool.submit(req, url, payload)]]
+        parent, _, column = race_target["targetObject"].partition(".")
+        rows = vaultdb.query(
+            f"SELECT count(*) FROM schema_documentation WHERE connection_id='{conn}' "
+            f"AND object_type='COLUMN' AND object_name='{column}' "
+            f"AND parent_object LIKE '%{parent}' AND source='CODE_DERIVED'"
+        )
+        check("concurrent approve writes one row", rows == "1", f"rows={rows}")
+        check(
+            "neither concurrent approve reported an error",
+            all(r.get("failed") == 0 for r in results),
+            json.dumps(results),
         )
 
     print()

@@ -104,3 +104,7 @@ optd-sidecar/target/
 *.iml
 .local-admin-credentials
 .local-mcp-token
+
+# Python bytecode from scripts/
+__pycache__/
+*.pyc

@@ -553,8 +553,30 @@ public class CodeScanService {
                                                          CodeKnowledgeSuggestion.Status status,
                                                          int page,
                                                          int size) {
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "confidence", "createdAt"));
-        return suggestionRepository.findByConnectionIdAndStatus(connectionId, status, pageable);
+        return suggestionRepository.findByConnectionIdAndStatus(
+            connectionId, status, PageRequest.of(page, size, sortFor(status)));
+    }
+
+    /**
+     * Sort depends on what the reviewer is looking at.
+     *
+     * <p>PENDING is a work queue — highest confidence first, so the best candidates
+     * are the ones you see. Anything already decided is a history view, and the
+     * question there is "what did I just do", so it leads with the most recent
+     * decision. Sorting decided rows by confidence scattered a fresh approval
+     * somewhere in the middle of hundreds of older ones.
+     *
+     * <p>{@code decidedAt} is null on rows decided before it was recorded, hence
+     * nullsLast with a createdAt fallback.
+     */
+    private static Sort sortFor(CodeKnowledgeSuggestion.Status status) {
+        if (status == CodeKnowledgeSuggestion.Status.PENDING) {
+            return Sort.by(Sort.Direction.DESC, "confidence", "createdAt");
+        }
+        return Sort.by(
+            new Sort.Order(Sort.Direction.DESC, "decidedAt", Sort.NullHandling.NULLS_LAST),
+            new Sort.Order(Sort.Direction.DESC, "createdAt")
+        );
     }
 
     /**
