@@ -149,15 +149,33 @@ export function useAllCodeScanSuggestions({ connectionId, status = 'PENDING' }) 
   })
 }
 
+/**
+ * Everything an approve/reject writes, in one place.
+ *
+ * A decision is not confined to the suggestion row: approving a SCHEMA_DOC
+ * upserts `schema_documentation` (served by `brain/notes`, which backs the Write
+ * notes tab and its coverage counts) and re-embeds it, and approving a
+ * KNOWLEDGE_ENTRY creates a company knowledge entry. Invalidating only codeScan +
+ * companyKnowledge left every schema-doc-derived count stale until a page reload.
+ */
+function invalidateAfterDecision(queryClient, connectionId) {
+  if (!connectionId) return
+  ;[
+    queryKeys.codeScan.all(connectionId),
+    queryKeys.companyKnowledge.all(connectionId),
+    // schema_documentation — brain/notes, coverage counts, understanding.
+    queryKeys.brain.all(connectionId),
+    // Accepting a description can resolve an ambiguity flagged in Unresolved.
+    queryKeys.schemaContext.all(connectionId),
+  ].forEach((queryKey) => queryClient.invalidateQueries({ queryKey }))
+}
+
 export function useDecideCodeScanSuggestion() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: codeScanAPI.decide,
     onSuccess: (_data, variables) => {
-      if (variables?.connectionId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.codeScan.all(variables.connectionId) })
-        queryClient.invalidateQueries({ queryKey: queryKeys.companyKnowledge.all(variables.connectionId) })
-      }
+      invalidateAfterDecision(queryClient, variables?.connectionId)
     },
   })
 }
@@ -167,10 +185,7 @@ export function useBulkDecideCodeScanSuggestions() {
   return useMutation({
     mutationFn: codeScanAPI.bulkDecide,
     onSuccess: (_data, variables) => {
-      if (variables?.connectionId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.codeScan.all(variables.connectionId) })
-        queryClient.invalidateQueries({ queryKey: queryKeys.companyKnowledge.all(variables.connectionId) })
-      }
+      invalidateAfterDecision(queryClient, variables?.connectionId)
     },
   })
 }

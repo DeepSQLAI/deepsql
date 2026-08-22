@@ -34,6 +34,7 @@ public class SchemaDescriptionService {
     private final ColumnProfileRepository columnProfileRepo;
     private final InferredTableRelationshipRepository inferredRelationshipRepository;
     private final TrainingService trainingService;
+    private final SchemaDocumentationDeduplicator schemaDocDeduplicator;
     private final ConnectionService connectionService;
     private final DatabaseProviderRegistry providerRegistry;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -71,6 +72,7 @@ public class SchemaDescriptionService {
             ColumnProfileRepository columnProfileRepo,
             InferredTableRelationshipRepository inferredRelationshipRepository,
             TrainingService trainingService,
+            SchemaDocumentationDeduplicator schemaDocDeduplicator,
             ConnectionService connectionService,
             DatabaseProviderRegistry providerRegistry,
             @Value("${brain.description.ai-concurrency:4}") int aiConcurrency) {
@@ -80,6 +82,7 @@ public class SchemaDescriptionService {
         this.columnProfileRepo = columnProfileRepo;
         this.inferredRelationshipRepository = inferredRelationshipRepository;
         this.trainingService = trainingService;
+        this.schemaDocDeduplicator = schemaDocDeduplicator;
         this.connectionService = connectionService;
         this.providerRegistry = providerRegistry;
         this.aiConcurrency = Math.max(1, aiConcurrency);
@@ -417,13 +420,14 @@ public class SchemaDescriptionService {
             : desc.getTableName();
 
         // Upsert table-level doc (find existing AI doc or create new)
-        var existingTableDoc = schemaDocRepo
-            .findByConnectionIdAndObjectTypeAndObjectNameAndSource(
+        var existingTableDoc = schemaDocDeduplicator.collapse(
+            schemaDocRepo.findByConnectionIdAndObjectTypeAndObjectNameAndSource(
                 connectionId, DocumentationType.TABLE, objectName,
-                DocumentationSource.AI_GENERATED);
+                DocumentationSource.AI_GENERATED),
+            objectName + " (TABLE, AI_GENERATED)");
         SchemaDocumentation tableDoc;
-        if (existingTableDoc.isPresent()) {
-            tableDoc = existingTableDoc.get();
+        if (existingTableDoc != null) {
+            tableDoc = existingTableDoc;
             tableDoc.setDescription(desc.getTableDescription());
             tableDoc.setBusinessTerms(desc.getBusinessTerms());
             tableDoc.setConfidence(desc.getConfidence());
@@ -445,13 +449,14 @@ public class SchemaDescriptionService {
         // Upsert column-level docs
         for (var col : desc.getColumns()) {
             if (col.getDescription() == null || col.getDescription().isBlank()) continue;
-            var existingColDoc = schemaDocRepo
-                .findByConnectionIdAndObjectTypeAndObjectNameAndParentObjectAndSource(
+            var existingColDoc = schemaDocDeduplicator.collapse(
+                schemaDocRepo.findByConnectionIdAndObjectTypeAndObjectNameAndParentObjectAndSource(
                     connectionId, DocumentationType.COLUMN, col.getName(),
-                    objectName, DocumentationSource.AI_GENERATED);
+                    objectName, DocumentationSource.AI_GENERATED),
+                objectName + "." + col.getName() + " (COLUMN, AI_GENERATED)");
             SchemaDocumentation colDoc;
-            if (existingColDoc.isPresent()) {
-                colDoc = existingColDoc.get();
+            if (existingColDoc != null) {
+                colDoc = existingColDoc;
                 colDoc.setDescription(col.getDescription());
                 colDoc.setConfidence(col.getConfidence());
             } else {

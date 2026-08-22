@@ -12,6 +12,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -35,6 +37,45 @@ def load_env(path: Path) -> dict[str, str]:
         k, v = line.split("=", 1)
         out[k.strip()] = v.strip().strip('"').strip("'")
     return out
+
+
+def apply_sql(sql_path: Path) -> int:
+    """Run the seed SQL against the vault DB, host install or Compose.
+
+    A Compose deployment has no host-side postgres role (or psql at all), so the
+    original `sudo -u postgres psql` path only ever worked on a bare-metal
+    install — the verify command in the PR that added this script failed on the
+    topology `scripts/self-host/install.sh` actually produces.
+    """
+    redirect = ">/tmp/seed-review.out 2>&1"
+    if shutil.which("psql"):
+        rc = os.system(
+            f"sudo -u postgres psql -d dba_agent -v ON_ERROR_STOP=1 -f {sql_path} {redirect}"
+        )
+        if rc == 0:
+            return 0
+        print("→ host psql failed; trying the Compose postgres container", file=sys.stderr)
+
+    container = compose_postgres_container()
+    if not container:
+        print("No psql on PATH and no running Compose postgres container found.", file=sys.stderr)
+        return 1
+    print(f"→ applying via docker exec {container}")
+    return os.system(
+        f"docker exec -i {container} psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 "
+        f"< {sql_path} {redirect}"
+    )
+
+
+def compose_postgres_container() -> str | None:
+    """Name of the running postgres container, whatever the compose project is."""
+    out = subprocess.run(
+        ["docker", "ps", "--filter", "label=com.docker.compose.service=postgres",
+         "--format", "{{.Names}}"],
+        capture_output=True, text=True, check=False,
+    )
+    names = [n for n in out.stdout.split() if n]
+    return names[0] if names else None
 
 
 def main() -> int:
@@ -155,7 +196,7 @@ VALUES
     sql_path = Path("/tmp/seed-review-suggestions.sql")
     sql_path.write_text(sql)
     print(f"→ writing {sql_path} ({args.count} suggestions)")
-    rc = os.system(f"sudo -u postgres psql -d dba_agent -v ON_ERROR_STOP=1 -f {sql_path} >/tmp/seed-review.out 2>&1")
+    rc = apply_sql(sql_path)
     if rc != 0:
         print(open("/tmp/seed-review.out").read(), file=sys.stderr)
         return 1
