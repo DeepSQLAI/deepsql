@@ -17,6 +17,10 @@ const {
   createConfigFromEnv,
   getAuthToken,
   invalidateTokenCache,
+  buildCallerCapabilities,
+  summarizeCallerCapabilities,
+  summarizeConnections,
+  resetToolCaches,
 } = require("./deepsql-phase1-lib");
 
 function tmpTokenFile(contents) {
@@ -639,6 +643,7 @@ test("handleToolCall(get_growth_anomalies) omits unacknowledgedOnly when not exp
 });
 
 function makeFakeConfig(callsOut, responses) {
+  resetToolCaches();
   let i = 0;
   const originalFetch = global.fetch;
   global.fetch = async (url, init) => {
@@ -724,11 +729,14 @@ test("connection-write tools are intentionally NOT exposed (secrets-in-history r
 
 test("handleToolCall(get_current_user) hits /auth/me with no args", async () => {
   const calls = [];
-  const cfg = makeFakeConfig(calls, [{ username: "alice", role: "ADMIN" }]);
+  const cfg = makeFakeConfig(calls, [
+    { username: "alice", role: "ADMIN" },
+    [{ id: "c1", canManageContent: true, canManageConfig: true }],
+  ]);
   const result = await handleToolCall(cfg, "get_current_user", {});
-  assert.equal(calls.length, 1);
   assert.match(calls[0].url, /\/auth\/me$/);
   assert.equal(result.structuredContent.username, "alice");
+  assert.equal(result.structuredContent.callerCapabilities.canWriteSharedBrainNotes, true);
 });
 
 test("handleToolCall(test_connection) sends only id — never plaintext creds", async () => {
@@ -863,14 +871,19 @@ test("handleToolCall(list_brain_recommendations) GETs suggestions with the limit
 
 test("handleToolCall(save_brain_note) POSTs a COLUMN-scoped note", async () => {
   const calls = [];
-  const cfg = makeFakeConfig(calls, [{ tableName: "orders", columnName: "status", noteText: "x" }]);
+  const cfg = makeFakeConfig(calls, [
+    [{ id: "c1", canManageContent: true }],
+    { username: "admin", role: "ADMIN" },
+    { tableName: "orders", columnName: "status", noteText: "x" },
+  ]);
   const result = await handleToolCall(cfg, "save_brain_note", {
     connectionId: "c1", tableName: "orders", columnName: "status", noteText: "x",
   });
-  assert.equal(calls[0].method, "POST");
-  assert.match(calls[0].url, /\/brain\/notes$/);
-  assert.equal(calls[0].body.scopeType, "COLUMN");
-  assert.equal(calls[0].body.tableName, "orders");
+  const noteCall = calls.find((c) => /\/brain\/notes$/.test(c.url));
+  assert.ok(noteCall, "should POST /brain/notes after the capability check");
+  assert.equal(noteCall.method, "POST");
+  assert.equal(noteCall.body.scopeType, "COLUMN");
+  assert.equal(noteCall.body.tableName, "orders");
   assert.match(result.content[0].text, /Saved to brain/);
 });
 
@@ -1073,4 +1086,65 @@ test("callDeepSqlApi does not retry a 401 when the token file is unchanged", asy
     stub.restore();
   }
   assert.equal(stub.authHeaders.length, 1, "unchanged token → no pointless retry");
+});
+
+test("buildCallerCapabilities fail-closes when the connection cannot write notes", () => {
+  const caps = buildCallerCapabilities(
+    { id: "c1", canManageContent: false, accessLevel: "CHAT_EDITOR" },
+    { username: "marts-editor", role: "DEVELOPER" },
+  );
+  assert.equal(caps.canWriteSharedBrainNotes, false);
+  assert.ok(caps.doNotOffer.includes("save_brain_note"));
+  assert.match(summarizeCallerCapabilities(caps), /Do not offer:.*save_brain_note/);
+});
+
+test("buildCallerCapabilities allows shared notes when canManageContent is true", () => {
+  const caps = buildCallerCapabilities(
+    { id: "c1", canManageContent: true, canManageConfig: true },
+    { username: "admin", role: "ADMIN" },
+  );
+  assert.equal(caps.canWriteSharedBrainNotes, true);
+  assert.equal(caps.canMutateSql, true);
+  assert.equal(caps.doNotOffer.includes("save_brain_note"), false);
+});
+
+test("summarizeConnections surfaces read-only vs manage-content", () => {
+  const text = summarizeConnections([
+    { id: "c1", connectionName: "ACME", dbType: "postgresql", canManageContent: false },
+    { id: "c2", connectionName: "Owned", dbType: "postgresql", canManageContent: true },
+  ]);
+  assert.match(text, /ACME.*\[read-only content\]/);
+  assert.match(text, /Owned.*\[manage-content\]/);
+});
+
+test("handleToolCall(save_brain_note) refuses before POST when caller cannot write", async () => {
+  const calls = [];
+  const cfg = makeFakeConfig(calls, [
+    [{ id: "c1", canManageContent: false, accessLevel: "CHAT_EDITOR" }],
+    { username: "marts-editor", role: "DEVELOPER" },
+  ]);
+  const result = await handleToolCall(cfg, "save_brain_note", {
+    connectionId: "c1", tableName: "marts.dim_person", noteText: "meditator_count_current",
+  });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /cannot write shared DeepSQL brain notes/);
+  assert.match(result.content[0].text, /Do not offer to save/);
+  assert.equal(result.structuredContent.errorCode, "POLICY_CONTENT_WRITE_DENIED");
+  assert.equal(calls.some((c) => /\/brain\/notes$/.test(c.url) && c.method === "POST"), false);
+});
+
+test("handleToolCall(get_brain_context) stamps callerCapabilities onto the payload", async () => {
+  const calls = [];
+  const cfg = makeFakeConfig(calls, [
+    { retrievalIntent: "metric", resultCount: 1, ragTableNames: ["marts.dim_person"] },
+    [{ id: "c1", canManageContent: false, accessLevel: "CHAT_EDITOR" }],
+    { username: "marts-editor", role: "DEVELOPER" },
+  ]);
+  const result = await handleToolCall(cfg, "get_brain_context", {
+    connectionId: "c1",
+    question: "how many meditators",
+  });
+  assert.equal(result.structuredContent.callerCapabilities.canWriteSharedBrainNotes, false);
+  assert.ok(result.structuredContent.callerCapabilities.doNotOffer.includes("save_brain_note"));
+  assert.match(result.content[0].text, /Do not offer:.*save_brain_note/);
 });

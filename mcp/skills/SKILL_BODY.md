@@ -91,8 +91,8 @@ usually doesn't know about either; that's exactly why DeepSQL exists.
 | `list_business_rules(connectionId, question?)` | Rules the SQL must respect. |
 | `get_relationships(connectionId)` | Foreign keys (declared + inferred-with-confidence). |
 | `get_anti_patterns(connectionId, kind="table"\|"query")` | Patterns to avoid in this DB. |
-| `list_brain_recommendations(connectionId, limit?)` | The brain's AI-proposed things to document (the review queue). Admin accepts good ones with `save_brain_note`. |
-| `save_brain_note(connectionId, tableName, noteText, columnName?)` | **Accept/save a fact to the SHARED company brain** — grounds every future answer for this connection. Admin (manage-content). NOT for personal prefs — those go in a DeepSQL skill. |
+| `list_brain_recommendations(connectionId, limit?)` | The brain's AI-proposed things to document (the review queue). Only offer accept/save when `callerCapabilities.canWriteSharedBrainNotes` is true. |
+| `save_brain_note(connectionId, tableName, noteText, columnName?)` | **Accept/save a fact to the SHARED company brain** — only when the user asked to remember it AND `canWriteSharedBrainNotes` is true. Never volunteer after answering a question. |
 | `list_brain_notes(connectionId, tableName?, columnName?)` | Knowledge already in the brain; filter before saving a duplicate. |
 | `analyze_slow_queries(connectionId, thresholdMs?, limit?)` | Snapshot of slow queries from live stats. |
 | `get_slow_query_timeline(connectionId, fingerprint)` | Day-by-day timeline for one fingerprint: call count, mean/max time, regression factor per day. Answers "is this query getting slower". |
@@ -106,7 +106,7 @@ usually doesn't know about either; that's exactly why DeepSQL exists.
 | `get_growth_anomalies(connectionId, tableName?, unacknowledgedOnly?, days?)` | DeepSQL-flagged sudden growth spikes with severity (CRITICAL/WARNING/INFO), anomaly type, before/after sizes, confidence score. Check this BEFORE walking the user through a slow-query plan — a recent growth anomaly is often the real root cause. |
 | `execute_sql(connectionId, query, ...)` | Run any SQL — SELECT for everyone, DML/DDL for admins (two-step confirm). |
 | `analyze_query_plan(connectionId, query, useAnalyze=false)` | AI-enriched plan analysis (issues + index recs + summary). |
-| `get_current_user()` | Authenticated user + role. Use to know whether the caller is admin-capable before suggesting DDL. |
+| `get_current_user()` | Authenticated user + role + `callerCapabilities`. Read `doNotOffer` before suggesting any write. |
 | `test_connection(connectionId)` | Validates a saved connection (privilege report + SSH tunnel check). Read-only on the customer's DB. |
 | `show_connection(connectionId)` | Full saved config with secrets masked. Diagnose host/port/SSL/SSH issues. |
 | `reinit_connection_brain(connectionId, force?)` | Trigger a fresh schema scan + brain re-embedding. Use after the user reports stale schema knowledge. |
