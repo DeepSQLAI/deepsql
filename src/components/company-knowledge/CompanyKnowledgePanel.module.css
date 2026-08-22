@@ -668,7 +668,200 @@
   background: #fff;
 }
 
-/* ===== Suggestions table layout ===== */
+/* ===== Suggestions bubble layout ===== */
+
+.suggestionsBubblePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  background: #fff;
+  min-height: 200px;
+}
+
+.suggestionsBubbleToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bubbleSelectAll {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.suggestionBubbles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-content: flex-start;
+}
+
+.suggestionBubbleWrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.suggestionBubbleCheckbox {
+  display: flex;
+  align-items: center;
+  padding-top: 12px;
+}
+
+.suggestionBubble {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 180px;
+  max-width: 280px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #f9fafb;
+  color: #111827;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
+}
+
+.suggestionBubble:hover {
+  background: #fff;
+  border-color: #c7d2fe;
+  transform: translateY(-1px);
+}
+
+.suggestionBubbleActive {
+  background: #eef2ff;
+  border-color: #6366f1;
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.12);
+}
+
+.suggestionBubbleSelected {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+.suggestionBubbleTop {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+
+.suggestionBubbleTitle {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.suggestionBubbleTarget {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.suggestionBubbleMerge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #92400e;
+  background: #fef3c7;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.mergeBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.previewSectionExisting {
+  padding: 12px;
+  border-radius: 12px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+
+.previewSectionExcerpt {
+  padding: 0;
+}
+
+.previewExistingTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: #92400e;
+  margin-bottom: 6px;
+}
+
+.previewBodyMuted {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #78350f;
+}
+
+.previewMergeHint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #92400e;
+}
+
+.ruleExcerptCard {
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid #dbeafe;
+  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+}
+
+.ruleExcerptHeadline {
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 8px;
+}
+
+.ruleExcerptBody {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #374151;
+  white-space: pre-wrap;
+}
+
+.ruleExcerptMeta {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+/* ===== Suggestions table layout (legacy rows kept for reference) ===== */
 
 .suggestionsLayout {
   display: grid;

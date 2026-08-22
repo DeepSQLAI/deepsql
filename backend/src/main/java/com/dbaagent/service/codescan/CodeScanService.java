@@ -9,6 +9,8 @@ import com.dbaagent.repository.CodeKnowledgeSuggestionRepository;
 import com.dbaagent.repository.CodeScanFileHashRepository;
 import com.dbaagent.repository.CodeScanJobRepository;
 import com.dbaagent.repository.CodeScanSourceRepository;
+import com.dbaagent.repository.CompanyKnowledgeEntryRepository;
+import com.dbaagent.repository.SchemaDocumentationRepository;
 import com.dbaagent.service.SchemaScannerService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -66,6 +68,8 @@ public class CodeScanService {
     private final CodeSuggestionApplier applier;
     private final SchemaScannerService schemaScannerService;
     private final SchemaAmbiguityService schemaAmbiguityService;
+    private final CompanyKnowledgeEntryRepository companyKnowledgeEntryRepository;
+    private final SchemaDocumentationRepository schemaDocumentationRepository;
 
     @Value("${code-scan.executor.core:2}")
     private int executorCore;
@@ -492,7 +496,14 @@ public class CodeScanService {
                 j.setProgress(90);
             });
 
-            List<CodeKnowledgeSuggestion> aggregated = aggregator.aggregate(connectionId, jobId, raw, schema);
+            List<CodeKnowledgeSuggestion> aggregated = aggregator.aggregate(
+                connectionId,
+                jobId,
+                raw,
+                schema,
+                companyKnowledgeEntryRepository.findByConnectionId(connectionId),
+                schemaDocumentationRepository.findByConnectionId(connectionId)
+            );
             if (!aggregated.isEmpty()) {
                 suggestionRepository.saveAll(aggregated);
                 supersedeStalePending(connectionId, sourceId, jobId, aggregated);
