@@ -54,6 +54,15 @@ import {
 // query fails with a real message rather than an opaque 504.
 const QUERY_TIMEOUT_SECONDS = 240;
 
+// CSV export re-runs the query with no display cap, so it needs its own bound.
+// Without one, an unbounded SELECT streams every row into a JS array, a CSV
+// string, and a Blob, and the equivalent unbounded read on the backend loads
+// the whole result set into memory before responding — large enough result
+// sets can exhaust the backend heap for every tenant on that instance, not
+// just the exporter. 100k rows is generous for a CSV download while staying
+// well short of that failure mode.
+const EXPORT_ROW_LIMIT = 100000;
+
 // Constants for diagram layout
 const DIAGRAM_NODE_WIDTH = 240;
 const DIAGRAM_NODE_HEIGHT = 120;
@@ -298,6 +307,12 @@ export default function SqlRunnerTab({ connectionId }) {
   const dbObjectsRef = useRef([]);
   const abortControllerRef = useRef(null);
   const executionIdRef = useRef(null);
+  // Guards against a second run starting while one is already in flight (e.g. a
+  // held-down Cmd+Enter): without it, whichever response lands last wins the
+  // results panel regardless of which run the user actually meant to see last,
+  // and the earlier run's abort/cancel handle gets silently discarded.
+  const isRunningRef = useRef(false);
+  const runSeqRef = useRef(0);
   // Note: savedQueriesPanelRef kept for potential future use, but panel UI is now in modal
   const savedQueriesPanelRef = useRef(null);
   const hasRowCount = (value) => value !== null && value !== undefined;
@@ -1194,6 +1209,9 @@ export default function SqlRunnerTab({ connectionId }) {
   };
 
   const handleRunQuery = async (queryToRun = null, options = {}) => {
+    if (isRunningRef.current) {
+      return;
+    }
     const mutationConfirmed = options.mutationConfirmed === true;
     let queryText = null;
 
@@ -1252,12 +1270,14 @@ export default function SqlRunnerTab({ connectionId }) {
       return;
     }
 
+    isRunningRef.current = true;
     setIsRunning(true);
     setError(null);
     setResults(null);
     setExplainResults(null); // Clear explain results when running query
     setOptimizeResult(null);
 
+    const seq = ++runSeqRef.current;
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     // Identifies this run so cancelling can terminate it on the database.
@@ -1283,6 +1303,12 @@ export default function SqlRunnerTab({ connectionId }) {
           executionId,
         },
       );
+
+      if (seq !== runSeqRef.current) {
+        // Superseded by a later run — drop this response rather than let a
+        // stale result overwrite what the user is now looking at.
+        return;
+      }
 
       if (response.success) {
         setPendingMutationConfirmation(null);
@@ -1355,9 +1381,12 @@ export default function SqlRunnerTab({ connectionId }) {
         setError(err.message || "Failed to execute query");
       }
     } finally {
-      abortControllerRef.current = null;
-      executionIdRef.current = null;
-      setIsRunning(false);
+      if (seq === runSeqRef.current) {
+        abortControllerRef.current = null;
+        executionIdRef.current = null;
+        isRunningRef.current = false;
+        setIsRunning(false);
+      }
     }
   };
 
@@ -1366,6 +1395,7 @@ export default function SqlRunnerTab({ connectionId }) {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
+    isRunningRef.current = false;
     setIsRunning(false);
     setError(null);
     // Aborting above only drops the HTTP response; the statement keeps running
@@ -1406,23 +1436,37 @@ export default function SqlRunnerTab({ connectionId }) {
 
   const handleExportResults = async () => {
     if (!results) return;
+    // Export re-runs the query, so it must respect the same in-flight guard as
+    // Run. Today `handleRunQuery` clears `results`, which hides the Export
+    // button for the duration of a run and makes this unreachable — but that is
+    // an incidental consequence of unrelated state handling, not a guarantee.
+    // Without this check, any change that keeps results on screen during a run
+    // silently reintroduces two concurrent queries from one tab.
+    if (isRunningRef.current || isExporting) return;
 
-    // If the result was limited, always re-fetch the full result set for download.
-    // This ensures the CSV contains all rows, not just the displayed page.
+    // If the result was limited, always re-fetch for download so the CSV isn't
+    // just the displayed page — but still capped at EXPORT_ROW_LIMIT, not
+    // unbounded, and on the same timeout budget as Run so it fails with a real
+    // error instead of an opaque 504 from the nginx proxy.
     if (results.isLimited && results.query) {
       setIsExporting(true);
       // Strip trailing semicolon so backends don't reject the re-executed query
       const queryForExport = results.query.trim().replace(/;+$/, "");
+      const exportAbortController = new AbortController();
+      const exportExecutionId =
+        globalThis.crypto?.randomUUID?.() ??
+        `exec-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       try {
         const response = await queryAPI.executeQuery(
           connectionId,
           queryForExport,
-          null,  // no limit — fetch all rows
-          600,
-          null,
+          EXPORT_ROW_LIMIT,
+          QUERY_TIMEOUT_SECONDS,
+          exportAbortController.signal,
           {
             executionOrigin: "EDITOR",
             mutationConfirmed: false,
+            executionId: exportExecutionId,
           },
         );
         if (response.success) {
@@ -2590,9 +2634,9 @@ export default function SqlRunnerTab({ connectionId }) {
                         disabled={isExporting}
                         title={
                           results?.isLimited
-                            ? results?.totalRowCount != null
-                              ? `Download all ${results.totalRowCount.toLocaleString()} rows as CSV`
-                              : "Download full result set as CSV"
+                            ? results?.totalRowCount != null && results.totalRowCount > EXPORT_ROW_LIMIT
+                              ? `Download first ${EXPORT_ROW_LIMIT.toLocaleString()} of ${results.totalRowCount.toLocaleString()} rows as CSV`
+                              : `Download up to ${EXPORT_ROW_LIMIT.toLocaleString()} rows as CSV`
                             : "Export CSV"
                         }
                       >
