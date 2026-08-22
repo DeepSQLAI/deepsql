@@ -122,6 +122,7 @@ export function useAllCodeScanSuggestions({ connectionId, status = 'PENDING' }) 
       const pageSize = 200
       // Cap to keep things bounded; one project's worst-case so far is ~750.
       const maxPages = 50
+      let totalElements = null
       while (page < maxPages) {
         const data = await codeScanAPI.listSuggestions({
           connectionId,
@@ -130,14 +131,21 @@ export function useAllCodeScanSuggestions({ connectionId, status = 'PENDING' }) 
           size: pageSize,
         })
         const content = data?.content || []
+        if (typeof data?.totalElements === 'number') {
+          totalElements = data.totalElements
+        }
         out.push(...content)
+        // Prefer server total when present so a truncated first page cannot
+        // silently stop early while the Review badge still shows 198.
+        if (totalElements != null && out.length >= totalElements) break
         if (content.length < pageSize) break
         page += 1
       }
       return out
     },
     enabled: Boolean(connectionId),
-    staleTime: 30_000,
+    // Badge probe and list must stay in sync after scans complete.
+    staleTime: 0,
   })
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Edit3, Loader2, RefreshCw, Save, Trash2, Upload, X } from 'lucide-react'
 import { codeScanAPI } from '@/lib/api/client'
 import { queryKeys } from '@/lib/queryKeys'
@@ -42,6 +42,8 @@ function SourceCard({ source, connectionId, onDelete, externalActiveJobId }) {
   const inputRef = useRef(null)
   const [editingFocus, setEditingFocus] = useState(false)
   const [focusDraft, setFocusDraft] = useState(source.focusText || '')
+  const queryClient = useQueryClient()
+  const lastTerminalJobRef = useRef(null)
 
   // Pull the most-recent job for this source so we can show progress even
   // after a page reload, and detect any running job that wasn't started in
@@ -68,6 +70,24 @@ function SourceCard({ source, connectionId, onDelete, externalActiveJobId }) {
   // job from the polling query. This is what makes the card show progress
   // even when the user lands on the page after a scan was already started.
   const effective = stream || latestJob
+
+  // When a scan finishes, refresh the Review queue. Previously only scan
+  // *start* invalidated queries, so the badge (fresh totalElements) could
+  // show 198 while the list still served a stale 2-item cache.
+  useEffect(() => {
+    if (!connectionId || !effective?.id || !effective?.status) return
+    if (!['COMPLETED', 'FAILED', 'CANCELLED'].includes(effective.status)) return
+    const key = `${effective.id}:${effective.status}:${effective.suggestionsEmitted ?? 0}`
+    if (lastTerminalJobRef.current === key) return
+    lastTerminalJobRef.current = key
+    queryClient.invalidateQueries({ queryKey: queryKeys.codeScan.all(connectionId) })
+  }, [
+    connectionId,
+    effective?.id,
+    effective?.status,
+    effective?.suggestionsEmitted,
+    queryClient,
+  ])
 
   const handleRescan = async (file) => {
     setError(null)

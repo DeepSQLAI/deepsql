@@ -191,6 +191,11 @@ only covers cloud-specific, non-obvious caveats.
   `sudo -u postgres psql -f docker/postgres/init/11_create_acme_erp.sql` then
   `bash scripts/seed-acme-erp.sh` (registers `ACME ERP (Multi-Schema)` when backend auth
   is disabled or you have an admin session cookie).
+- **Company Knowledge → Review queue** (code-scan suggestions): seed without an LLM via
+  `python3 scripts/self-host/seed-review-suggestions.py --count 50`, then exercise approve/
+  reject/bulk edge cases with `python3 scripts/self-host/e2e-review-approvals.py`.
+  Approving `SCHEMA_DOC` rows needs `CODE_DERIVED` on `schema_documentation_source_check`
+  (startup initializer repairs this; Hibernate `ddl-auto` does not).
 
 ### Non-obvious setup caveats (each cost real debugging time)
 
