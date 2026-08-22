@@ -266,6 +266,54 @@
 
 .msgError { font-size: 12px; color: #b42318; margin-top: 6px; }
 
+.recWrap { margin-top: 12px; max-width: 520px; }
+.recBubbles { display: flex; flex-wrap: wrap; gap: 8px; }
+.recBubble {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid #dcd8f4; background: #f6f5fd; color: #3d3690;
+  border-radius: 999px; padding: 6px 12px; font-size: 12.5px; font-weight: 550;
+  cursor: pointer;
+  transition: background 120ms ease-out, border-color 120ms ease-out, transform 120ms cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.recBubble:hover { background: #eeedfe; border-color: #c4bdf0; }
+.recBubble:active { transform: scale(0.97); }
+.recBubbleOpen { background: #eeedfe; border-color: #534AB7; }
+.recCard {
+  margin-top: 8px; padding: 12px 14px;
+  border: 1px solid #ececec; border-radius: 12px; background: #fff;
+  box-shadow: 0 6px 16px -12px rgba(17, 17, 17, 0.2);
+}
+.recCardHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.recCardKicker { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: #6b668f; }
+.recDismiss {
+  border: none; background: transparent; color: #888; cursor: pointer; padding: 2px;
+  border-radius: 6px;
+}
+.recDismiss:hover { background: #f4f4f4; color: #333; }
+.recTarget { margin: 6px 0 4px; font-size: 12.5px; font-weight: 600; color: #111; font-family: var(--font-family-mono, ui-monospace, Menlo, monospace); }
+.recOverlap { margin: 0 0 8px; font-size: 12px; color: #6b668f; }
+.recExcerpt {
+  margin: 0; padding: 10px 12px; border-left: 3px solid #534AB7;
+  background: #f7f7fb; color: #333; font-size: 13px; line-height: 1.5; border-radius: 0 8px 8px 0;
+}
+.recActions { display: flex; gap: 8px; margin-top: 12px; }
+.recAccept {
+  border: none; background: #534AB7; color: #fff; border-radius: 8px;
+  padding: 7px 12px; font-size: 12.5px; font-weight: 550; cursor: pointer;
+}
+.recAccept:hover:not(:disabled) { background: #463c9f; }
+.recAccept:disabled { background: #d8d5f0; cursor: default; }
+.recCancel {
+  border: 1px solid #e2e2e2; background: #fff; color: #333; border-radius: 8px;
+  padding: 7px 12px; font-size: 12.5px; font-weight: 500; cursor: pointer;
+}
+.recCancel:hover { background: #f6f6f6; }
+.recError { margin: 8px 0 0; font-size: 12px; color: #b42318; }
+@media (prefers-reduced-motion: reduce) {
+  .recBubble { transition: background 120ms ease-out, border-color 120ms ease-out; }
+  .recBubble:active { transform: none; }
+}
+
 .typing { display: inline-flex; gap: 4px; padding: 4px 0; }
 .typing span { width: 6px; height: 6px; border-radius: 50%; background: #cfcaf0; animation: blink 1.2s infinite both; }
 .typing span:nth-child(2) { animation-delay: .2s; }

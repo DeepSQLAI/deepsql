@@ -3,7 +3,9 @@ import { ArrowUp, Plus, Square, Loader2, Database, Sparkles, Hash, Table2, Clock
 import { agentChatAPI, withConnectionContext } from '@/lib/api/agentClient'
 import { agentConversationAPI } from '@/lib/api/client'
 import { useAuth } from '@/hooks/useAuth'
+import { brainAPI } from '@/lib/api/client'
 import AgentMarkdown from './AgentMarkdown'
+import AgentRecommendationBubbles from './AgentRecommendationBubbles'
 import { sanitizeAssistantAnswer } from './sanitizeAssistantAnswer'
 import styles from './AgentChatPanel.module.css'
 
@@ -41,7 +43,7 @@ const SUGGESTIONS = [
   { icon: Clock, text: 'What are the top slow queries?' },
 ]
 
-export default function AgentChatPanel({ connectionId, connectionName }) {
+export default function AgentChatPanel({ connectionId, connectionName, canManageContent = false }) {
   const { username } = useAuth()
   const [sessionId, setSessionId] = useState(null)
   const [booting, setBooting] = useState(true)
@@ -164,13 +166,49 @@ export default function AgentChatPanel({ connectionId, connectionName }) {
         // tool step in the collapsible activity — so the bubble ends with just the
         // final answer (the text after the last tool).
         onTool: (d) => setMessages((m) => updateLast(m, (a) => ({ ...a, content: '', tools: [...(a.tools || []), toolLabel(d)] }))),
-        onEnd: () => { setMessages((m) => updateLast(m, (a) => ({ ...a, streaming: false }))); setSending(false); esRef.current = null },
+        onEnd: () => {
+          setMessages((m) => updateLast(m, (a) => ({ ...a, streaming: false })))
+          setSending(false)
+          esRef.current = null
+          // Recommendation bubbles load after the turn so the composer is
+          // already free. Failures here must never block chat.
+          if (canManageContent) {
+            queueMicrotask(() => proposeFromLastTurn())
+          }
+        },
         onError: () => { setMessages((m) => updateLast(m, (a) => ({ ...a, streaming: false, error: true }))); setSending(false); esRef.current = null },
       })
     } catch (e) {
       setMessages((m) => updateLast(m, (a) => ({ ...a, streaming: false, error: true, content: a.content || `Error: ${e?.message || 'request failed'}` })))
       setSending(false)
     }
+  }
+
+  const proposeFromLastTurn = () => {
+    setMessages((current) => {
+      const last = current[current.length - 1]
+      const prev = current[current.length - 2]
+      if (!last || last.role !== 'assistant' || last.error || last.proposal) {
+        return current
+      }
+      const answer = sanitizeAssistantAnswer(last.content || '')
+      const question = prev?.role === 'user' ? prev.content : ''
+      brainAPI.proposeNoteFromTurn({ connectionId, question, answer })
+        .then((proposal) => {
+          if (!proposal) return
+          setMessages((msgs) => updateLast(msgs, (assistant) => (
+            assistant.proposal ? assistant : { ...assistant, proposal }
+          )))
+        })
+        .catch(() => { /* no bubble is fine — chat stays usable */ })
+      return current
+    })
+  }
+
+  const patchLastProposal = (patch) => {
+    setMessages((m) => updateLast(m, (a) => (
+      a.proposal ? { ...a, proposal: { ...a.proposal, ...patch } } : a
+    )))
   }
 
   const stop = async () => {
@@ -248,6 +286,14 @@ export default function AgentChatPanel({ connectionId, connectionName }) {
                   ? <AgentMarkdown content={sanitizeAssistantAnswer(m.content)} />
                   : m.streaming && <span className={styles.typing}><span /><span /><span /></span>}
                 {m.error && <div className={styles.msgError}>The agent run ended early.</div>}
+                {canManageContent && !m.streaming && m.proposal && (
+                  <AgentRecommendationBubbles
+                    connectionId={connectionId}
+                    proposal={m.proposal}
+                    onDismiss={() => patchLastProposal({ status: 'dismissed' })}
+                    onAccepted={() => patchLastProposal({ status: 'saved' })}
+                  />
+                )}
               </div>
             ) : (
               <div className={styles.userBubble}>{m.content}</div>

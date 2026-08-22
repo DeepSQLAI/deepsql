@@ -28,7 +28,8 @@ After the answer you may offer **one short follow-up question** (a single line) 
    `list_connections` carry `callerCapabilities`. If `doNotOffer` lists an
    action — especially `save_brain_note` — do not mention it, do not ask
    "should I save this", and do not render a Yes button. Answering a metric
-   is not a request to persist it. Offering a write that 403s is a broken UX.
+   is not a request to persist it. The product UI may show a non-blocking
+   save bubble after your answer for admins; leave that to the UI.
 
 ## Remembering things — two different places
 
