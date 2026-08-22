@@ -60,8 +60,8 @@ function readCaBundle(caPath) {
 
 /**
  * Node `https.request` options implementing the profile's policy.
- * In `pinned`/`insecure` mode Node's own chain check is disabled and replaced by
- * the fingerprint check in `checkPeerCertificate` — never skip that follow-up.
+ * Certificate validation must remain enabled; additional checks (like pinning)
+ * are additive and must not replace TLS verification.
  */
 function nodeTlsOptions(profile) {
   const mode = profile?.tls?.mode || 'system';
@@ -69,7 +69,7 @@ function nodeTlsOptions(profile) {
     return { ca: readCaBundle(profile.tls.caPath), rejectUnauthorized: true };
   }
   if (mode === 'pinned' || mode === 'insecure') {
-    return { rejectUnauthorized: false };
+    return { rejectUnauthorized: true };
   }
   return { rejectUnauthorized: true };
 }
