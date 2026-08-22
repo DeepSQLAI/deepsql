@@ -48,34 +48,12 @@ function buildSearchHaystack(s) {
   return parts.join(' ').toLowerCase()
 }
 
-function buildRuleExcerpt(suggestion) {
-  if (!suggestion) return null
-  const entryType = suggestion.payload?.entryType || 'BUSINESS_RULE'
-  if (suggestion.targetKind === 'SCHEMA_DOC') {
-    const target = suggestion.targetObject || 'schema object'
-    return {
-      label: 'Schema note that would be saved',
-      headline: target,
-      body: suggestion.content,
-      meta: suggestion.payload?.businessTerms?.length
-        ? `Terms: ${suggestion.payload.businessTerms.join(', ')}`
-        : null,
-    }
-  }
-  return {
-    label: `${String(entryType).replaceAll('_', ' ').toLowerCase()} that would be saved`,
-    headline: suggestion.title,
-    body: suggestion.content,
-    meta: suggestion.targetObject ? `Linked: ${suggestion.targetObject}` : null,
-  }
-}
-
 function PreviewPane({ suggestion, pinned, onPin, onUnpin, onDecide, decidePending }) {
   if (!suggestion) {
     return (
       <aside className={styles.previewPane}>
         <div className={styles.previewPaneEmpty}>
-          Click a suggestion bubble to preview the business rule or schema note that would be created.
+          Hover a row to preview the suggestion. Click the pin to keep it open while you select.
         </div>
       </aside>
     )
@@ -85,10 +63,6 @@ function PreviewPane({ suggestion, pinned, onPin, onUnpin, onDecide, decidePendi
   const sources = suggestion.sourceFiles || []
   const businessTerms = suggestion.payload?.businessTerms || []
   const rationale = suggestion.payload?.rationale
-  const excerpt = buildRuleExcerpt(suggestion)
-  const mergedWithExisting = Boolean(suggestion.payload?.mergedWithExisting)
-  const existingExcerpt = suggestion.payload?.existingExcerpt
-  const existingTitle = suggestion.payload?.existingTitle
   return (
     <aside className={styles.previewPane}>
       <div className={styles.previewBadgeRow}>
@@ -98,9 +72,6 @@ function PreviewPane({ suggestion, pinned, onPin, onUnpin, onDecide, decidePendi
         <span className={`${styles.confidencePill} ${confidenceClass(suggestion.confidence)}`}>
           {Math.round((suggestion.confidence || 0) * 100)}%
         </span>
-        {mergedWithExisting && (
-          <span className={styles.mergeBadge}>Merges existing</span>
-        )}
         {suggestion.payload?.entryType && (
           <span className={styles.kindBadge}>{suggestion.payload.entryType}</span>
         )}
@@ -119,30 +90,8 @@ function PreviewPane({ suggestion, pinned, onPin, onUnpin, onDecide, decidePendi
         <div className={styles.previewTarget}>{suggestion.targetObject}</div>
       )}
 
-      {mergedWithExisting && existingExcerpt && (
-        <div className={`${styles.previewSection} ${styles.previewSectionExisting}`}>
-          <div className={styles.previewLabel}>Already in knowledge base</div>
-          {existingTitle && <div className={styles.previewExistingTitle}>{existingTitle}</div>}
-          <p className={styles.previewBodyMuted}>{existingExcerpt}</p>
-          <p className={styles.previewMergeHint}>
-            Approving merges this scan finding into the existing rule instead of creating a duplicate.
-          </p>
-        </div>
-      )}
-
-      {excerpt && (
-        <div className={`${styles.previewSection} ${styles.previewSectionExcerpt}`}>
-          <div className={styles.previewLabel}>{excerpt.label}</div>
-          <div className={styles.ruleExcerptCard}>
-            <div className={styles.ruleExcerptHeadline}>{excerpt.headline}</div>
-            <p className={styles.ruleExcerptBody}>{excerpt.body}</p>
-            {excerpt.meta && <div className={styles.ruleExcerptMeta}>{excerpt.meta}</div>}
-          </div>
-        </div>
-      )}
-
       <div className={styles.previewSection}>
-        <div className={styles.previewLabel}>Full description</div>
+        <div className={styles.previewLabel}>Description</div>
         <p className={styles.previewBody}>{suggestion.content}</p>
       </div>
 
@@ -212,7 +161,7 @@ function PreviewPane({ suggestion, pinned, onPin, onUnpin, onDecide, decidePendi
           </button>
         </div>
       )}
-      <div className={styles.previewPinHint}>Click a bubble to preview · pin keeps the excerpt open</div>
+      <div className={styles.previewPinHint}>Click row to pin · click pin to release</div>
     </aside>
   )
 }
@@ -231,7 +180,7 @@ export default function SuggestionsQueueTab({ connectionId }) {
   const [search, setSearch] = useState('')
   const [minConfidence, setMinConfidence] = useState(0)
   const [selected, setSelected] = useState(() => new Set())
-  const [activeId, setActiveId] = useState(null)
+  const [hoveredId, setHoveredId] = useState(null)
   const [pinnedId, setPinnedId] = useState(null)
   const [bulkError, setBulkError] = useState(null)
   const [bulkSuccess, setBulkSuccess] = useState(null)
@@ -269,7 +218,7 @@ export default function SuggestionsQueueTab({ connectionId }) {
   const allVisibleSelected = filtered.length > 0 && filtered.every((s) => selected.has(s.id))
   const someVisibleSelected = !allVisibleSelected && filtered.some((s) => selected.has(s.id))
 
-  const focusedId = pinnedId || activeId || filtered[0]?.id || null
+  const focusedId = pinnedId || hoveredId
   const focused = useMemo(
     () => indexed.find((s) => s.id === focusedId) || null,
     [indexed, focusedId],
@@ -470,9 +419,9 @@ export default function SuggestionsQueueTab({ connectionId }) {
         </div>
       ) : (
         <div className={styles.suggestionsLayout}>
-          <div className={styles.suggestionsBubblePanel}>
-            <div className={styles.suggestionsBubbleToolbar}>
-              <label className={styles.bubbleSelectAll}>
+          <div className={styles.suggestionsList}>
+            <div className={styles.suggestionsHeader}>
+              <div className={styles.checkboxCell}>
                 <input
                   type="checkbox"
                   className={styles.checkboxInput}
@@ -483,57 +432,57 @@ export default function SuggestionsQueueTab({ connectionId }) {
                   onChange={toggleAllVisible}
                   aria-label="select all visible"
                 />
-                Select all visible
-              </label>
+              </div>
+              <div>Conf</div>
+              <div>Kind</div>
+              <div>Target</div>
+              <div>Title</div>
             </div>
             {filtered.length === 0 ? (
               <div className={styles.emptyState} style={{ minHeight: 100 }}>
                 Nothing matches that filter.
               </div>
             ) : (
-              <div className={styles.suggestionBubbles} role="list">
-                {filtered.map((s) => {
-                  const isSel = selected.has(s.id)
-                  const isActive = focusedId === s.id
-                  const merged = Boolean(s.payload?.mergedWithExisting)
-                  return (
-                    <div key={s.id} className={styles.suggestionBubbleWrap} role="listitem">
-                      <label className={styles.suggestionBubbleCheckbox} onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          className={styles.checkboxInput}
-                          checked={isSel}
-                          onChange={() => toggleOne(s.id)}
-                          aria-label={`select ${s.title}`}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        className={`${styles.suggestionBubble} ${isActive ? styles.suggestionBubbleActive : ''} ${isSel ? styles.suggestionBubbleSelected : ''}`}
-                        onClick={() => {
-                          setActiveId(s.id)
-                          setPinnedId((cur) => (cur === s.id ? cur : null))
-                        }}
-                        title={s.content}
-                      >
-                        <span className={styles.suggestionBubbleTop}>
-                          <span className={`${styles.kindBadge} ${kindClass(s.targetKind)}`}>
-                            {kindLabel(s.targetKind)}
-                          </span>
-                          <span className={`${styles.confidencePill} ${confidenceClass(s.confidence)}`}>
-                            {Math.round((s.confidence || 0) * 100)}%
-                          </span>
-                        </span>
-                        <span className={styles.suggestionBubbleTitle}>{s.title}</span>
-                        {s.targetObject && (
-                          <span className={styles.suggestionBubbleTarget}>{s.targetObject}</span>
-                        )}
-                        {merged && <span className={styles.suggestionBubbleMerge}>Merges existing</span>}
-                      </button>
+              filtered.map((s) => {
+                const isSel = selected.has(s.id)
+                const isPin = pinnedId === s.id
+                return (
+                  <div
+                    key={s.id}
+                    className={`${styles.suggestionsRow} ${isSel ? styles.suggestionsRowSelected : ''} ${isPin ? styles.suggestionsRowPinned : ''}`}
+                    onMouseEnter={() => setHoveredId(s.id)}
+                    onClick={(e) => {
+                      // Clicks inside a checkbox / button shouldn't toggle pin.
+                      if (e.target.closest('button, input')) return
+                      setPinnedId((cur) => (cur === s.id ? null : s.id))
+                    }}
+                  >
+                    <div className={styles.checkboxCell} onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        className={styles.checkboxInput}
+                        checked={isSel}
+                        onChange={() => toggleOne(s.id)}
+                        aria-label={`select ${s.title}`}
+                      />
                     </div>
-                  )
-                })}
-              </div>
+                    <div>
+                      <span className={`${styles.confidencePill} ${confidenceClass(s.confidence)}`}>
+                        {Math.round((s.confidence || 0) * 100)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className={`${styles.kindBadge} ${kindClass(s.targetKind)}`}>
+                        {kindLabel(s.targetKind)}
+                      </span>
+                    </div>
+                    <div className={`${styles.targetCell} ${!s.targetObject ? styles.targetCellEmpty : ''}`}>
+                      {s.targetObject || '—'}
+                    </div>
+                    <div className={styles.titleCell}>{s.title}</div>
+                  </div>
+                )
+              })
             )}
           </div>
 

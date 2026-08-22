@@ -600,9 +600,7 @@ export default function CompanyKnowledgePanel({ connectionId }) {
             )}
           </span>
           <span className={styles.stageMeta}>
-            {pendingSuggestionCount > 0
-              ? `${pendingSuggestionCount} optional — review anytime`
-              : 'Accept what fits'}
+            {pendingSuggestionCount > 0 ? `${pendingSuggestionCount} awaiting sign-off` : 'Accept what fits'}
           </span>
         </button>
 
@@ -625,7 +623,7 @@ export default function CompanyKnowledgePanel({ connectionId }) {
       </div>
 
       <p className={styles.flowCaption}>
-        Review is optional and never blocks Agent chat — approve suggestions when you want them in the knowledge base.
+        Knowledge flows left to right — nothing reaches the knowledge base until you review and accept it.
       </p>
 
       {activeTab === 'schema-context' && <SchemaContextTab connectionId={connectionId} />}

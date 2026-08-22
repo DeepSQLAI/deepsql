@@ -1,12 +1,10 @@
 package com.dbaagent.service.codescan;
 
-import com.dbaagent.model.CompanyKnowledgeEntry;
 import com.dbaagent.model.DocumentationSource;
 import com.dbaagent.model.SchemaDocumentation;
 import com.dbaagent.model.SchemaMetadata;
 import com.dbaagent.model.code.CodeKnowledgeSuggestion;
 import com.dbaagent.repository.CodeKnowledgeSuggestionRepository;
-import com.dbaagent.repository.CompanyKnowledgeEntryRepository;
 import com.dbaagent.repository.SchemaDocumentationRepository;
 import com.dbaagent.service.CompanyKnowledgeService;
 import com.dbaagent.service.SchemaScannerService;
@@ -35,7 +33,6 @@ class CodeSuggestionApplierTest {
 
     @Mock private CodeKnowledgeSuggestionRepository suggestionRepository;
     @Mock private SchemaDocumentationRepository schemaDocRepository;
-    @Mock private CompanyKnowledgeEntryRepository companyKnowledgeEntryRepository;
     @Mock private CompanyKnowledgeService companyKnowledgeService;
     @Mock private TrainingService trainingService;
     @Mock private SchemaScannerService schemaScannerService;
@@ -47,7 +44,6 @@ class CodeSuggestionApplierTest {
         applier = new CodeSuggestionApplier(
             suggestionRepository,
             schemaDocRepository,
-            companyKnowledgeEntryRepository,
             companyKnowledgeService,
             trainingService,
             schemaScannerService

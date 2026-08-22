@@ -5,7 +5,6 @@ import com.dbaagent.model.DocumentationSource;
 import com.dbaagent.model.SchemaDocumentation;
 import com.dbaagent.model.code.CodeKnowledgeSuggestion;
 import com.dbaagent.repository.CodeKnowledgeSuggestionRepository;
-import com.dbaagent.repository.CompanyKnowledgeEntryRepository;
 import com.dbaagent.repository.SchemaDocumentationRepository;
 import com.dbaagent.service.CompanyKnowledgeService;
 import com.dbaagent.service.SchemaScannerService;
@@ -16,7 +15,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -34,7 +32,6 @@ public class CodeSuggestionApplier {
 
     private final CodeKnowledgeSuggestionRepository suggestionRepository;
     private final SchemaDocumentationRepository schemaDocRepository;
-    private final CompanyKnowledgeEntryRepository companyKnowledgeEntryRepository;
     private final CompanyKnowledgeService companyKnowledgeService;
     private final TrainingService trainingService;
     private final SchemaScannerService schemaScannerService;
@@ -81,36 +78,6 @@ public class CodeSuggestionApplier {
     }
 
     private void applySchemaDoc(CodeKnowledgeSuggestion suggestion, String decidedBy) {
-        Map<String, Object> payload = suggestion.getPayload();
-        Object existingDocId = payload == null ? null : payload.get("existingDocId");
-        if (existingDocId != null && !existingDocId.toString().isBlank()) {
-            SchemaDocumentation doc = schemaDocRepository.findById(existingDocId.toString())
-                .orElseThrow(() -> new IllegalArgumentException(
-                    "Existing schema doc not found: " + existingDocId
-                ));
-            doc.setDescription(mergeText(doc.getDescription(), suggestion.getContent()));
-            Object terms = payload.get("businessTerms");
-            if (terms instanceof List<?> list && !list.isEmpty()) {
-                String mergedTerms = mergeCommaSeparated(doc.getBusinessTerms(), list);
-                doc.setBusinessTerms(mergedTerms);
-            }
-            if (doc.getConfidence() == null || (suggestion.getConfidence() != null
-                && suggestion.getConfidence() > doc.getConfidence())) {
-                doc.setConfidence(suggestion.getConfidence());
-            }
-            if (suggestion.getSourceFiles() != null && !suggestion.getSourceFiles().isEmpty()) {
-                doc.setSourceFiles(suggestion.getSourceFiles());
-            }
-            SchemaDocumentation saved = schemaDocRepository.save(doc);
-            suggestion.setAppliedDocId(saved.getId());
-            try {
-                trainingService.upsertDocumentationEmbedding(saved);
-            } catch (Exception e) {
-                log.warn("Failed to embed schema doc {} after approval: {}", saved.getId(), e.getMessage());
-            }
-            return;
-        }
-
         SchemaDocumentation.DocumentationType objectType = resolveObjectType(suggestion);
         String objectName;
         String parentObject = null;
@@ -199,27 +166,6 @@ public class CodeSuggestionApplier {
     }
 
     private void applyKnowledgeEntry(CodeKnowledgeSuggestion suggestion, String decidedBy) {
-        Map<String, Object> payload = suggestion.getPayload();
-        Object existingId = payload == null ? null : payload.get("existingEntryId");
-        if (existingId != null && !existingId.toString().isBlank()) {
-            CompanyKnowledgeEntry existing = companyKnowledgeEntryRepository.findById(existingId.toString())
-                .orElseThrow(() -> new IllegalArgumentException(
-                    "Existing company knowledge entry not found: " + existingId
-                ));
-            CompanyKnowledgeEntry merged = CompanyKnowledgeEntry.builder()
-                .connectionId(existing.getConnectionId())
-                .title(pickTitle(existing.getTitle(), suggestion.getTitle()))
-                .content(mergeText(existing.getContent(), suggestion.getContent()))
-                .entryType(resolveEntryType(suggestion))
-                .linkedTables(mergeStringLists(existing.getLinkedTables(), suggestion.getLinkedTables()))
-                .linkedColumns(mergeStringLists(existing.getLinkedColumns(), suggestion.getLinkedColumns()))
-                .createdBy(decidedBy)
-                .build();
-            CompanyKnowledgeEntry saved = companyKnowledgeService.updateEntry(existing.getId(), merged);
-            suggestion.setAppliedEntryId(saved.getId());
-            return;
-        }
-
         CompanyKnowledgeEntry entry = CompanyKnowledgeEntry.builder()
             .connectionId(suggestion.getConnectionId())
             .title(suggestion.getTitle())
@@ -273,54 +219,5 @@ public class CodeSuggestionApplier {
             }
         }
         return CompanyKnowledgeEntry.EntryType.BUSINESS_RULE;
-    }
-
-    private static String pickTitle(String existing, String proposed) {
-        if (proposed == null || proposed.isBlank()) return existing;
-        if (existing == null || existing.isBlank()) return proposed;
-        return proposed.length() >= existing.length() ? proposed : existing;
-    }
-
-    private static String mergeText(String existing, String addition) {
-        if (addition == null || addition.isBlank()) {
-            return existing == null ? "" : existing;
-        }
-        if (existing == null || existing.isBlank()) {
-            return addition.trim();
-        }
-        String left = existing.trim();
-        String right = addition.trim();
-        if (left.equalsIgnoreCase(right)) return left;
-        if (left.toLowerCase().contains(right.toLowerCase())) return left;
-        if (right.toLowerCase().contains(left.toLowerCase())) return right;
-        return left + "\n\n" + right;
-    }
-
-    private static List<String> mergeStringLists(List<String> left, List<String> right) {
-        List<String> merged = new ArrayList<>();
-        if (left != null) merged.addAll(left);
-        if (right != null) {
-            for (String value : right) {
-                if (value != null && !value.isBlank() && !merged.contains(value)) {
-                    merged.add(value);
-                }
-            }
-        }
-        return merged;
-    }
-
-    private static String mergeCommaSeparated(String existing, List<?> additions) {
-        List<String> merged = new ArrayList<>();
-        if (existing != null && !existing.isBlank()) {
-            for (String part : existing.split(",")) {
-                String trimmed = part.trim();
-                if (!trimmed.isEmpty() && !merged.contains(trimmed)) merged.add(trimmed);
-            }
-        }
-        for (Object item : additions) {
-            String value = String.valueOf(item).trim();
-            if (!value.isEmpty() && !merged.contains(value)) merged.add(value);
-        }
-        return String.join(", ", merged);
     }
 }

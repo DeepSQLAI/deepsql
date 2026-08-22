@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { ArrowUp, Plus, Square, Loader2, Database, Sparkles, Hash, Table2, Clock, AlertCircle, Inbox } from 'lucide-react'
+import { ArrowUp, Plus, Square, Loader2, Database, Sparkles, Hash, Table2, Clock, AlertCircle } from 'lucide-react'
 import { agentChatAPI, withConnectionContext } from '@/lib/api/agentClient'
 import { agentConversationAPI } from '@/lib/api/client'
-import { useCodeScanSuggestions } from '@/lib/hooks/queries'
 import { useAuth } from '@/hooks/useAuth'
 import AgentMarkdown from './AgentMarkdown'
 import { sanitizeAssistantAnswer } from './sanitizeAssistantAnswer'
@@ -62,14 +61,6 @@ export default function AgentChatPanel({ connectionId, connectionName }) {
   const profileRef = useRef(null)   // resolved agent profile (for new sessions)
   const convIdRef = useRef(null)    // backend conversation id (the per-user index row)
   const restoredRef = useRef(false) // guards the persist effect until boot finishes
-
-  const pendingSuggestionsQuery = useCodeScanSuggestions({
-    connectionId,
-    status: 'PENDING',
-    page: 0,
-    size: 1,
-  })
-  const pendingSuggestionCount = pendingSuggestionsQuery.data?.totalElements ?? 0
 
   const boot = useCallback(async ({ fresh = false } = {}) => {
     setBooting(true); setBootError(null); setAuthBlocked(false)
@@ -206,16 +197,6 @@ export default function AgentChatPanel({ connectionId, connectionName }) {
           </button>
         </div>
       </header>
-
-      {pendingSuggestionCount > 0 && (
-        <div className={styles.reviewHint} role="status">
-          <Inbox size={14} aria-hidden="true" />
-          <span>
-            {pendingSuggestionCount} code-scan suggestion{pendingSuggestionCount === 1 ? '' : 's'} ready for optional review in Brain.
-            Chat keeps working — nothing is blocked.
-          </span>
-        </div>
-      )}
 
       <div className={styles.messages} ref={listRef}>
         {booting && (
