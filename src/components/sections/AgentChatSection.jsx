@@ -21,6 +21,7 @@ export default function AgentChatSection() {
       key={`${username || 'anon'}:${connectionId}`}
       connectionId={connectionId}
       connectionName={selectedConnection?.connectionName}
+      canManageContent={Boolean(selectedConnection?.canManageContent)}
     />
   )
 }

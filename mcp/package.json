@@ -1,6 +1,6 @@
 {
   "name": "@deepsql/mcp",
-  "version": "0.27.0",
+  "version": "0.27.1",
   "description": "DeepSQL CLI, DBA Agent (thin client), and stdio MCP server for self-hosted deployments",
   "bin": {
     "deepsql": "bin/deepsql.js",

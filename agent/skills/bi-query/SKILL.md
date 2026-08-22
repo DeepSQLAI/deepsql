@@ -27,7 +27,7 @@ Use when the user asks a question whose answer is **in the data** ("how many boo
 
 6. **Run it** with `execute_sql(connectionId, sql, limit=…)`. Remember: default 100 rows, max 1000. For a total, `SELECT COUNT(*)` rather than counting a truncated result set.
 
-7. **Answer only.** Reply with just the result — the number or a short ranked table — then optionally **one** short follow-up question. Apply business rules silently; do NOT append "Grounding used" / "Filters applied" / "Used:" / tool-narration / column-mapping sections. Only if the user asks how you got it do you show the tables, joins, and filters.
+7. **Answer only.** Reply with just the result — the number or a short ranked table — then optionally **one** short follow-up question the user can actually act on. Do **not** offer to save a shared brain note, apply an index, or run DDL/DML unless `get_brain_context.callerCapabilities` says they can. Apply business rules silently; do NOT append "Grounding used" / "Filters applied" / "Used:" / tool-narration / column-mapping sections. Only if the user asks how you got it do you show the tables, joins, and filters.
 
 ## Guardrails
 
