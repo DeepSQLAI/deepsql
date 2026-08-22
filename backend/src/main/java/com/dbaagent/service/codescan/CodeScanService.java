@@ -579,24 +579,46 @@ public class CodeScanService {
      * transaction inside applier.approve/reject, so one bad row cannot mark a
      * shared transaction rollback-only and break every subsequent item.
      */
-    public List<CodeKnowledgeSuggestion> bulkDecide(List<String> ids,
-                                                    String decision,
-                                                    String decidedBy,
-                                                    String note) {
+    public BulkDecideResult bulkDecide(List<String> ids,
+                                       String decision,
+                                       String decidedBy,
+                                       String note) {
         List<CodeKnowledgeSuggestion> out = new ArrayList<>();
-        int failures = 0;
+        List<Map<String, String>> failures = new ArrayList<>();
         for (String id : ids) {
             try {
                 out.add(decide(id, decision, decidedBy, note));
             } catch (Exception e) {
-                failures++;
-                log.warn("bulk decide skipped {}: {}", id, e.getMessage());
+                String message = rootMessage(e);
+                failures.add(Map.of("id", id, "error", message));
+                log.warn("bulk decide skipped {}: {}", id, message);
             }
         }
-        if (failures > 0) {
-            log.info("bulk decide: {} succeeded, {} failed", out.size(), failures);
+        if (!failures.isEmpty()) {
+            log.info("bulk decide: {} succeeded, {} failed", out.size(), failures.size());
         }
-        return out;
+        return new BulkDecideResult(out, failures);
+    }
+
+    public record BulkDecideResult(
+        List<CodeKnowledgeSuggestion> succeeded,
+        List<Map<String, String>> failures
+    ) {}
+
+    private static String rootMessage(Throwable e) {
+        Throwable cur = e;
+        String best = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+        while (cur != null) {
+            if (cur.getMessage() != null && !cur.getMessage().isBlank()) {
+                best = cur.getMessage();
+            }
+            cur = cur.getCause();
+        }
+        // Keep API payloads short — full stack stays in logs.
+        if (best.length() > 400) {
+            return best.substring(0, 397) + "...";
+        }
+        return best;
     }
 
     // ---- Helpers ----
