@@ -466,8 +466,19 @@ public class QueryExecutionPolicyService {
             .replaceAll("\"([^\"\\\\]|\\\\.)*\"", "\"\"");
     }
 
+    // Word-bounded and comment-stripped: the previous literal " WHERE " match
+    // missed a WHERE preceded by a newline (as in any multi-line formatted
+    // UPDATE/DELETE) and was satisfied by a commented-out "-- WHERE ..." that
+    // never reaches the database. This only runs on the keyword-fallback path —
+    // when JSqlParser succeeds, delete.getWhere()/update.getWhere() are used
+    // instead, which are exact.
+    private static final Pattern WHERE_CLAUSE_PATTERN = Pattern.compile("\\bWHERE\\b", Pattern.CASE_INSENSITIVE);
+
     private boolean containsWhereClause(String sql) {
-        return sql != null && sql.toUpperCase(Locale.ROOT).contains(" WHERE ");
+        if (sql == null) {
+            return false;
+        }
+        return WHERE_CLAUSE_PATTERN.matcher(stripComments(sql)).find();
     }
 
     private boolean looksLikeMultipleStatements(String sql) {
