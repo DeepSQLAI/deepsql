@@ -15,6 +15,7 @@ import java.util.UUID;
     @Index(name = "idx_saved_dashboards_connection_id", columnList = "connectionId"),
     @Index(name = "idx_saved_dashboards_user_id", columnList = "userId"),
     @Index(name = "idx_saved_dashboards_is_favorite", columnList = "isFavorite"),
+    @Index(name = "idx_saved_dashboards_workspace_id", columnList = "workspace_id"),
     @Index(name = "idx_saved_dashboards_created_at", columnList = "createdAt")
 })
 @Data
@@ -76,6 +77,13 @@ public class SavedDashboard {
 
     @Column(length = 255)
     private String folder;
+
+    // Optional grouping with its own member list (DashboardWorkspace). Null means the
+    // dashboard is not in a workspace and is governed purely by the connection ACL, as
+    // every dashboard was before workspaces existed. When set, a viewer needs BOTH
+    // connection read access AND workspace membership (admins bypass the latter).
+    @Column(name = "workspace_id")
+    private UUID workspaceId;
 
     // Server-owned "is a generation turn in flight for this dashboard" marker.
     // Set to RUNNING the instant a chat submit is accepted (before the slow

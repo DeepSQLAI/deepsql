@@ -3,6 +3,7 @@ package com.dbaagent.controller;
 import com.dbaagent.model.DashboardVersion;
 import com.dbaagent.model.SavedDashboard;
 import com.dbaagent.service.ConnectionChatAccessPolicyService;
+import com.dbaagent.service.DashboardWorkspaceService;
 import com.dbaagent.service.SavedDashboardService;
 import com.dbaagent.service.security.AccessControlService;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +32,9 @@ public class SavedDashboardController {
     @Autowired
     private ConnectionChatAccessPolicyService connectionChatAccessPolicyService;
 
+    @Autowired
+    private DashboardWorkspaceService dashboardWorkspaceService;
+
     // Every write method below is load-then-save on a row a background generation
     // turn (SavedDashboardService.beginGenerationTurn etc.) may be writing at the
     // same time. Without this helper, the loser's raw Hibernate message
@@ -44,6 +48,17 @@ public class SavedDashboardController {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
     }
 
+    /**
+     * A dashboard may only be created into a workspace the caller can actually manage —
+     * otherwise anyone could push a dashboard into someone else's workspace.
+     */
+    private void assertWorkspaceAssignable(String connectionId, UUID workspaceId) {
+        if (workspaceId == null) {
+            return;
+        }
+        dashboardWorkspaceService.getWorkspace(workspaceId);
+    }
+
     /** Publish this dashboard to the web (opt-in, revocable public link). */
     @PostMapping("/{id}/share")
     public ResponseEntity<Map<String, Object>> enableShare(@PathVariable UUID id) {
@@ -51,6 +66,7 @@ public class SavedDashboardController {
             SavedDashboard existing = savedDashboardService.getDashboardById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Dashboard not found"));
             accessControlService.assertCanReadConnectionContent(existing.getConnectionId());
+            dashboardWorkspaceService.assertCanReadDashboard(existing);
             if (connectionChatAccessPolicyService.hasActivePolicy(existing.getConnectionId())) {
                 return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
                     "success", false,
@@ -81,6 +97,7 @@ public class SavedDashboardController {
             SavedDashboard existing = savedDashboardService.getDashboardById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Dashboard not found"));
             accessControlService.assertCanReadConnectionContent(existing.getConnectionId());
+            dashboardWorkspaceService.assertCanReadDashboard(existing);
             SavedDashboard d = savedDashboardService.setSharePassword(id, body == null ? null : body.get("password"));
             return ResponseEntity.ok(Map.of("success", true, "sharePasswordSet", d.isSharePasswordSet()));
         } catch (IllegalArgumentException e) {
@@ -103,6 +120,7 @@ public class SavedDashboardController {
             SavedDashboard existing = savedDashboardService.getDashboardById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Dashboard not found"));
             accessControlService.assertCanReadConnectionContent(existing.getConnectionId());
+            dashboardWorkspaceService.assertCanReadDashboard(existing);
             savedDashboardService.disablePublicShare(id);
             return ResponseEntity.ok(Map.of("success", true, "isPublic", false));
         } catch (IllegalArgumentException e) {
@@ -125,6 +143,8 @@ public class SavedDashboardController {
     public ResponseEntity<Map<String, Object>> createDashboard(@RequestBody SavedDashboard savedDashboard) {
         try {
             log.info("Creating saved dashboard: {} for connection: {}", savedDashboard.getName(), savedDashboard.getConnectionId());
+            accessControlService.assertCanManageConnectionContent(savedDashboard.getConnectionId());
+            assertWorkspaceAssignable(savedDashboard.getConnectionId(), savedDashboard.getWorkspaceId());
 
             SavedDashboard created = savedDashboardService.saveDashboard(savedDashboard);
 
@@ -152,8 +172,10 @@ public class SavedDashboardController {
     public ResponseEntity<Map<String, Object>> getDashboardsByConnection(@PathVariable String connectionId) {
         try {
             log.info("Fetching saved dashboards for connection: {}", connectionId);
+            accessControlService.assertCanReadConnectionContent(connectionId);
 
-            List<SavedDashboard> dashboards = savedDashboardService.getDashboardsByConnection(connectionId);
+            List<SavedDashboard> dashboards = dashboardWorkspaceService.filterReadable(
+                savedDashboardService.getDashboardsByConnection(connectionId));
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -182,6 +204,8 @@ public class SavedDashboardController {
 
             return savedDashboardService.getDashboardById(id)
                     .map(dashboard -> {
+                        accessControlService.assertCanReadConnectionContent(dashboard.getConnectionId());
+                        dashboardWorkspaceService.assertCanReadDashboard(dashboard);
                         Map<String, Object> response = new HashMap<>();
                         response.put("success", true);
                         response.put("savedDashboard", dashboard);
@@ -211,6 +235,10 @@ public class SavedDashboardController {
     public ResponseEntity<Map<String, Object>> updateDashboard(@PathVariable UUID id, @RequestBody SavedDashboard updates) {
         try {
             log.info("Updating saved dashboard: {}", id);
+            SavedDashboard existing = savedDashboardService.getDashboardById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Dashboard not found"));
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
+            dashboardWorkspaceService.assertCanReadDashboard(existing);
 
             SavedDashboard updated = savedDashboardService.updateDashboard(id, updates);
 
@@ -248,6 +276,7 @@ public class SavedDashboardController {
             SavedDashboard existing = savedDashboardService.getDashboardById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Dashboard not found"));
             accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
+            dashboardWorkspaceService.assertCanReadDashboard(existing);
             SavedDashboard clone = savedDashboardService.cloneDashboard(id);
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -273,6 +302,7 @@ public class SavedDashboardController {
             SavedDashboard existing = savedDashboardService.getDashboardById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Dashboard not found"));
             accessControlService.assertCanReadConnectionContent(existing.getConnectionId());
+            dashboardWorkspaceService.assertCanReadDashboard(existing);
             List<DashboardVersion> versions = savedDashboardService.getVersionHistory(id);
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -298,6 +328,7 @@ public class SavedDashboardController {
             SavedDashboard existing = savedDashboardService.getDashboardById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Dashboard not found"));
             accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
+            dashboardWorkspaceService.assertCanReadDashboard(existing);
             SavedDashboard restored = savedDashboardService.restoreVersion(id, versionId);
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -323,6 +354,10 @@ public class SavedDashboardController {
     public ResponseEntity<Map<String, Object>> deleteDashboard(@PathVariable UUID id) {
         try {
             log.info("Deleting saved dashboard: {}", id);
+            SavedDashboard existing = savedDashboardService.getDashboardById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Dashboard not found"));
+            accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
+            dashboardWorkspaceService.assertCanReadDashboard(existing);
 
             savedDashboardService.deleteDashboard(id);
 
@@ -384,8 +419,10 @@ public class SavedDashboardController {
     public ResponseEntity<Map<String, Object>> getFavoriteDashboards(@PathVariable String connectionId) {
         try {
             log.info("Fetching favorite dashboards for connection: {}", connectionId);
+            accessControlService.assertCanReadConnectionContent(connectionId);
 
-            List<SavedDashboard> dashboards = savedDashboardService.getFavoriteDashboards(connectionId);
+            List<SavedDashboard> dashboards = dashboardWorkspaceService.filterReadable(
+                savedDashboardService.getFavoriteDashboards(connectionId));
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -413,8 +450,10 @@ public class SavedDashboardController {
             @PathVariable String folder) {
         try {
             log.info("Fetching dashboards in folder: {} for connection: {}", folder, connectionId);
+            accessControlService.assertCanReadConnectionContent(connectionId);
 
-            List<SavedDashboard> dashboards = savedDashboardService.getDashboardsByFolder(connectionId, folder);
+            List<SavedDashboard> dashboards = dashboardWorkspaceService.filterReadable(
+                savedDashboardService.getDashboardsByFolder(connectionId, folder));
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -442,8 +481,10 @@ public class SavedDashboardController {
             @RequestParam String q) {
         try {
             log.info("Searching dashboards for connection: {} with term: {}", connectionId, q);
+            accessControlService.assertCanReadConnectionContent(connectionId);
 
-            List<SavedDashboard> dashboards = savedDashboardService.searchDashboards(connectionId, q);
+            List<SavedDashboard> dashboards = dashboardWorkspaceService.filterReadable(
+                savedDashboardService.searchDashboards(connectionId, q));
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -469,6 +510,7 @@ public class SavedDashboardController {
     public ResponseEntity<Map<String, Object>> getFolders(@PathVariable String connectionId) {
         try {
             log.info("Fetching folders for connection: {}", connectionId);
+            accessControlService.assertCanReadConnectionContent(connectionId);
 
             List<String> folders = savedDashboardService.getFolders(connectionId);
 
