@@ -241,6 +241,22 @@ your schema — all from one shared brain.
 - **Postgres and MySQL, in your infra.** One dialect registry, read-only execution, and SSH
   tunnelling to reach databases behind a bastion.
 
+### DeepSQL Desktop (optional)
+
+A thin Electron client for a self-hosted VM — direct TLS or an in-process SSH tunnel —
+without bundling a second copy of the web UI. Separate npm project:
+
+```bash
+cd desktop
+npm install
+npm start
+```
+
+Requires **Node 22+**. Forward the tunnel to the **frontend container (port 3000)**, not a
+host reverse proxy on `:80`. Keep loopback CORS wildcards on the VM
+(`http://127.0.0.1:*,http://localhost:*`) or tunnel login fails with a confusing 403 — see
+[`desktop/README.md`](desktop/README.md).
+
 ---
 
 ## Operating the stack

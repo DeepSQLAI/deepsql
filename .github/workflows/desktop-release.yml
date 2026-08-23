@@ -1,0 +1,93 @@
+name: desktop-release
+
+# Builds the DeepSQL desktop client for every platform. Each OS builds its own
+# targets on its own runner: cross-building Windows needs Wine and Linux targets
+# need a matching glibc, and both are far less reliable than just using the
+# native runner.
+#
+# Tag-triggered runs attach the installers to the GitHub release. Manual runs
+# upload them as workflow artifacts, which is the easy way to hand a build to a
+# colleague before there is a release to cut.
+
+on:
+  push:
+    tags:
+      - 'desktop-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, name: macOS, target: '--mac' }
+          - { os: windows-latest, name: Windows, target: '--win' }
+          - { os: ubuntu-latest, name: Linux, target: '--linux' }
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Self-test the SSH tunnel transport
+        # Runs a real SSH server in-process, so it needs a display-free Electron.
+        # xvfb is only required on Linux; the other runners have a window server.
+        working-directory: desktop
+        run: ${{ matrix.os == 'ubuntu-latest' && 'xvfb-run --auto-servernum npm run selftest:tunnel' || 'npm run selftest:tunnel' }}
+        shell: bash
+
+      - name: Build installers
+        working-directory: desktop
+        env:
+          # Signing is skipped when these are unset; electron-builder warns and
+          # produces unsigned artifacts rather than failing the build.
+          CSC_LINK: ${{ secrets.DESKTOP_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.DESKTOP_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx electron-builder ${{ matrix.target }} --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deepsql-desktop-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/*.exe
+            desktop/release/*.AppImage
+            desktop/release/*.deb
+            desktop/release/*.rpm
+
+  release:
+    name: attach to release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          fail_on_unmatched_files: true
