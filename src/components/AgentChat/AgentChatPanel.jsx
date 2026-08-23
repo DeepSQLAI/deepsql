@@ -191,7 +191,25 @@ export default function AgentChatPanel({ connectionId, connectionName, canManage
             queueMicrotask(() => proposeFromLastTurn())
           }
         },
-        onError: () => { setMessages((m) => updateLast(m, (a) => ({ ...a, streaming: false, error: true }))); setSending(false); esRef.current = null },
+        // The stream is an EventSource, so we never see a status code here —
+        // every cause (session expiry at the nginx auth gate, agent restart,
+        // a credential the backend refused as mcp_identity_mismatch) arrives
+        // as one opaque event. Re-bootstrap to find out which: it returns the
+        // real reason, and for a mismatched/rotated credential it also
+        // re-provisions this user's token so a retry works.
+        onError: async () => {
+          setMessages((m) => updateLast(m, (a) => ({ ...a, streaming: false, error: true })))
+          setSending(false); esRef.current = null
+          try {
+            const { mcpAuthOk, mcpAuthError } = await agentChatAPI.bootstrap(connectionId)
+            if (mcpAuthOk === false) {
+              setAuthBlocked(true)
+              setBootError(mcpAuthError || 'Agent cannot reach DeepSQL (auth). Reconnect / check Agent runtime.')
+            }
+          } catch (e) {
+            setBootError(e?.message || 'The agent connection dropped. Retry to reconnect.')
+          }
+        },
       })
     } catch (e) {
       setMessages((m) => updateLast(m, (a) => ({ ...a, streaming: false, error: true, content: a.content || `Error: ${e?.message || 'request failed'}` })))

@@ -76,27 +76,31 @@ def iter_profile_homes(hermes_home: Path):
 
 
 def mirror_token_for_live_mcp(hermes_home: Path, token: str) -> list[Path]:
-    """Copy the provisioned token onto every file a live MCP process might read.
+    """Publish the provisioned token to the ONE shared path a live MCP process
+    may have been started from — without touching any other user's profile.
 
     Hermes starts one DeepSQL MCP stdio server from whichever profile first
     loaded ``mcp_servers``, then keeps that subprocess for the life of the
     Agent API. ``POST /api/profile/switch`` is explicitly ``process_wide=False``
     — it sets a cookie / thread-local for sessions, but does **not** respawn
-    MCP with the target profile's ``DEEPSQL_AUTH_TOKEN``.
+    MCP with the target profile's ``DEEPSQL_AUTH_TOKEN``. The MCP client
+    re-reads ``DEEPSQL_TOKEN_FILE`` per request (mtime cache), so the shared
+    root file is what lets a rotation reach that already-running process.
 
-    The MCP client re-reads ``DEEPSQL_TOKEN_FILE`` per request (mtime cache).
-    Writing only ``profiles/u-<target>/deepsql.token`` therefore leaves the
-    already-running server on the previous user's credential (in practice the
-    admin who first opened the Agent tab). View as / a new chat thread then
-    executes SQL as admin and skips chat-access policy.
+    This previously also wrote every ``profiles/*/deepsql.token``, which made
+    the credential globally last-writer-wins: any user opening the Agent tab
+    overwrote every other user's token, so their agent then authenticated as
+    the newcomer — a cross-user read whose audit row named the wrong person.
+    Two concurrent users were enough; no impersonation required.
 
-    Mirror onto ``$HERMES_HOME/deepsql.token`` and every profile token file so
-    whichever path the live process was started with picks up the rotation.
+    The root file alone is still shared, so a mismatched credential can still
+    reach the live process. That is why the *backend* is the real guard:
+    ``McpTokenAuthenticationFilter`` refuses a token whose owner differs from
+    the request's ``DEEPSQL_MCP_USER_ID`` claim, so a stale/foreign token fails
+    closed with ``mcp_identity_mismatch`` instead of silently reading another
+    user's data. Never restore the per-profile fan-out.
     """
-    written = [write_token_file(hermes_home, token)]
-    for home in iter_profile_homes(hermes_home):
-        written.append(write_token_file(home, token))
-    return written
+    return [write_token_file(hermes_home, token)]
 
 
 def ensure_profile(name: str) -> Path:
@@ -284,34 +288,54 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def _self_test() -> int:
-    """Prove token mirroring covers the process-global MCP watch path."""
+    """Prove one user's Agent-tab open cannot overwrite another user's credential.
+
+    Regression guard for the cross-user token leak: this test previously
+    asserted the OPPOSITE — that a rotation lands on *every* profile token file
+    — which encoded the bug as the requirement and would have failed on the fix.
+    The property that actually matters is isolation: provisioning B leaves A's
+    credential intact.
+    """
     import tempfile
     import traceback
 
     hermes_home = Path(tempfile.mkdtemp(prefix="deepsql-provisioner-test-"))
     try:
         admin = hermes_home / "profiles" / "u-admin"
-        editor = hermes_home / "profiles" / "u-marts-editor"
+        analyst = hermes_home / "profiles" / "u-analyst"
         admin.mkdir(parents=True)
-        editor.mkdir(parents=True)
-        write_token_file(admin, "dsql_mcp_admin.old")
-        write_token_file(editor, "dsql_mcp_editor.old")
+        analyst.mkdir(parents=True)
 
-        rotated = "dsql_mcp_editor.live"
-        written = mirror_token_for_live_mcp(hermes_home, rotated)
-        paths = {p.resolve() for p in written}
-        expected = {
-            token_file_for(hermes_home).resolve(),
-            token_file_for(admin).resolve(),
-            token_file_for(editor).resolve(),
-        }
-        if paths != expected:
-            raise AssertionError(f"mirrored paths {paths} != {expected}")
-        for path in expected:
-            body = path.read_text().strip()
-            if body != rotated:
-                raise AssertionError(f"{path} still {body!r}, expected {rotated!r}")
-        print("ok: live MCP token is mirrored onto every profile token file")
+        # Each user opens the Agent tab; each gets their own credential.
+        write_token_file(analyst, "dsql_mcp_analyst.tok")
+        mirror_token_for_live_mcp(hermes_home, "dsql_mcp_analyst.tok")
+        write_token_file(admin, "dsql_mcp_admin.tok")
+        mirror_token_for_live_mcp(hermes_home, "dsql_mcp_admin.tok")
+
+        # The later open must NOT have rewritten the earlier user's token.
+        analyst_now = token_file_for(analyst).read_text().strip()
+        if analyst_now != "dsql_mcp_analyst.tok":
+            raise AssertionError(
+                f"cross-user token leak: u-analyst holds {analyst_now!r}, "
+                "expected 'dsql_mcp_analyst.tok'. A user's Agent-tab open must "
+                "never overwrite another user's credential."
+            )
+        admin_now = token_file_for(admin).read_text().strip()
+        if admin_now != "dsql_mcp_admin.tok":
+            raise AssertionError(f"u-admin holds {admin_now!r}, expected own token")
+
+        # The shared root file (the live-process watch path) still rotates, so
+        # View as keeps working; the backend rejects it if it names another user.
+        root_now = token_file_for(hermes_home).read_text().strip()
+        if root_now != "dsql_mcp_admin.tok":
+            raise AssertionError(f"root token file {root_now!r} did not rotate")
+
+        # And the fan-out must not come back.
+        paths = {p.resolve() for p in mirror_token_for_live_mcp(hermes_home, "x")}
+        if paths != {token_file_for(hermes_home).resolve()}:
+            raise AssertionError(f"mirror touched more than the root file: {paths}")
+
+        print("ok: per-user tokens stay isolated; only the shared root file rotates")
         return 0
     except Exception:
         traceback.print_exc()
