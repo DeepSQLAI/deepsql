@@ -426,17 +426,22 @@ serve from.
 | `DEEPSQL_BACKEND_PORT` | 8080 | [`docker-compose.yml:94`](../../docker-compose.yml) |
 | `DEEPSQL_POSTGRES_PORT` | 5432 (published as `127.0.0.1:…` only) | [`docker-compose.yml`](../../docker-compose.yml) |
 | `DEEPSQL_VALKEY_PORT` | 6379 (published as `127.0.0.1:…` only) | [`docker-compose.yml`](../../docker-compose.yml) |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | `application.properties:87` → [`SecurityConfig.java`](../../backend/src/main/java/com/dbaagent/config/SecurityConfig.java) |
+| `CORS_ALLOWED_ORIGINS` | loopback hosts + port wildcards (see `.env.example`) | `application.properties` → [`SecurityConfig.java`](../../backend/src/main/java/com/dbaagent/config/SecurityConfig.java) |
 
 ```env
 DEEPSQL_FRONTEND_PORT=13000
-CORS_ALLOWED_ORIGINS=http://localhost:13000
+# Port wildcards keep DeepSQL Desktop SSH-tunnel origins working (sticky local port).
+CORS_ALLOWED_ORIGINS=http://localhost:13000,http://127.0.0.1:*,http://localhost:*
 ```
 
-Behind a reverse proxy, `CORS_ALLOWED_ORIGINS` must list the **public** origin
-(`https://deepsql.your-company.example`), not the container port. Consider binding
-postgres and valkey to `127.0.0.1` on a public host, or dropping their `ports:` entries
-entirely — nothing outside the Compose network needs them.
+`CORS_ALLOWED_ORIGINS` **replaces** the built-in allowlist rather than extending it.
+Behind a reverse proxy, list the **public** origin
+(`https://deepsql.your-company.example`) **and** keep
+`http://127.0.0.1:*,http://localhost:*` if anyone will use [DeepSQL Desktop](../../desktop/README.md)
+(SSH tunnel → `http://127.0.0.1:<port>`). A public-origin-only value makes tunnel
+login fail with `403 Invalid CORS request` while GETs still look healthy. Consider
+binding postgres and valkey to `127.0.0.1` on a public host, or dropping their
+`ports:` entries entirely — nothing outside the Compose network needs them.
 
 ### Optional integrations
 
@@ -482,7 +487,8 @@ Once TLS is in place, three settings must follow or authentication behaves oddly
 
 ```env
 SECURITY_COOKIE_SECURE=true
-CORS_ALLOWED_ORIGINS=https://deepsql.your-company.example
+# Public origin for browsers + loopback wildcards for DeepSQL Desktop tunnels.
+CORS_ALLOWED_ORIGINS=https://deepsql.your-company.example,http://127.0.0.1:*,http://localhost:*
 APP_BASE_URL=https://deepsql.your-company.example
 APP_PUBLIC_URL=https://deepsql.your-company.example
 ```
@@ -803,7 +809,7 @@ Agent-specific (in addition to the core stack):
 - [ ] `ENCRYPTION_KEY` backed up somewhere other than where the database dumps live
 - [ ] TLS terminated in front of the frontend, with `SECURITY_COOKIE_SECURE=true`
 - [ ] `APP_BASE_URL` and `APP_PUBLIC_URL` set to the public URL, and the startup log line checked
-- [ ] `CORS_ALLOWED_ORIGINS` set to the public origin only
+- [ ] `CORS_ALLOWED_ORIGINS` includes the public origin **and** `http://127.0.0.1:*,http://localhost:*` (Desktop tunnel / local loopback)
 - [ ] `EMBEDDING_FAIL_OPEN=false` (the `prod` default) so retrieval failures surface
 - [ ] Postgres and valkey not published to a public interface
 - [ ] `.env` never committed — it is gitignored, keep it that way
@@ -816,6 +822,7 @@ Agent-specific (in addition to the core stack):
 
 - [`README.md`](../../README.md) — overview, quick start, LLM configuration, development
 - [`.env.example`](../../.env.example) — inline documentation for every shipped variable
+- [`desktop/README.md`](../../desktop/README.md) — DeepSQL Desktop (Electron) install, SSH tunnel, and CORS requirements
 - [`mcp/README.md`](../../mcp/README.md) — the `deepsql` CLI and MCP server, including client configuration for Claude Desktop and Codex
 - [`docs/root/MCP_PHASE1.md`](./MCP_PHASE1.md) — MCP tools and environment variables
 - [`docs/LOGGING-GUIDE.md`](../LOGGING-GUIDE.md) — log format

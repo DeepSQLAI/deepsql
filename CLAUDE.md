@@ -129,7 +129,8 @@ project** — `cd desktop && npm install`, not part of the root `package.json`.
 
 ```bash
 cd desktop
-npm start                 # run     npm run dev          # run with DevTools
+npm start                 # run
+npm run dev               # run with DevTools
 npm test                  # drift guard for the DevTools kill switch
 npm run dist:mac          # dmg + zip (arm64 + x64), also :win / :linux
 npm run smoke -- --url https://deepsql.example.com   # headless connection check

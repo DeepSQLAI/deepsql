@@ -127,9 +127,14 @@ or an in-process SSH local forward (`ssh2`, no `ssh` binary needed).
 | `desktop/src/main/windows/workspace.js` | Frameless shell: native chrome + embedded DeepSQL view |
 | `desktop/src/renderer/shared/theme.css` | Mirrors `src/index.css` tokens — keep in step |
 
-No backend change was needed: `docker/nginx/default.conf` already serves the SPA,
-`/api` and `/agent-api` from one origin, which is what makes the thin-client
-model work without CORS or cookie special-casing.
+`docker/nginx/default.conf` already serves the SPA, `/api`, and `/agent-api` from
+one origin, so cookies and SSE behave like a normal browser. **CORS is the one
+backend setting the thin client still needs:** an SSH tunnel uses origin
+`http://127.0.0.1:<sticky-port>`, so `CORS_ALLOWED_ORIGINS` on the VM must keep
+the loopback port wildcards (`http://127.0.0.1:*,http://localhost:*`) alongside
+any public hostname. Overriding that env var *replaces* the built-in list — a
+public-origin-only value breaks Desktop tunnel login with a confusing 403.
+Setup and diagnosis: [`desktop/README.md`](desktop/README.md#cors-on-the-vm-the-403-nobody-can-read).
 
 ## Performance & Safety Guardrails
 
@@ -308,10 +313,15 @@ only covers cloud-specific, non-obvious caveats.
   `deepsql agent --connection <uuid> "…"`. Interactive: `deepsql` / `deepsql agent`.
   The CLI is a thin client over `POST /api/agent/chat` (not a local agent runtime);
   backend + agent API (:8787) + provisioner must already be up.
-- **Spring CORS must allow both loopback hosts.** Set
-  `CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000` in `.env`. Opening
-  the UI as `http://127.0.0.1:3000` while only `localhost` is allowlisted yields **403**
-  on `POST /api/agent/session` (and other cookie-auth APIs).
+- **Spring CORS must allow loopback (and Desktop tunnel ports).** Prefer
+  `CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:*,http://localhost:*`
+  in `.env` (match `.env.example`). Fixed `:3000` alone is enough for Vite on that
+  port; the `*` port wildcards are required for DeepSQL Desktop’s SSH tunnel, which
+  binds a sticky random local port. Opening the UI as `http://127.0.0.1:…` while
+  only `localhost` (or only a public hostname) is allowlisted yields **403** on
+  `POST /api/agent/session` (and other cookie-auth APIs). Electron GUI itself is
+  out of scope for headless Cloud Agents — use Vite + these CORS patterns here;
+  see [`desktop/README.md`](desktop/README.md) when developing the client.
 - **Before running backend tests that boot the Spring context** (e.g. `ApiSmokeTest`), stop
   the running backend first — both use `ddl-auto=update` on the same `dba_agent` DB and can
   deadlock on an `ALTER TABLE`. Test env vars are documented in `CLAUDE.md` (Testing).

@@ -57,6 +57,9 @@ launch needs **right-click → Open** (or `xattr -dr com.apple.quarantine
 
 ### From source
 
+**Requires Node.js 22+** (matches the Desktop release CI). GUI needs a display; on
+headless Linux use `xvfb-run` for the packaged app or the selftests.
+
 ```bash
 cd desktop
 npm install
@@ -336,6 +339,7 @@ scripts/
   generate-icons.js   SVG → build/icon.png via Electron
   smoke.js            headless connection check
   tunnel-selftest.js  end-to-end SSH tunnel test
+  settings-selftest.js proves an edited setting reaches the live connection
 ```
 
 The renderers are plain HTML/CSS/JS with no build step: they are chrome around
