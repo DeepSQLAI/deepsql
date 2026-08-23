@@ -81,12 +81,13 @@ public class ImpersonationController {
     }
 
     private Map<String, Object> toAuthPayload(User user, User impersonator) {
-        Role role = user.getRoleEnum();
-        Set<String> permissions = permissionService.getEffectivePermissionCodes(role);
+        String roleCode = user.getRoleCode();
+        Set<String> permissions = permissionService.getEffectivePermissionCodes(roleCode);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("username", user.getUsername());
         payload.put("email", user.getEmail());
-        payload.put("role", role.name());
+        payload.put("role", roleCode);
+        payload.put("roleName", permissionService.describeRole(roleCode));
         payload.put("permissions", permissions);
         payload.put("emailVerified", user.isEmailVerified());
         payload.put("accountStatus", user.getAccountStatus());

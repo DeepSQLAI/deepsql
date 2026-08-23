@@ -60,12 +60,24 @@ public class User {
     private LocalDateTime invitedAt;
 
     /**
-     * Get the Role enum for this user.
-     * Returns DEVELOPER as default if role is null or invalid.
+     * The built-in {@link Role} for this user, or null when {@code role} names a
+     * custom role.
+     *
+     * <p>It used to fall back to DEVELOPER for anything unrecognised. That is wrong now
+     * that custom roles exist: a user holding the custom role "ANALYST" would report
+     * itself as a DEVELOPER and inherit Developer's permissions instead of the ones the
+     * admin ticked. Callers that need a permission answer must go through
+     * {@code PermissionService}, which resolves both kinds by role code.
      */
     @Transient
     public Role getRoleEnum() {
         return Role.fromString(this.role);
+    }
+
+    /** The user's role code, built-in or custom, as stored. */
+    @Transient
+    public String getRoleCode() {
+        return role == null || role.isBlank() ? Role.DEVELOPER.name() : role.trim().toUpperCase();
     }
 
     /**
@@ -76,27 +88,38 @@ public class User {
     }
 
     /**
-     * Get all permissions for this user based on their role.
+     * Default permissions for this user's built-in role.
+     *
+     * <p>Empty for a custom role — the authoritative answer for any role lives in
+     * {@code PermissionService.getEffectivePermissions(roleCode)}, which also applies
+     * overrides. This remains only for callers that already had a built-in role in hand.
      */
     @Transient
     public Set<Permission> getPermissions() {
-        return getRoleEnum().getPermissions();
+        Role builtIn = getRoleEnum();
+        return builtIn == null ? java.util.EnumSet.noneOf(Permission.class) : builtIn.getPermissions();
     }
 
     /**
-     * Check if this user has a specific permission.
+     * Whether this user's built-in role holds a permission by default.
+     * Custom roles and overrides are not consulted here; use {@code PermissionService}.
      */
     @Transient
     public boolean hasPermission(Permission permission) {
-        return getRoleEnum().hasPermission(permission);
+        Role builtIn = getRoleEnum();
+        return builtIn != null && builtIn.hasPermission(permission);
     }
 
     /**
-     * Check if this user has at least the specified role level.
+     * Whether this user holds exactly the given built-in role.
+     *
+     * <p>Formerly {@code isAtLeast}, a rank comparison. The roles no longer form a
+     * hierarchy — DATA_ENGINEER and DEVELOPER each have menus the other lacks — so an
+     * ordering comparison has no meaning and would silently answer nonsense.
      */
     @Transient
     public boolean hasRole(Role requiredRole) {
-        return getRoleEnum().isAtLeast(requiredRole);
+        return requiredRole != null && getRoleEnum() == requiredRole;
     }
 
     /**

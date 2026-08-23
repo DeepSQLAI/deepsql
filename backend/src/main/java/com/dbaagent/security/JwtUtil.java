@@ -146,8 +146,30 @@ public class JwtUtil {
         Duration ttl,
         Long impersonateUserId
     ) {
+        return generateAccessToken(username, sessionId, role == null ? null : role.name(),
+            permissions, ttl, impersonateUserId);
+    }
+
+    /**
+     * Mint an access token for a role <em>code</em>, which may name a built-in
+     * {@link Role} or a custom one.
+     *
+     * <p>The Role-typed overloads delegate here. They cannot represent a custom role, so
+     * every caller that resolves a user's role from the database must use this variant —
+     * otherwise a custom-role user's token would carry the wrong role claim.
+     */
+    public String generateAccessToken(
+        String username,
+        String sessionId,
+        String roleCode,
+        Set<Permission> permissions,
+        Duration ttl,
+        Long impersonateUserId
+    ) {
         Map<String, Object> claims = new HashMap<>();
-        claims.put("role", role.name());
+        claims.put("role", roleCode == null || roleCode.isBlank()
+            ? Role.DEVELOPER.name()
+            : roleCode.trim().toUpperCase());
 
         List<String> permissionNames = permissions.stream()
                 .map(Permission::name)
