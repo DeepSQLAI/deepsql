@@ -312,16 +312,30 @@ public class AgentBridgeService {
      * bearer credential against the local backend (loopback — this call never
      * leaves the box, so no external base-URL config is needed).
      *
+     * <p>Sends the same {@code X-DeepSQL-Client-Agent: <username>} claim the
+     * provisioned MCP process will send, so the probe passes only if the token
+     * and the declared identity agree. A probe without that header would call a
+     * token healthy that the live MCP process cannot actually use.
+     *
+     * @param token    the credential to verify
+     * @param username the identity the MCP process will declare for this profile
      * @return true if the API accepted the token (2xx), false on any
      *         non-2xx/auth failure or network error.
      */
-    public boolean probeMcpAuth(String token) {
+    public boolean probeMcpAuth(String token, String username) {
         if (token == null || token.isBlank()) {
             return false;
         }
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(localApiBaseUrl + "/connections"))
                 .header("Authorization", "Bearer " + token)
+                // Declare the same identity the provisioned MCP process will send
+                // (DEEPSQL_MCP_USER_ID -> X-DeepSQL-Client-Agent), so the probe
+                // exercises the identity-binding check in
+                // McpTokenAuthenticationFilter rather than bypassing it. Probing
+                // without this header would report a token as healthy even when
+                // the live MCP process's own calls will be refused.
+                .header(ClientContext.HEADER_AGENT, username)
                 .timeout(Duration.ofSeconds(5))
                 .GET()
                 .build();

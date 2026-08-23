@@ -371,9 +371,30 @@ The Agent tab must not inherit the admin MCP token. `/api/agent/session` mints a
    on purpose (per-browser cookie), so a View as / new-thread Agent chat tagged
    `profile: u-marts-editor` still sends the admin MCP bearer. Chat-access policy
    then `resolveEffectivePolicy(..., actorIsAdmin=true)` → `none()`. The
-   provisioner mirrors the target user's token onto every `deepsql.token` the
-   live process might re-read (`DEEPSQL_TOKEN_FILE` mtime cache in
-   `mcp/deepsql-phase1-lib.js`).
+   provisioner writes the target user's token to `$HERMES_HOME/deepsql.token`,
+   the one shared path the live process may have started from
+   (`DEEPSQL_TOKEN_FILE` mtime cache in `mcp/deepsql-phase1-lib.js`).
+
+   **Never fan that write out across `profiles/*/deepsql.token`.** It did once,
+   and made the agent credential globally last-writer-wins: any user opening the
+   Agent tab overwrote every other user's token, so their agent authenticated as
+   the newcomer. Verified end to end — `analyst`'s agent read an admin-only
+   connection (403 on their own session, 200 with the agent token, 133 vault
+   tables) and the `EDITOR_QUERY_EXECUTED` row named **admin**, not analyst. Two
+   concurrent users was the whole trigger; no impersonation needed. The
+   provisioner self-test asserted the fan-out as *correct* (it modelled only the
+   View-as case, where overwriting is desired), so a green suite guarded the bug —
+   it now asserts the opposite, that provisioning B leaves A's token intact.
+
+   Because that root file is still shared, the real guard is server-side:
+   `McpTokenAuthenticationFilter` refuses an MCP token whose owner differs from
+   the request's `DEEPSQL_MCP_USER_ID` claim (sent as `X-DeepSQL-Client-Agent`),
+   answering `401 mcp_identity_mismatch`. The claim is only ever used to *refuse*,
+   never to grant, so forging it cannot widen access. A claim that isn't a real
+   DeepSQL username is ignored, which is what keeps editor/CLI MCP installs
+   (`cursor`, `claude-desktop`, any `--caller-agent`) working. `probeMcpAuth`
+   sends the same header so the boot health check exercises the binding instead
+   of bypassing it.
 6. **The agent image build clones two third-party repos over the public internet,
    unauthenticated.** `agent/Dockerfile` fetches `NousResearch/hermes-agent` and
    `nesquena/hermes-webui` at build time. GitHub rate-limits unauthenticated
