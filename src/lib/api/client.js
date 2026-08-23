@@ -904,6 +904,14 @@ export const brainAPI = {
     );
     return response.data;
   },
+  proposeNoteFromTurn: async (payload) => {
+    const response = await apiClient.post("/api/brain/notes/propose", payload);
+    return response.status === 204 ? null : response.data;
+  },
+  acceptNote: async (payload) => {
+    const response = await apiClient.post("/api/brain/notes/accept", payload);
+    return response.data;
+  },
   getKeyColumns: async (connectionId, params = {}) => {
     const response = await apiClient.get(
       `/api/brain/key-columns/${connectionId}`,

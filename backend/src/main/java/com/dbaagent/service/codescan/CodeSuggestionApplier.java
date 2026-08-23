@@ -7,6 +7,7 @@ import com.dbaagent.model.code.CodeKnowledgeSuggestion;
 import com.dbaagent.repository.CodeKnowledgeSuggestionRepository;
 import com.dbaagent.repository.SchemaDocumentationRepository;
 import com.dbaagent.service.CompanyKnowledgeService;
+import com.dbaagent.service.SchemaDocumentationDeduplicator;
 import com.dbaagent.service.SchemaScannerService;
 import com.dbaagent.service.TrainingService;
 import lombok.RequiredArgsConstructor;
@@ -17,7 +18,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * Materializes an APPROVED suggestion into a real
@@ -35,10 +35,11 @@ public class CodeSuggestionApplier {
     private final CompanyKnowledgeService companyKnowledgeService;
     private final TrainingService trainingService;
     private final SchemaScannerService schemaScannerService;
+    private final SchemaDocumentationDeduplicator schemaDocDeduplicator;
 
     @Transactional
     public CodeKnowledgeSuggestion approve(String suggestionId, String decidedBy, String note) {
-        CodeKnowledgeSuggestion suggestion = suggestionRepository.findById(suggestionId)
+        CodeKnowledgeSuggestion suggestion = suggestionRepository.findByIdForUpdate(suggestionId)
             .orElseThrow(() -> new IllegalArgumentException("Suggestion not found: " + suggestionId));
         if (suggestion.getStatus() == CodeKnowledgeSuggestion.Status.APPROVED) {
             return suggestion;
@@ -62,7 +63,7 @@ public class CodeSuggestionApplier {
 
     @Transactional
     public CodeKnowledgeSuggestion reject(String suggestionId, String decidedBy, String note) {
-        CodeKnowledgeSuggestion suggestion = suggestionRepository.findById(suggestionId)
+        CodeKnowledgeSuggestion suggestion = suggestionRepository.findByIdForUpdate(suggestionId)
             .orElseThrow(() -> new IllegalArgumentException("Suggestion not found: " + suggestionId));
         if (suggestion.getStatus() == CodeKnowledgeSuggestion.Status.REJECTED) {
             return suggestion;
@@ -82,15 +83,20 @@ public class CodeSuggestionApplier {
         String objectName;
         String parentObject = null;
         String target = suggestion.getTargetObject();
+        // Never silently skip — bulk-decide would report succeeded while nothing
+        // was written, and the Review UI would look like a no-op approval.
         if (target == null || target.isBlank()) {
-            log.warn("SCHEMA_DOC suggestion {} has no targetObject; skipping", suggestion.getId());
-            return;
+            throw new IllegalArgumentException(
+                "SCHEMA_DOC suggestion " + suggestion.getId() + " has no targetObject"
+            );
         }
         if (objectType == SchemaDocumentation.DocumentationType.COLUMN) {
             int dot = target.indexOf('.');
             if (dot <= 0 || dot >= target.length() - 1) {
-                log.warn("SCHEMA_DOC column suggestion {} has malformed target '{}'", suggestion.getId(), target);
-                return;
+                throw new IllegalArgumentException(
+                    "SCHEMA_DOC column suggestion " + suggestion.getId()
+                        + " has malformed target '" + target + "'"
+                );
             }
             parentObject = target.substring(0, dot);
             objectName = target.substring(dot + 1);
@@ -107,11 +113,14 @@ public class CodeSuggestionApplier {
         }
 
         // Scope the upsert to our own CODE_DERIVED rows AND, for columns,
-        // include parent_object — same column name can exist in many tables,
-        // so a (connection, COLUMN, "status", CODE_DERIVED) lookup would
-        // otherwise return multiple rows and throw "Query did not return a
-        // unique result".
-        Optional<SchemaDocumentation> existing;
+        // include parent_object — the same column name exists in many tables, so a
+        // (connection, COLUMN, "status", CODE_DERIVED) lookup would match all of them.
+        //
+        // Even with the full key this can match more than one row on installs whose
+        // duplicates predate V116's unique index, so collapse rather than assume one:
+        // an Optional finder here threw "Query did not return a unique result" and
+        // wedged the suggestion forever.
+        List<SchemaDocumentation> existing;
         if (objectType == SchemaDocumentation.DocumentationType.COLUMN) {
             existing = schemaDocRepository
                 .findByConnectionIdAndObjectTypeAndObjectNameAndParentObjectAndSource(
@@ -131,7 +140,12 @@ public class CodeSuggestionApplier {
                 );
         }
 
-        SchemaDocumentation doc = existing.orElseGet(SchemaDocumentation::new);
+        String docKey = (parentObject == null ? objectName : parentObject + "." + objectName)
+            + " (" + objectType + ", CODE_DERIVED)";
+        SchemaDocumentation doc = schemaDocDeduplicator.collapse(existing, docKey);
+        if (doc == null) {
+            doc = new SchemaDocumentation();
+        }
         doc.setConnectionId(suggestion.getConnectionId());
         doc.setObjectType(objectType);
         doc.setObjectName(objectName);

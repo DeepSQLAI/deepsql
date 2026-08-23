@@ -112,6 +112,42 @@ class QueryExecutionPolicyServiceTest {
         assertThat(exception.getMessage()).contains("without a WHERE clause");
     }
 
+    // EXPLAIN UPDATE/DELETE is the one reachable path to the keyword-fallback
+    // containsWhereClause check for a real UPDATE/DELETE: JSqlParser only models
+    // EXPLAIN SELECT, so these fall through to detectExplainWrappedMutation
+    // rather than Update.getWhere()/Delete.getWhere(), which every ordinary
+    // (non-EXPLAIN) mutation test above exercises instead.
+    @Test
+    void editorConfirmedExplainUpdateWithMultilineWhere_isAllowed() {
+        QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
+            new QueryRequest(
+                "EXPLAIN UPDATE customers\nSET property_status = 'ACTIVE'\nWHERE customer_id = 9",
+                null,
+                null
+            ),
+            QueryExecutionContext.editor("admin", true, true),
+            "mysql"
+        );
+
+        assertThat(decision.mutating()).isTrue();
+        assertThat(decision.primaryQueryType()).isEqualTo("UPDATE");
+    }
+
+    @Test
+    void editorConfirmedExplainDeleteWithOnlyCommentedOutWhere_isBlocked() {
+        QueryExecutionPolicyException exception = assertThrows(
+            QueryExecutionPolicyException.class,
+            () -> service.enforce(
+                new QueryRequest("EXPLAIN DELETE FROM customers -- WHERE customer_id = 9\n", null, null),
+                QueryExecutionContext.editor("admin", true, true),
+                "mysql"
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo(QueryExecutionPolicyException.UNSAFE_MUTATION_BLOCKED);
+        assertThat(exception.getMessage()).contains("without a WHERE clause");
+    }
+
     @Test
     void editorMutation_multiStatementBatchIsBlocked() {
         QueryExecutionPolicyException exception = assertThrows(

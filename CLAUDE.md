@@ -388,6 +388,15 @@ The Agent tab must not inherit the admin MCP token. `/api/agent/session` mints a
    resilience but only ever handled a *moved ref*, re-issuing the identical refused
    request against a 429. A fallback that fails the same way as the thing it backs
    up is not a fallback.
+7. **Never offer a write the caller cannot enforce.** `SOUL.md` once asked
+   "Should everyone on this database see this?" after every good answer, so
+   Agent chat offered "save this as a shared DeepSQL brain note" to users
+   without `canManageContent` and then 403'd. `get_brain_context` now stamps
+   `callerCapabilities`; if `doNotOffer` includes `save_brain_note`, the
+   agent must not mention it. MCP `save_brain_note` also fail-closes before
+   the POST. Admins get a non-blocking suggestion bubble only after they
+   correct or teach the Agent (`POST /brain/notes/propose` + accept) — a
+   clean first answer stays quiet. Overlaps merge into one intent.
 
 ### Verification Anti-Patterns (do not repeat)
 
@@ -406,6 +415,16 @@ broken. Assert the *outcome*, never the attempt:
 - **Mocks hide SDK breaks.** `tests/tools/test_mcp_structured_content.py` uses a
   `_FakeCallToolResult` with a hardcoded `.isError`, so it kept passing precisely when
   the real SDK stopped matching. Pin the dependency; a fake cannot catch this.
+- **A self-host verification script must reach the DB the way the install does.**
+  `seed-review-suggestions.py` / `e2e-review-approvals.py` hardcoded
+  `sudo -u postgres psql`, which only exists on a bare-metal install — on the Compose
+  deployment `install.sh` actually produces, the documented verify command died before
+  testing anything. Both now resolve the path through `scripts/self-host/vaultdb.py`.
+- **A test that mutates shared state must restore it, and only what it created.** The
+  same e2e suite parked every real `CODE_DERIVED` row by rewriting `source` to `USER`
+  and never restored it, so a run against a live install silently relabelled the user's
+  approved docs. It now copies rows to a scratch table and restores them, and its
+  cleanup deletes the planted row only while nothing references it.
 - **Never claim a check you did not run.** `install.sh` reported "up to date" when it
   could not reach npm; it now says it could not check.
 - **`set -e` + `read` at EOF aborts silently.** Prompts in `install.sh` use
@@ -493,6 +512,53 @@ it against a real database — not a theoretical hardening pass.
   does nothing (Spring proxies are bypassed by `this::`). This broke
   `POST /users/admin/reset` on every install that had run `setup-agent.sh`, since that
   mints an admin MCP token on each run.
+
+- **An `Optional`-returning derived finder is an assertion that the key is unique.**
+  Spring Data throws `IncorrectResultSizeDataAccessException` ("Query did not return a
+  unique result: N results were returned") the moment it is not, and the row that broke
+  it never repairs itself, so the failure is permanent rather than transient.
+  `schema_documentation` had no unique constraint on
+  `(connection_id, object_type, object_name, parent_object, source)` and
+  `CodeSuggestionApplier.approve` took no row lock, so one bulk approve submitted twice
+  concurrently wrote 219 duplicate pairs. Every later approve touching one of those keys
+  threw, `CodeScanService.bulkDecide` swallowed it per item, and the Review queue
+  reported "Approved 0 of 2" — with all 198 pending SCHEMA_DOC suggestions wedged.
+  Three-part fix, and all three are load-bearing:
+  1. `V116__dedupe_schema_documentation.sql` + `SchemaDocumentationDedupeInitializer`
+     (no Flyway here, so the initializer is what actually applies it) collapse the
+     duplicates and add `ux_schema_doc_target`, keyed on
+     `coalesce(parent_object,'')` because Postgres treats NULLs as distinct.
+  2. Those finders now return `List`, and `SchemaDocumentationDeduplicator.collapse`
+     keeps the newest row, repoints any `applied_doc_id` off the rows it deletes, and
+     drops their RAG embeddings. Do not restore an `Optional` variant — legacy installs
+     still carry duplicates until the initializer runs.
+  3. `approve`/`reject` load the suggestion via `findByIdForUpdate` (`PESSIMISTIC_WRITE`)
+     so the concurrent double-submit that created the duplicates blocks instead of racing.
+- **`applied_doc_id` is a loose reference, not an FK.** Deleting a `schema_documentation`
+  row it points at raises nothing and dangles silently — repoint before deleting.
+- **Approve *updates* the row an earlier scan wrote**, so a "freshly approved" doc row
+  carries a historical `created_at`. A test that plants an "old" duplicate with a
+  hardcoded past date can easily plant the *newer* of the two and assert nothing; anchor
+  fixture timestamps to the real row's `created_at`.
+- **A write's blast radius decides what to invalidate, not the endpoint you called.**
+  Approving a code-scan suggestion writes `code_knowledge_suggestion` *and*
+  `schema_documentation` (served by `brain/notes`, which backs the Write-notes tab
+  and its coverage counts) *and* `rag_documents` *and*, for KNOWLEDGE_ENTRY, a
+  company knowledge entry. The decide hooks invalidated only `codeScan` +
+  `companyKnowledge`, so every schema-doc-derived count stayed stale until the user
+  reloaded the page. `invalidateAfterDecision` in `useCodeScan.js` is the single
+  place that lists them; add to it when an approval starts writing something new.
+- **`@PreUpdate` does not fire on insert, so `updatedAt` is null on a brand-new row.**
+  Sorting "newest first" on `updatedAt` alone with nulls last therefore sends every
+  freshly created row to the *bottom* — which is why a just-approved note did not
+  appear at the top of the Write-notes list. Sort on
+  `COALESCE(updatedAt, createdAt)` (`BrainNoteService.touchedAt`,
+  `CompanyKnowledgeEntryRepository.findByConnectionIdOrderByRecency`).
+- **Suggestion list order depends on the status being viewed.** PENDING is a work
+  queue → `confidence DESC`. APPROVED/REJECTED are history → `decidedAt DESC NULLS
+  LAST` so the decision you just made is at the top; confidence-sorting a decided
+  list scattered fresh approvals among hundreds of older ones
+  (`CodeScanService.sortFor`).
 
 ### Endpoint Authorization Rules
 

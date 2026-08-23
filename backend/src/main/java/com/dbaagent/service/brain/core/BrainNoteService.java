@@ -34,10 +34,25 @@ public class BrainNoteService {
         List<SchemaDocumentation> docs = schemaDocumentationRepository.findByConnectionId(connectionId);
         return docs.stream()
             .filter(doc -> matchesScope(doc, scopeType, tableName, columnName))
-            .sorted(Comparator.comparing(SchemaDocumentation::getUpdatedAt,
+            .sorted(Comparator.comparing(BrainNoteService::touchedAt,
                 Comparator.nullsLast(Comparator.reverseOrder())))
             .map(doc -> toResponse(doc, lastSnapshotAt))
             .collect(Collectors.toList());
+    }
+
+    /**
+     * Recency for sorting: {@code updatedAt} falls back to {@code createdAt}.
+     *
+     * <p>{@code @PreUpdate} never fires on an insert, so a note that has only ever
+     * been created has a null {@code updatedAt}. Sorting on {@code updatedAt} alone
+     * with nulls last therefore pushed every brand-new note to the *bottom* — the
+     * opposite of what "newest first" means, and why a freshly approved code-scan
+     * suggestion did not show up at the top of the list. Same
+     * {@code COALESCE(updatedAt, createdAt)} convention as
+     * {@code CompanyKnowledgeEntryRepository.findByConnectionIdOrderByRecency}.
+     */
+    private static LocalDateTime touchedAt(SchemaDocumentation doc) {
+        return doc.getUpdatedAt() != null ? doc.getUpdatedAt() : doc.getCreatedAt();
     }
 
     public BrainNoteResponse createNote(BrainNoteRequest request) {
