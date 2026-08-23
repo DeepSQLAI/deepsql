@@ -4,6 +4,7 @@ import com.dbaagent.model.AnalysisHistory;
 import com.dbaagent.model.Chat;
 import com.dbaagent.model.ChatFeedback;
 import com.dbaagent.model.EffectiveConnectionAccess;
+import com.dbaagent.model.Permission;
 import com.dbaagent.repository.AnalysisHistoryRepository;
 import com.dbaagent.repository.ChatFeedbackRepository;
 import com.dbaagent.repository.ChatRepository;
@@ -179,6 +180,52 @@ public class AccessControlService {
             throw new ResponseStatusException(FORBIDDEN, "Access denied");
         }
         return username;
+    }
+
+    /**
+     * Assert the caller may create a database connection.
+     *
+     * <p>Creating a connection is not scoped to an existing connection, so none of the
+     * {@code assertCanManage*Connection*} checks apply — there is no id to resolve
+     * access against yet. Without this, {@code POST /connections} had no authorization
+     * at all: a Developer or Data Engineer could create, then edit and delete, their own
+     * connection (verified live against a running install — the row persisted with
+     * {@code owner_username = analyst}). Hiding the Connections button only hid the
+     * button.
+     *
+     * <p>Permission-based rather than {@code isCurrentUserAdmin()} so DBA — which holds
+     * MANAGE_CONNECTIONS by design — keeps working, and so an admin-defined custom role
+     * granting that permission behaves consistently.
+     */
+    public void assertCanManageConnections() {
+        if (!authEnabled) {
+            return;
+        }
+        if (!hasPermission(Permission.MANAGE_CONNECTIONS)) {
+            throw new ResponseStatusException(FORBIDDEN, "You do not have permission to manage connections");
+        }
+    }
+
+    /**
+     * Whether the current principal carries a permission authority.
+     *
+     * <p>{@code CustomUserDetailsService} stamps every effective permission onto the
+     * authentication as a plain authority alongside {@code ROLE_<code>}, so this reads
+     * the already-resolved set (overrides and custom roles included) without a lookup.
+     */
+    public boolean hasPermission(Permission permission) {
+        if (permission == null) {
+            return false;
+        }
+        if (isCurrentUserAdmin()) {
+            return true;
+        }
+        Authentication authentication = currentAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return false;
+        }
+        return authentication.getAuthorities().stream()
+            .anyMatch(authority -> permission.name().equals(authority.getAuthority()));
     }
 
     public boolean isCurrentUserAdmin() {
