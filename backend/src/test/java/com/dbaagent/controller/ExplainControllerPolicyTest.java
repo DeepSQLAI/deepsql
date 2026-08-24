@@ -30,6 +30,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -135,6 +136,7 @@ class ExplainControllerPolicyTest {
     @Test
     void useAnalyzeTrue_mcpBearer_usesMcpExecutionContext() {
         givenConnection("conn-1", "postgres");
+        lenient().when(httpRequest.getHeader(anyString())).thenReturn(null);
         when(httpRequest.getHeader(HttpHeaders.AUTHORIZATION))
             .thenReturn("Bearer dsql_mcp_public.secret");
         when(accessControlService.getCurrentUsername()).thenReturn("admin");
