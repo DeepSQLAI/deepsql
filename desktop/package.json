@@ -1,9 +1,9 @@
 {
   "name": "deepsql-desktop",
   "productName": "DeepSQL",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "DeepSQL desktop client — connect to a self-hosted DeepSQL VM over TLS or an SSH tunnel.",
+  "description": "DeepSQL desktop client \u2014 connect to a self-hosted DeepSQL VM over TLS or an SSH tunnel.",
   "license": "Apache-2.0",
   "author": {
     "name": "DeepSQL",
@@ -37,7 +37,7 @@
   "build": {
     "appId": "com.deepsql.desktop",
     "productName": "DeepSQL",
-    "copyright": "Copyright © DeepSQL",
+    "copyright": "Copyright \u00a9 DeepSQL",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -80,7 +80,7 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
-        "NSHumanReadableCopyright": "Copyright © DeepSQL"
+        "NSHumanReadableCopyright": "Copyright \u00a9 DeepSQL"
       }
     },
     "dmg": {
