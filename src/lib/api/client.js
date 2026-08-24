@@ -3682,7 +3682,8 @@ export const setupAPI = {
 
   /**
    * Returns current setup state: setupComplete, hasOrganizationInfo,
-   * hasConnections, hasLlmConfig. Public endpoint — no auth required.
+   * hasConnections, hasLlmConfig, googleEnabled, passwordLoginEnabled.
+   * Public endpoint — no auth required.
    */
   getStatus: async () => {
     const response = await apiClient.get("/api/setup/status");

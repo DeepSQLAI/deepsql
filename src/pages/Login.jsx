@@ -98,8 +98,15 @@ export default function Login() {
   }
 
 
+  // Default to showing the password form: setupStatus is null on first paint and
+  // while the request is in flight, and an install that never set the flag gets
+  // `undefined`. Both must render the form, or a slow/failed status call would
+  // strand everyone on a login page with no way in.
+  const passwordLoginEnabled = setupStatus?.passwordLoginEnabled !== false
+
   const renderLoginStep = () => (
     <>
+    {passwordLoginEnabled && (
     <form onSubmit={handlePasswordLogin} className="space-y-5">
       <div>
         <label htmlFor="email" className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">
@@ -148,6 +155,7 @@ export default function Login() {
         {loading ? 'Signing in…' : 'Sign In'}
       </button>
     </form>
+    )}
 
     {/*
       Only rendered when the server reports security.google.enabled. The login
@@ -159,21 +167,24 @@ export default function Login() {
       so this is a full-page navigation and must not submit the form above.
     */}
     {setupStatus?.googleEnabled && (
-      <div className="mt-6">
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center" aria-hidden="true">
-            <div className="w-full border-t border-gray-200" />
+      <div className={passwordLoginEnabled ? 'mt-6' : ''}>
+        {/* The divider only separates two things — drop it when SSO stands alone. */}
+        {passwordLoginEnabled && (
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center" aria-hidden="true">
+              <div className="w-full border-t border-gray-200" />
+            </div>
+            <div className="relative flex justify-center">
+              <span className="bg-white px-3 text-xs font-medium uppercase tracking-wider text-gray-400">
+                or
+              </span>
+            </div>
           </div>
-          <div className="relative flex justify-center">
-            <span className="bg-white px-3 text-xs font-medium uppercase tracking-wider text-gray-400">
-              or
-            </span>
-          </div>
-        </div>
+        )}
 
         <a
           href={authAPI.getGoogleStartUrl()}
-          className="mt-6 w-full min-h-[48px] flex items-center justify-center gap-3 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold py-3 rounded-full shadow-sm transition-all active:scale-[0.98]"
+          className={`${passwordLoginEnabled ? 'mt-6' : ''} w-full min-h-[48px] flex items-center justify-center gap-3 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold py-3 rounded-full shadow-sm transition-all active:scale-[0.98]`}
         >
           <svg className="h-5 w-5" viewBox="0 0 24 24" aria-hidden="true">
             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.76h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -250,7 +261,9 @@ export default function Login() {
   const stepTitle = step === STEP_OTP ? 'Verify your sign-in' : 'Secure sign-in'
   const stepSubtitle = step === STEP_OTP
     ? 'Complete the extra email verification step for this workspace.'
-    : 'Sign in with your email and password to access DeepSQL.'
+    : passwordLoginEnabled
+      ? 'Sign in with your email and password to access DeepSQL.'
+      : 'Sign in with your work Google account to access DeepSQL.'
 
   return (
     <div className="flex min-h-screen w-full bg-white text-gray-900 overflow-x-hidden">

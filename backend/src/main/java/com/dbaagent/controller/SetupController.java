@@ -46,6 +46,14 @@ public class SetupController {
     @Value("${security.google.enabled:false}")
     private boolean googleEnabled;
 
+    /**
+     * Mirrors {@code security.password.enabled}. Lets the login page hide the
+     * email/password form on SSO-only installs instead of rendering a form that
+     * always fails. Same non-final reasoning as above.
+     */
+    @Value("${security.password.enabled:true}")
+    private boolean passwordLoginEnabled;
+
     // ── GET /setup/status ─────────────────────────────────────────────────────
 
     /** Returns setup completion state. Public endpoint — no auth required. */
@@ -66,7 +74,8 @@ public class SetupController {
                 hasOrgInfo,
                 hasConnections,
                 hasLlmConfig,
-                googleEnabled
+                googleEnabled,
+                passwordLoginEnabled
         );
     }
 
@@ -293,7 +302,9 @@ public class SetupController {
             boolean hasConnections,
             boolean hasLlmConfig,
             /** Whether Google Workspace SSO is configured; drives the login page's SSO button. */
-            boolean googleEnabled
+            boolean googleEnabled,
+            /** Whether email+password sign-in is accepted; false hides the password form. */
+            boolean passwordLoginEnabled
     ) {}
 
     public record InitializeRequest(String orgName, String adminUsername, String adminEmail, String adminPassword) {}
