@@ -491,4 +491,128 @@ class QueryExecutionPolicyServiceTest {
         );
         assertThat(decision.primaryQueryType()).isEqualTo("INSERT");
     }
+
+    // --- MCP / coding-agent surface: CREATE/ALTER go through; DROP/TRUNCATE do not ---
+
+    @Test
+    void mcpAdminCreate_unconfirmedRequiresConfirmation() {
+        QueryExecutionPolicyException exception = assertThrows(
+            QueryExecutionPolicyException.class,
+            () -> service.enforce(
+                new QueryRequest("CREATE TABLE t_new (id INT PRIMARY KEY)", null, null),
+                QueryExecutionContext.mcp("admin", true, false),
+                "mysql"
+            )
+        );
+        assertThat(exception.getErrorCode())
+            .isEqualTo(QueryExecutionPolicyException.EDITOR_MUTATION_CONFIRMATION_REQUIRED);
+        assertThat(exception.isRequiresConfirmation()).isTrue();
+    }
+
+    @Test
+    void mcpAdminCreate_confirmedIsAllowed() {
+        QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
+            new QueryRequest("CREATE TABLE t_new (id INT PRIMARY KEY)", null, null),
+            QueryExecutionContext.mcp("admin", true, true),
+            "mysql"
+        );
+        assertThat(decision.mutating()).isTrue();
+        assertThat(decision.primaryQueryType()).isEqualTo("CREATE");
+    }
+
+    @Test
+    void mcpAdminAlter_confirmedIsAllowed() {
+        QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
+            new QueryRequest("ALTER TABLE customers ADD COLUMN tag VARCHAR(64)", null, null),
+            QueryExecutionContext.mcp("admin", true, true),
+            "mysql"
+        );
+        assertThat(decision.mutating()).isTrue();
+        assertThat(decision.primaryQueryType()).isEqualTo("ALTER");
+    }
+
+    @Test
+    void mcpAdminCreateIndex_confirmedIsAllowed() {
+        QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
+            new QueryRequest("CREATE INDEX idx_customers_tag ON customers (tag)", null, null),
+            QueryExecutionContext.mcp("admin", true, true),
+            "mysql"
+        );
+        assertThat(decision.mutating()).isTrue();
+        assertThat(decision.primaryQueryType()).startsWith("CREATE");
+    }
+
+    @Test
+    void mcpDeveloperCreate_isForbidden() {
+        QueryExecutionPolicyException exception = assertThrows(
+            QueryExecutionPolicyException.class,
+            () -> service.enforce(
+                new QueryRequest("CREATE TABLE t_new (id INT PRIMARY KEY)", null, null),
+                QueryExecutionContext.mcp("dev", false, true),
+                "mysql"
+            )
+        );
+        assertThat(exception.getErrorCode())
+            .isEqualTo(QueryExecutionPolicyException.EDITOR_MUTATION_FORBIDDEN);
+    }
+
+    @Test
+    void mcpAdminDropTable_isBlockedEvenWhenConfirmed() {
+        QueryExecutionPolicyException exception = assertThrows(
+            QueryExecutionPolicyException.class,
+            () -> service.enforce(
+                new QueryRequest("DROP TABLE temp_rollup", null, null),
+                QueryExecutionContext.mcp("admin", true, true),
+                "mysql"
+            )
+        );
+        assertThat(exception.getErrorCode())
+            .isEqualTo(QueryExecutionPolicyException.UNSAFE_MUTATION_BLOCKED);
+        assertThat(exception.getMessage()).contains("DROP and TRUNCATE");
+    }
+
+    @Test
+    void mcpAdminDropIndex_isBlockedEvenWhenConfirmed() {
+        QueryExecutionPolicyException exception = assertThrows(
+            QueryExecutionPolicyException.class,
+            () -> service.enforce(
+                new QueryRequest("DROP INDEX idx_bookings_hotel ON bookings", null, null),
+                QueryExecutionContext.mcp("admin", true, true),
+                "mysql"
+            )
+        );
+        assertThat(exception.getErrorCode())
+            .isEqualTo(QueryExecutionPolicyException.UNSAFE_MUTATION_BLOCKED);
+        assertThat(exception.getMessage()).contains("DROP and TRUNCATE");
+    }
+
+    @Test
+    void mcpAdminTruncate_isBlockedEvenWhenConfirmed() {
+        QueryExecutionPolicyException exception = assertThrows(
+            QueryExecutionPolicyException.class,
+            () -> service.enforce(
+                new QueryRequest("TRUNCATE TABLE temp_rollup", null, null),
+                QueryExecutionContext.mcp("admin", true, true),
+                "mysql"
+            )
+        );
+        assertThat(exception.getErrorCode())
+            .isEqualTo(QueryExecutionPolicyException.UNSAFE_MUTATION_BLOCKED);
+        assertThat(exception.getMessage()).contains("DROP and TRUNCATE");
+    }
+
+    @Test
+    void mcpAdminExplainDrop_isBlockedEvenWhenConfirmed() {
+        QueryExecutionPolicyException exception = assertThrows(
+            QueryExecutionPolicyException.class,
+            () -> service.enforce(
+                new QueryRequest("EXPLAIN DROP TABLE temp_rollup", null, null),
+                QueryExecutionContext.mcp("admin", true, true),
+                "mysql"
+            )
+        );
+        assertThat(exception.getErrorCode())
+            .isEqualTo(QueryExecutionPolicyException.UNSAFE_MUTATION_BLOCKED);
+        assertThat(exception.getMessage()).contains("DROP and TRUNCATE");
+    }
 }

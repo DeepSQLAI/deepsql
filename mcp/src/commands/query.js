@@ -10,13 +10,15 @@
  *   - Developer + SELECT/WITH/SHOW/EXPLAIN → runs immediately
  *   - Developer + DML/DDL                  → backend returns 403 with a
  *                                            clear EDITOR_MUTATION_FORBIDDEN
- *   - Admin + DML/DDL (no --write)         → server returns
+ *   - Admin + CREATE/ALTER/DML (no --write)→ server returns
  *                                            requiresConfirmation; we print
  *                                            the warnings, prompt y/N, and
  *                                            re-send with confirmMutation=true
- *   - Admin + DML/DDL + --write            → confirmation flag is set
+ *   - Admin + CREATE/ALTER/DML + --write   → confirmation flag is set
  *                                            upfront, no prompt; useful in
  *                                            scripts / CI
+ *   - Admin + DROP/TRUNCATE                → blocked (UNSAFE_MUTATION_BLOCKED)
+ *                                            even with --write
  *
  * `EXPLAIN` and `EXPLAIN ANALYZE` are just SQL — no special flag needed.
  * For the AI-enriched plan analysis, use `deepsql analyze "<sql>"`.

@@ -325,6 +325,7 @@ test("execute_sql tool schema advertises mutation flow (confirmMutation) and bou
   assert.equal(def.inputSchema.required.includes("query"), true);
   assert.ok(def.inputSchema.properties.confirmMutation, "needs confirmMutation hint for agents");
   assert.equal(def.inputSchema.properties.limit.maximum, 1000);
+  assert.match(def.description, /DROP and TRUNCATE are blocked/i);
 });
 
 test("analyze_query_plan schema advertises useAnalyze + confirmMutation", () => {
