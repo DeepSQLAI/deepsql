@@ -1,6 +1,7 @@
 package com.dbaagent.service;
 
 import com.dbaagent.model.DashboardWorkspace;
+import com.dbaagent.model.Permission;
 import com.dbaagent.model.DashboardWorkspaceMember;
 import com.dbaagent.model.DashboardWorkspaceRole;
 import com.dbaagent.model.SavedDashboard;
@@ -97,6 +98,11 @@ public class DashboardWorkspaceService {
     @Transactional
     public DashboardWorkspace createWorkspace(String connectionId, String name, String description, String color) {
         accessControlService.assertCanReadConnectionContent(connectionId);
+        // MANAGE_DASHBOARD_WORKSPACES was declared in the Permission enum and offered in
+        // the role editor, but nothing enforced it — an admin who unticked it saw no
+        // effect, which is worse than not offering the toggle at all.
+        accessControlService.assertHasPermission(Permission.MANAGE_DASHBOARD_WORKSPACES,
+            "You do not have permission to create dashboard workspaces");
         String cleanName = requireName(name);
 
         workspaceRepository.findByConnectionIdAndNameIgnoreCase(connectionId, cleanName).ifPresent(existing -> {
@@ -313,6 +319,23 @@ public class DashboardWorkspaceService {
         }
         memberRepository.findByWorkspaceIdAndUsernameIgnoreCase(workspace.getId(), currentUsername())
             .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Workspace not found"));
+    }
+
+    /**
+     * Assert the caller may put a dashboard into this workspace.
+     *
+     * <p>Deliberately manage-level, not view-level: a VIEWER can open a workspace but must
+     * not be able to push new dashboards into someone else's, which is what checking only
+     * visibility allowed. Mirrors {@link #moveDashboard}, so creating into a workspace and
+     * moving into one now require the same thing.
+     */
+    public void assertCanAssignInto(UUID workspaceId) {
+        if (workspaceId == null) {
+            return;
+        }
+        DashboardWorkspace workspace = workspaceRepository.findById(workspaceId)
+            .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Workspace not found"));
+        assertCanManage(workspace);
     }
 
     private void assertCanManage(DashboardWorkspace workspace) {

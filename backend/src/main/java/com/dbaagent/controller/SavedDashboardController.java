@@ -1,6 +1,7 @@
 package com.dbaagent.controller;
 
 import com.dbaagent.model.DashboardVersion;
+import com.dbaagent.model.DashboardWorkspace;
 import com.dbaagent.model.SavedDashboard;
 import com.dbaagent.service.ConnectionChatAccessPolicyService;
 import com.dbaagent.service.DashboardWorkspaceService;
@@ -12,6 +13,7 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
 import java.util.List;
@@ -49,14 +51,23 @@ public class SavedDashboardController {
     }
 
     /**
-     * A dashboard may only be created into a workspace the caller can actually manage —
-     * otherwise anyone could push a dashboard into someone else's workspace.
+     * A dashboard may only be created into a workspace the caller can actually manage.
+     *
+     * <p>This previously called {@code getWorkspace}, which asserts only *visibility* —
+     * so a VIEWER could create dashboards into a workspace they merely belonged to,
+     * despite {@code moveDashboard} requiring MANAGER for the same effect. The two paths
+     * now agree.
      */
     private void assertWorkspaceAssignable(String connectionId, UUID workspaceId) {
         if (workspaceId == null) {
             return;
         }
-        dashboardWorkspaceService.getWorkspace(workspaceId);
+        DashboardWorkspace workspace = dashboardWorkspaceService.getWorkspace(workspaceId);
+        if (!workspace.getConnectionId().equals(connectionId)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "Workspace belongs to a different connection");
+        }
+        dashboardWorkspaceService.assertCanAssignInto(workspaceId);
     }
 
     /** Publish this dashboard to the web (opt-in, revocable public link). */
@@ -384,6 +395,15 @@ public class SavedDashboardController {
     public ResponseEntity<Map<String, Object>> toggleFavorite(@PathVariable UUID id) {
         try {
             log.info("Toggling favorite for dashboard: {}", id);
+            // This handler had NO authorization at all, so a non-member could toggle the
+            // favorite flag on a workspace-restricted dashboard and — worse — read the
+            // whole row back from the 200 response (dashboardConfig and chatMessages
+            // included), bypassing the very 404 that hides it. Load first, then apply the
+            // same connection + workspace gate every other handler here uses.
+            SavedDashboard existing = savedDashboardService.getDashboardById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Dashboard not found"));
+            accessControlService.assertCanReadConnectionContent(existing.getConnectionId());
+            dashboardWorkspaceService.assertCanReadDashboard(existing);
 
             SavedDashboard updated = savedDashboardService.toggleFavorite(id);
 
@@ -512,7 +532,18 @@ public class SavedDashboardController {
             log.info("Fetching folders for connection: {}", connectionId);
             accessControlService.assertCanReadConnectionContent(connectionId);
 
-            List<String> folders = savedDashboardService.getFolders(connectionId);
+            // Derive folders from the dashboards this caller can actually see. The
+            // repository query is a DISTINCT over every dashboard on the connection, so a
+            // non-member learned the folder names of workspace-restricted dashboards —
+            // a small leak, but through the same list the 404s are meant to hide.
+            List<String> folders = dashboardWorkspaceService
+                .filterReadable(savedDashboardService.getDashboardsByConnection(connectionId))
+                .stream()
+                .map(SavedDashboard::getFolder)
+                .filter(f -> f != null && !f.isBlank())
+                .distinct()
+                .sorted()
+                .toList();
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);

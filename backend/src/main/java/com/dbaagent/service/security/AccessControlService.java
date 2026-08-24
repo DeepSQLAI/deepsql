@@ -206,6 +206,16 @@ public class AccessControlService {
         }
     }
 
+    /** Assert the caller holds a permission, with a caller-supplied message. */
+    public void assertHasPermission(Permission permission, String message) {
+        if (!authEnabled) {
+            return;
+        }
+        if (!hasPermission(permission)) {
+            throw new ResponseStatusException(FORBIDDEN, message);
+        }
+    }
+
     /**
      * Whether the current principal carries a permission authority.
      *

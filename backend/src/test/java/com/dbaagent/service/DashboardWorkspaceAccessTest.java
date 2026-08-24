@@ -194,6 +194,50 @@ class DashboardWorkspaceAccessTest {
     }
 
     @Test
+    @DisplayName("assertCanAssignInto requires MANAGER, not mere membership")
+    void assignIntoRequiresManager() {
+        // Creating a dashboard into a workspace used to call getWorkspace(), which asserts
+        // only visibility — so a VIEWER could push dashboards into a workspace while
+        // moveDashboard() required MANAGER for the same effect.
+        DashboardWorkspace workspace = new DashboardWorkspace();
+        workspace.setId(WORKSPACE);
+        workspace.setConnectionId(CONNECTION);
+        when(workspaceRepository.findById(WORKSPACE)).thenReturn(Optional.of(workspace));
+
+        DashboardWorkspaceMember viewer = new DashboardWorkspaceMember();
+        viewer.setWorkspaceId(WORKSPACE);
+        viewer.setUsername("analyst");
+        viewer.setWorkspaceRole(DashboardWorkspaceRole.VIEWER);
+        when(memberRepository.findByWorkspaceIdAndUsernameIgnoreCase(WORKSPACE, "analyst"))
+            .thenReturn(Optional.of(viewer));
+
+        assertThatThrownBy(() -> service.assertCanAssignInto(WORKSPACE))
+            .isInstanceOf(ResponseStatusException.class)
+            .hasMessageContaining("403");
+
+        // A manager passes.
+        viewer.setWorkspaceRole(DashboardWorkspaceRole.MANAGER);
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> service.assertCanAssignInto(WORKSPACE));
+    }
+
+    @Test
+    @DisplayName("assertCanReadDashboard is what stops the favorite-toggle IDOR")
+    void favoriteTogglePathIsGated() {
+        // POST /saved-dashboards/{id}/favorite had no authorization at all: a non-member
+        // could flip the flag on a workspace-restricted dashboard AND read the whole row
+        // back from the 200 response, bypassing the 404 that hides it. The controller now
+        // runs this same gate before toggling.
+        when(memberRepository.findByWorkspaceIdAndUsernameIgnoreCase(WORKSPACE, "analyst"))
+            .thenReturn(Optional.empty());
+
+        SavedDashboard restricted = dashboard(WORKSPACE);
+
+        assertThatThrownBy(() -> service.assertCanReadDashboard(restricted))
+            .isInstanceOf(ResponseStatusException.class)
+            .hasMessageContaining("404");
+    }
+
+    @Test
     @DisplayName("A dashboard cannot be moved into a workspace on a different connection")
     void cannotMoveAcrossConnections() {
         when(accessControlService.isCurrentUserAdmin()).thenReturn(true);
