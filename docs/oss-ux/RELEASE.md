@@ -19,10 +19,11 @@ Cron for the weekly automation: `CRON_TZ=America/Los_Angeles 0 9 * * 6`.
 
 | Surface | Where | Current |
 |---------|-------|---------|
-| Product / Git tag | `vMAJOR.MINOR.PATCH` | `v1.2.0` |
-| Backend JAR | `backend/pom.xml` `<version>` | `1.2.0` |
+| Product / Git tag | `vMAJOR.MINOR.PATCH` | `v1.3.0` |
+| Backend JAR | `backend/pom.xml` `<version>` | `1.3.0` |
 | Frontend package | root `package.json` | `0.1.0` (internal) |
-| MCP / CLI npm | `mcp/package.json` | `0.27.0` |
+| MCP / CLI npm | `mcp/package.json` | `0.27.1` |
+| DeepSQL Desktop | `desktop/package.json` + `desktop-v*` tags | `1.0.0` |
 
 Tag the **product** version (`v1.1.0`). Keep backend `pom.xml` in lockstep with the tag for the JAR filename. MCP may continue its own semver when publishing `@deepsql/mcp` to npm.
 
@@ -102,8 +103,19 @@ gh release create v1.1.0 \
 
 Docker Compose remains the primary install path (`docker compose up --build`); the JAR + frontend tarball support air-gapped / non-Compose operators.
 
+### DeepSQL Desktop (optional, separate tag)
+
+Desktop installers are **not** produced by the product `v*.*.*` workflow. After the product release is published:
+
+1. Confirm `desktop/package.json` version matches the intended Desktop cut (e.g. `1.0.0`).
+2. Tag and push `desktop-v1.0.0` (annotated).
+3. `.github/workflows/desktop-release.yml` builds macOS / Windows / Linux on native runners and attaches installers to that GitHub Release.
+
+Setup and CORS requirements: [`desktop/README.md`](../../desktop/README.md).
+
 ## Post-release
 
 - Confirm the Release page lists every file and checksums verify.
+- If Desktop shipped in this cycle, confirm the `desktop-v*` Release has platform installers.
 - Announce with the tag URL + one-line upgrade note.
 - Bump versions on `main` for the next cycle only after the tag is cut (avoid tagging a commit whose pom still says the previous version).

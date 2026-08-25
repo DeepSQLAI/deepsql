@@ -1,5 +1,7 @@
 # DeepSQL Desktop
 
+**Version 1.0.0** — first public Desktop cut (ships with DeepSQL product `v1.3.0`).
+
 A cross-platform desktop client for a self-hosted DeepSQL server. It connects to
 the VM (or bare metal) running the DeepSQL stack either **directly over TLS** or
 through an **SSH tunnel**, and presents the DeepSQL UI in a native window with
