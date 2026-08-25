@@ -191,7 +191,12 @@ public class SchemaController {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
             }
             accessControlService.assertCanUseChatEditor(connectionId);
-            queryRequest.setExecutionOrigin(QueryExecutionOrigin.EDITOR);
+            boolean mcpBearer = McpTokenService.isMcpAuthorizationHeader(
+                httpRequest.getHeader(HttpHeaders.AUTHORIZATION)
+            );
+            queryRequest.setExecutionOrigin(
+                mcpBearer ? QueryExecutionOrigin.MCP : QueryExecutionOrigin.EDITOR
+            );
             connectionRequest = credentialService.getDecryptedConnection(connectionId);
 
             QueryResult result = queryExecutorService.executeQuery(
@@ -438,23 +443,12 @@ public class SchemaController {
     }
 
     private QueryExecutionContext queryExecutionContext(QueryRequest queryRequest, HttpServletRequest httpRequest) {
-        String username = accessControlService.getCurrentUsername();
-        boolean admin = accessControlService.isCurrentUserAdmin();
-        if (isMcpBearer(httpRequest)) {
-            return QueryExecutionContext.mcp(username, admin);
-        }
-        return QueryExecutionContext.editor(
-            username,
-            admin,
+        return QueryExecutionContext.forSqlSurface(
+            McpTokenService.isMcpAuthorizationHeader(httpRequest.getHeader(HttpHeaders.AUTHORIZATION)),
+            accessControlService.getCurrentUsername(),
+            accessControlService.isCurrentUserAdmin(),
             Boolean.TRUE.equals(queryRequest.getMutationConfirmed())
         );
-    }
-
-    private boolean isMcpBearer(HttpServletRequest httpRequest) {
-        String authorization = httpRequest.getHeader(HttpHeaders.AUTHORIZATION);
-        return authorization != null
-            && authorization.startsWith("Bearer ")
-            && authorization.substring(7).startsWith(McpTokenService.TOKEN_PREFIX);
     }
 
     private SchemaMetadata scopedSchema(String connectionId, SchemaMetadata schema) {

@@ -245,9 +245,8 @@ their native runners. See `desktop/README.md` for the full picture.
 ## MCP Server
 
 - `mcp/deepsql-phase1-server.js` implements a Phase 1 stdio MCP server for internal rollout.
-- It exposes read-only tools only: listing connections, fetching schema/objects, asking DeepSQL questions, executing read-only SQL, and running EXPLAIN without ANALYZE.
-- It wraps existing backend APIs, so it reuses DeepSQL chat orchestration, RAG, connection management, and guardrails instead of exposing raw DB credentials.
-- Read-only enforcement is applied in `mcp/deepsql-phase1-lib.js` before calling backend execution endpoints.
+- Schema/retrieval tools stay read-only. `execute_sql` is role-gated: developers stay read-only; admins can run DML and non-destructive DDL (`CREATE`, `ALTER`) with the same two-step confirmation as the SQL Editor. `DROP` and `TRUNCATE` stay blocked on MCP even when confirmed.
+- It wraps existing backend APIs, so it reuses DeepSQL chat orchestration, RAG, connection management, and `QueryExecutionPolicyService` instead of exposing raw DB credentials.
 - Client config examples live in `.cursor/mcp.json` and `mcp/claude_desktop_config.example.json`.
 - Usage and env vars are documented in `docs/root/MCP_PHASE1.md`.
 
@@ -329,6 +328,99 @@ returns a number).
 3. **UI State**: Use Zustand stores from `src/lib/stores/`. Prefer selector hooks for optimized re-renders.
 4. **Tooltips**: Always use `HelpTooltip` component, never plain `title` attributes.
 5. **Design**: Minimal black/white/grey palette, Inter font, subtle transitions. See UX guidelines in full CLAUDE.md.
+
+### Roles, Permissions & Custom Roles
+
+Roles are **not a hierarchy**. The old model ranked `DEVELOPER < ADMIN` and compared
+`ordinal()`; the shipped roles deliberately overlap without nesting, so an ordering
+comparison has no meaning and `Role.isAtLeast` is gone.
+
+| Role | Sections | Notes |
+|---|---|---|
+| `ADMIN` | everything | Fixed point: holds **every** permission; overrides against it are refused, so the last admin cannot be locked out of user management. |
+| `DBA` | all menus + connection settings | **No** user creation / invite codes / role management. |
+| `DATA_ENGINEER` | Agent, Dashboards, Editor | No Digest, no Performance. |
+| `DEVELOPER` | Agent, Digest, Dashboards, Performance, Editor | No connection settings. |
+| custom | whatever an admin ticks | `custom_roles` rows; the `code` is written to `users.role`. |
+
+- **Permissions are the unit of authorization.** `Permission` carries the built-in roles
+  that hold it by default (`defaultRoles`); one `VIEW_*` permission per sidebar section
+  (`VIEW_AGENT`, `VIEW_DASHBOARDS`, `VIEW_DIGEST`, `VIEW_BRAIN`, `VIEW_PERFORMANCE`,
+  `VIEW_EDITOR`). The frontend gates nav on those codes (`SECTION_PERMISSION` in
+  `src/lib/features.js`), not on a minimum role.
+- **A "role code" is either a built-in `Role` name or a `CustomRole.code`** — they share
+  the `users.role` namespace, so `CustomRoleService` refuses a code colliding with a
+  built-in one. `Role.fromString` returns **null** for anything unrecognised instead of
+  collapsing to DEVELOPER: mapping a custom role onto a built-in one would hand its
+  holders the wrong permissions. Use `PermissionService.getEffectivePermissions(roleCode)`
+  — `User.getRoleEnum()` is null for a custom role and `Role.getPermissions()` skips
+  overrides.
+- **Every token-minting path must resolve by role code.** `AuthSessionService`,
+  `PasswordlessAuthService`, `AuthInternalController`, `CustomUserDetailsService` and the
+  `/auth/me` payload all use `user.getRoleCode()` + `PermissionService`; `JwtUtil` gained
+  a `String roleCode` overload for exactly this. A `Role`-typed path cannot represent a
+  custom role, so a custom-role user would silently get the wrong claim.
+- **An unknown role code grants nothing** rather than falling back — a deleted custom role
+  must not become silent Developer access. Deleting a custom role is refused while any
+  user still holds it.
+- `RolePermissionOverride.role` is now a role-code **string** (same column), so overrides
+  work for custom roles too. Built-in role permission sets are code, not data: the API
+  refuses to edit them directly and points at overrides instead, so an admin's change
+  survives an upgrade.
+
+### Connection access levels & the create-connection guard
+
+- **There is one access level.** `ConnectionAccessLevel.CHAT_EDITOR` is `@Deprecated` and
+  retained only so pre-existing rows parse; `fromString` folds it (and a blank value) into
+  `FULL_CONTENT`, and `ConnectionAccessService.resolveAccess` returns `FULL_CONTENT` for
+  **every** grant. Assigning a connection therefore implies content access — no migration
+  was needed, legacy rows upgrade themselves on read. The "Full Access" / "Chat + Editor"
+  badges are gone; only Owner/Admin are surfaced.
+- **`AccessControlServiceTest` cannot prove anything about this.** It stubs
+  `resolveAccess` to return a fixed `EffectiveConnectionAccess`, so its CHAT_EDITOR case
+  passes vacuously no matter what the resolver does. `ConnectionAccessLevelCollapseTest`
+  exercises the real path — add coverage there, not to the stubbed test.
+- **`POST /connections` had no authorization at all.** It went straight to test-and-save,
+  so any authenticated user could create — then edit and delete — their own connection
+  (verified live: the row persisted with `owner_username = analyst` for a DATA_ENGINEER).
+  Hiding the sidebar button is not a control. It now calls
+  `accessControlService.assertCanManageConnections()`, which is **permission-based, not
+  admin-only**, so DBA and any custom role holding `MANAGE_CONNECTIONS` still work.
+  Creation is not scoped to a connection id, so none of the `assertCanManage*Connection*`
+  helpers apply — a new unscoped endpoint needs this guard explicitly.
+- **Settings and Connections are admin surfaces in the UI.** `SettingsModal` and
+  `ManageConnectionsModal` each refuse to render without the relevant permission, enforced
+  *inside* the component rather than only at the call site: both are opened from several
+  places, and gating each entry point separately means the next one silently reopens the
+  hole. Hiding Settings also removes MCP tokens from those roles — that is intended.
+
+### Dashboard workspaces
+
+`DashboardWorkspace` groups dashboards within one connection and carries its own member
+list (`DashboardWorkspaceMember`, keyed by **username** to match `connection_access_grant`
+so "View as" resolves membership as the target user).
+
+- **The rule is an AND, and it only ever narrows.** Connection access is checked first and
+  unchanged (`assertCanReadConnectionContent`); workspace membership is an *additional*
+  gate. Adding someone to a workspace can never grant them a connection they were not
+  already given. `saved_dashboards.workspace_id` is nullable — NULL means "not grouped",
+  governed purely by the connection ACL exactly as before.
+- Admins bypass the membership half, matching how they already bypass connection grants.
+- **Non-membership reports 404, not 403** — a user outside the workspace must not learn
+  the dashboard exists.
+- **Deleting a workspace detaches its dashboards, never deletes them** (the FK is
+  deliberately non-cascading). Removing the last MANAGER is refused, otherwise the
+  workspace could never be changed again by anyone but an admin.
+- `DashboardWorkspaceService.filterReadable` resolves a whole list in one membership
+  query; use it for any new dashboard-list endpoint rather than checking per row.
+- **`/saved-dashboards` had no connection authorization at all** before this change —
+  create, list, get, update and delete took a caller-supplied `connectionId`/id and
+  checked nothing, so any authenticated user could read every dashboard on every
+  connection (verified live against a running install, not inferred). All of them now
+  assert connection access *and* the workspace gate; `DashboardAlertController` does the
+  same through its single `requireDashboard` choke point. This is the same
+  "authentication is not authorization" trap `BrainController` documents — there is still
+  no filter doing it for you.
 
 ### Admin profile switch
 Admins can **View as** a sub-user from the top-right of the home layout (`ProfileSwitch`) to verify connection ACLs, chat/editor policies, and role-gated nav.

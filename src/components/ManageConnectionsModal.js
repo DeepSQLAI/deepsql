@@ -17,6 +17,7 @@ import ConnectionSlowQueryConfig from "./ConnectionSlowQueryConfig";
 import SlowQuerySourceModal from "./SlowQuerySourceModal";
 import { connectionAPI, brainAPI } from "@/lib/api/client";
 import { useAuth } from "@/hooks/useAuth";
+import { PERMISSIONS } from "@/lib/permissions";
 import { getConnectionAccessBadge, getConnectionAccessLabel } from "@/lib/features";
 
 export default function ManageConnectionsModal({
@@ -25,7 +26,7 @@ export default function ManageConnectionsModal({
   onConnectionDeleted,
   onConnectionSaved,
 }) {
-  const { isAdmin } = useAuth();
+  const { isAdmin, hasPermission } = useAuth();
   const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
@@ -117,6 +118,12 @@ export default function ManageConnectionsModal({
   };
 
   if (!isOpen) return null;
+
+  // Enforced here rather than only at the call sites: this modal adds, edits and deletes
+  // database connections, and it is opened from the sidebar, the Agent view and the user
+  // menu. Gating each entry point separately means the next new one silently reopens the
+  // hole. The backend already 403s these writes; this keeps the UI honest about it.
+  if (!hasPermission(PERMISSIONS.MANAGE_CONNECTIONS)) return null;
 
   return (
     <div className={styles.overlay} onClick={onClose}>

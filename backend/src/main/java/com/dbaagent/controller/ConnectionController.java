@@ -189,6 +189,12 @@ public class ConnectionController {
     public ResponseEntity<Map<String, Object>> saveConnection(@RequestBody ConnectionRequest request) {
         Map<String, Object> response = new HashMap<>();
         try {
+            // Creating a connection is not scoped to an existing connection id, so none of
+            // the assertCanManage*Connection* checks apply here — this endpoint had no
+            // authorization at all, and any authenticated user could add (then edit and
+            // delete) their own connection. Hiding the Connections button did not stop it.
+            accessControlService.assertCanManageConnections();
+
             // Test connection with privilege checks
             ConnectionTestResult result = connectionService.testConnectionWithPrivileges(request);
 

@@ -509,10 +509,12 @@ const TOOL_DEFINITIONS = [
     description:
       "Execute a SQL statement through DeepSQL. Routes through the same policy "
       + "gate as the SQL Editor: developers can run SELECT/WITH/SHOW/EXPLAIN; admins "
-      + "can additionally run DML/DDL with a two-step confirmation. Pass `confirmMutation: "
-      + "true` to confirm a mutation. EXPLAIN and EXPLAIN ANALYZE are valid SQL — just "
-      + "type them as the query, no separate mode flag needed. Multi-statement input "
-      + "and unsafe DELETE/UPDATE without WHERE are still rejected.",
+      + "can additionally run DML and non-destructive DDL (CREATE, ALTER, CREATE INDEX) "
+      + "with a two-step confirmation. DROP and TRUNCATE are blocked on this surface "
+      + "even for confirmed admins. Pass `confirmMutation: true` to confirm a mutation. "
+      + "EXPLAIN and EXPLAIN ANALYZE are valid SQL — just type them as the query, no "
+      + "separate mode flag needed. Multi-statement input and unsafe DELETE/UPDATE "
+      + "without WHERE are still rejected.",
     inputSchema: {
       type: "object",
       properties: {
@@ -524,8 +526,8 @@ const TOOL_DEFINITIONS = [
           type: "string",
           description:
             "SQL to execute. Any single-statement SQL the connection's actor is "
-            + "allowed to run: SELECT/WITH/SHOW/EXPLAIN for any role, plus DML/DDL "
-            + "for admins.",
+            + "allowed to run: SELECT/WITH/SHOW/EXPLAIN for any role, plus DML and "
+            + "non-destructive DDL (CREATE/ALTER) for admins. DROP and TRUNCATE are blocked.",
         },
         limit: {
           type: "integer",

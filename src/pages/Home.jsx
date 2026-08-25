@@ -27,16 +27,16 @@ const SECTION_MAP = {
 }
 
 export default function Home() {
-  const { role, canSwitchProfile } = useAuth()
+  const { role, canSwitchProfile, permissions } = useAuth()
   const { selectedConnection } = useConnectionManager()
   const activeSection = useActiveSection()
   const setActiveSection = useSetActiveSection()
   const clearNavigating = useClearNavigating()
   const immersive = useImmersive()
-  const normalizedActiveSection = normalizeHomeSection(activeSection, role, selectedConnection)
+  const normalizedActiveSection = normalizeHomeSection(activeSection, role, selectedConnection, permissions)
   const visibleSections = useMemo(
-    () => Object.entries(SECTION_MAP).filter(([key]) => canAccessHomeSection(key, role, selectedConnection)),
-    [role, selectedConnection]
+    () => Object.entries(SECTION_MAP).filter(([key]) => canAccessHomeSection(key, role, selectedConnection, permissions)),
+    [role, selectedConnection, permissions]
   )
 
   // Lazy-mount: only render sections the user has actually visited.

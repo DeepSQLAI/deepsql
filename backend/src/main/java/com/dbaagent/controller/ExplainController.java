@@ -10,6 +10,7 @@ import com.dbaagent.service.AnalysisHistoryService;
 import com.dbaagent.service.ClientContext;
 import com.dbaagent.service.CredentialService;
 import com.dbaagent.service.ExplainPlanService;
+import com.dbaagent.service.McpTokenService;
 import com.dbaagent.service.QueryExecutionContext;
 import com.dbaagent.service.QueryExecutionPolicyException;
 import com.dbaagent.service.QueryExecutionPolicyService;
@@ -19,6 +20,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.BadSqlGrammarException;
@@ -38,9 +40,10 @@ import java.util.stream.Collectors;
  *   1. `useAnalyze=true` actually runs the underlying statement inside
  *      EXPLAIN ANALYZE — so for any mutating statement, that's a real
  *      database write. We route those through QueryExecutionPolicyService
- *      with `QueryExecutionContext.editor(...)` so the same role/WHERE/
- *      confirmation gates that protect /api/connections/{id}/query
- *      protect this path too.
+ *      with `QueryExecutionContext.forSqlSurface(...)` so MCP bearers
+ *      keep the MCP DROP/TRUNCATE block and Editor JWT callers keep the
+ *      Editor DROP TABLE block. Role, WHERE, and confirmation gates that
+ *      protect /api/connections/{id}/query protect this path too.
  *
  *   2. Every call — success, blocked, or failed — emits a SecurityEvent so
  *      audit dashboards can see CLI/MCP/Editor traffic with one filter.
@@ -71,7 +74,7 @@ public class ExplainController {
     ) {
         ClientContext client = ClientContext.fromRequest(httpRequest);
         String connectionId = request.getConnectionId();
-        QueryRequest auditQueryRequest = buildAuditQueryRequest(request);
+        QueryRequest auditQueryRequest = buildAuditQueryRequest(request, httpRequest);
         ConnectionRequest connectionRequest = null;
 
         try {
@@ -79,15 +82,19 @@ public class ExplainController {
             log.info("EXPLAIN analysis requested for connection: {} (useAnalyze={})", connectionId, request.isUseAnalyze());
 
             // ANALYZE actually executes the SQL. Route the underlying
-            // statement through the same policy gate the SQL Editor uses so
-            // a developer can't bypass the mutation guard by sending
-            // useAnalyze=true with `DELETE FROM users`.
+            // statement through the same policy gate /connections/{id}/query
+            // uses so a developer can't bypass the mutation guard by sending
+            // useAnalyze=true with `DELETE FROM users`, and MCP callers keep
+            // the DROP/TRUNCATE block.
             if (request.isUseAnalyze()) {
                 connectionRequest = credentialService.getDecryptedConnection(connectionId);
                 String dbType = providerRegistry.getCanonicalName(connectionRequest.getDbType());
                 queryExecutionPolicyService.enforce(
                     auditQueryRequest,
-                    QueryExecutionContext.editor(
+                    QueryExecutionContext.forSqlSurface(
+                        McpTokenService.isMcpAuthorizationHeader(
+                            httpRequest.getHeader(HttpHeaders.AUTHORIZATION)
+                        ),
                         accessControlService.getCurrentUsername(),
                         accessControlService.isCurrentUserAdmin(),
                         Boolean.TRUE.equals(request.getMutationConfirmed())
@@ -161,10 +168,13 @@ public class ExplainController {
      * Carries the user's mutationConfirmed flag through so admin-confirmed
      * ANALYZE runs aren't stuck on the confirmation gate.
      */
-    private QueryRequest buildAuditQueryRequest(ExplainRequest request) {
+    private QueryRequest buildAuditQueryRequest(ExplainRequest request, HttpServletRequest httpRequest) {
         QueryRequest qr = new QueryRequest();
         qr.setQuery(request.getQuery());
-        qr.setExecutionOrigin(QueryExecutionOrigin.EDITOR);
+        boolean mcpBearer = McpTokenService.isMcpAuthorizationHeader(
+            httpRequest.getHeader(HttpHeaders.AUTHORIZATION)
+        );
+        qr.setExecutionOrigin(mcpBearer ? QueryExecutionOrigin.MCP : QueryExecutionOrigin.EDITOR);
         qr.setMutationConfirmed(Boolean.TRUE.equals(request.getMutationConfirmed()));
         return qr;
     }

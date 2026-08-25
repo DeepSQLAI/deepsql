@@ -338,12 +338,12 @@ public class PasswordlessAuthService {
         return authSessionService.findValidSessionByRefreshToken(tokenHash)
             .flatMap(session -> userRepository.findById(session.getUserId())
                 .map(user -> {
-                    Role role = user.getRoleEnum();
+                    String roleCode = user.getRoleCode();
                     return authSessionService.refreshSession(
                         rawRefreshToken,
                         user,
-                        role,
-                        permissionService.getEffectivePermissions(role),
+                        roleCode,
+                        permissionService.getEffectivePermissions(roleCode),
                         clientIp,
                         userAgent
                     );
@@ -577,11 +577,12 @@ public class PasswordlessAuthService {
         String requestId,
         boolean mfaVerified
     ) {
+        String roleCode = user.getRoleCode();
         Role role = user.getRoleEnum();
-        Set<Permission> permissions = permissionService.getEffectivePermissions(role);
+        Set<Permission> permissions = permissionService.getEffectivePermissions(roleCode);
         AuthSessionService.SessionAuthentication session = authSessionService.createSession(
             user,
-            role,
+            roleCode,
             permissions,
             clientIp,
             userAgent,
@@ -593,7 +594,7 @@ public class PasswordlessAuthService {
         user.setLastLoginAt(LocalDateTime.now());
         user.setLastLoginIp(clientIp);
         userRepository.save(user);
-        return AuthFlowResult.authenticated(user, role, permissions, session);
+        return AuthFlowResult.authenticated(user, role, roleCode, permissions, session);
     }
 
     private void markFailedOtp(AuthLoginChallenge challenge, User user, String clientIp, String userAgent, String requestId) {
@@ -792,7 +793,13 @@ public class PasswordlessAuthService {
         boolean mfaRequired,
         boolean mfaSetupRequired,
         User user,
+        /**
+         * The built-in role, or null when the user holds a custom role. Prefer
+         * {@link #roleCode()} — a null here does NOT mean "not authenticated".
+         */
         Role role,
+        /** The user's role code, built-in or custom. Non-null on a successful auth. */
+        String roleCode,
         Set<Permission> permissions,
         AuthSessionService.SessionAuthentication sessionAuthentication
     ) {
@@ -824,10 +831,22 @@ public class PasswordlessAuthService {
             Set<Permission> permissions,
             AuthSessionService.SessionAuthentication sessionAuthentication
         ) {
+            return authenticated(user, role, user != null ? user.getRoleCode() : null,
+                permissions, sessionAuthentication);
+        }
+
+        static AuthFlowResult authenticated(
+            User user,
+            Role role,
+            String roleCode,
+            Set<Permission> permissions,
+            AuthSessionService.SessionAuthentication sessionAuthentication
+        ) {
             return AuthFlowResult.builder()
                 .success(true)
                 .user(user)
                 .role(role)
+                .roleCode(roleCode)
                 .permissions(permissions)
                 .sessionAuthentication(sessionAuthentication)
                 .build();

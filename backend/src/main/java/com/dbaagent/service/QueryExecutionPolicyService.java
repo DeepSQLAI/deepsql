@@ -55,6 +55,16 @@ public class QueryExecutionPolicyService {
         "^\\s*DROP\\s+(?:IF\\s+EXISTS\\s+)?TABLE\\b",
         Pattern.CASE_INSENSITIVE
     );
+    // MCP/coding-agent loops may not run any DROP or TRUNCATE, including
+    // DROP INDEX / DROP VIEW. EXPLAIN wrappers are stripped before matching.
+    private static final Pattern DROP_OR_TRUNCATE_HEAD = Pattern.compile(
+        "^\\s*(DROP|TRUNCATE)\\b",
+        Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern EXPLAIN_PREFIX_PATTERN = Pattern.compile(
+        "^\\s*EXPLAIN(?:\\s*\\([^)]*\\)|\\s+ANALYZE)?\\s+",
+        Pattern.CASE_INSENSITIVE
+    );
 
     // Text-level backstops for writes that hide inside a statement which reads as
     // a SELECT. Applied to SQL with literals and comments already stripped.
@@ -137,6 +147,15 @@ public class QueryExecutionPolicyService {
             throw QueryExecutionPolicyException.editorMutationForbidden(mutation.queryType());
         }
 
+        if (origin == QueryExecutionOrigin.MCP
+            && isDropOrTruncateStatement(mutation.queryType(), statements.getFirst())) {
+            throw QueryExecutionPolicyException.unsafeMutation(
+                "DROP and TRUNCATE are blocked on MCP and coding-agent loops. "
+                    + "CREATE, ALTER, and DML still require admin privileges plus confirmation.",
+                mutation.queryType()
+            );
+        }
+
         if (origin == QueryExecutionOrigin.EDITOR
             && isDropTableStatement(mutation.queryType(), statements.getFirst())) {
             throw QueryExecutionPolicyException.unsafeMutation(
@@ -204,6 +223,15 @@ public class QueryExecutionPolicyService {
                 return new StatementClassification("SELECT", true, false, false, false, false);
             }
             if (parsed instanceof ExplainStatement) {
+                String wrappedMutation = detectExplainWrappedMutation(trimmed);
+                if (wrappedMutation != null) {
+                    boolean requiresWhere = "UPDATE".equalsIgnoreCase(wrappedMutation)
+                        || "DELETE".equalsIgnoreCase(wrappedMutation);
+                    boolean hasWhere = !requiresWhere || containsWhereClause(trimmed);
+                    return new StatementClassification(
+                        wrappedMutation, false, true, requiresWhere, hasWhere, false
+                    );
+                }
                 return new StatementClassification("EXPLAIN", true, false, false, false, false);
             }
             if (parsed instanceof UseStatement) {
@@ -398,6 +426,23 @@ public class QueryExecutionPolicyService {
 
     private boolean isUseStatement(String sql) {
         return sql != null && USE_ANY_PATTERN.matcher(stripLeadingComments(sql)).find();
+    }
+
+    /**
+     * True for any {@code DROP …} or {@code TRUNCATE …}, including EXPLAIN-wrapped forms.
+     * Used by the MCP origin gate so coding agents cannot confirm around destructive DDL.
+     */
+    private boolean isDropOrTruncateStatement(String queryType, String sql) {
+        if (queryType != null) {
+            String upper = queryType.toUpperCase(Locale.ROOT);
+            if (upper.startsWith("DROP") || upper.startsWith("TRUNCATE")) {
+                return true;
+            }
+        }
+        String remaining = stripLeadingComments(sql == null ? "" : sql);
+        remaining = EXPLAIN_PREFIX_PATTERN.matcher(remaining).replaceFirst("");
+        remaining = stripLeadingComments(remaining);
+        return DROP_OR_TRUNCATE_HEAD.matcher(remaining).find();
     }
 
     /**
