@@ -192,7 +192,7 @@ per-user admin ops (`users`/`access`/`permissions`).
 
 | Tool | Purpose |
 |---|---|
-| `execute_sql` | Run any SQL — backend enforces role-based policy (developers read-only, admins can mutate with two-step confirm) |
+| `execute_sql` | Run any SQL — backend enforces role-based policy (developers read-only; admins can run DML and CREATE/ALTER with two-step confirm; DROP/TRUNCATE blocked) |
 | `analyze_query_plan` | AI-enriched plan analysis (parsed plan tree, performance issues, index recommendations, written summary that uses the connection's schema + business rules) |
 
 EXPLAIN and EXPLAIN ANALYZE are just SQL — pass them as the query to

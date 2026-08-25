@@ -6,6 +6,8 @@ import com.dbaagent.provider.DatabaseProviderRegistry;
 import com.dbaagent.service.AnalysisHistoryService;
 import com.dbaagent.service.CredentialService;
 import com.dbaagent.service.ExplainPlanService;
+import com.dbaagent.model.QueryExecutionOrigin;
+import com.dbaagent.service.QueryExecutionContext;
 import com.dbaagent.service.QueryExecutionPolicyException;
 import com.dbaagent.service.QueryExecutionPolicyService;
 import com.dbaagent.service.SqlExecutionAuditService;
@@ -14,8 +16,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
@@ -26,6 +30,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -126,6 +131,30 @@ class ExplainControllerPolicyTest {
         assertThat(body).containsEntry("requiresConfirmation", true);
         assertThat(body).containsEntry("queryType", "UPDATE");
         verify(explainPlanService, never()).analyzeQuery(anyString(), anyString(), anyBoolean());
+    }
+
+    @Test
+    void useAnalyzeTrue_mcpBearer_usesMcpExecutionContext() {
+        givenConnection("conn-1", "postgres");
+        lenient().when(httpRequest.getHeader(anyString())).thenReturn(null);
+        when(httpRequest.getHeader(HttpHeaders.AUTHORIZATION))
+            .thenReturn("Bearer dsql_mcp_public.secret");
+        when(accessControlService.getCurrentUsername()).thenReturn("admin");
+        when(accessControlService.isCurrentUserAdmin()).thenReturn(true);
+        when(explainPlanService.analyzeQuery(eq("conn-1"), anyString(), eq(true)))
+            .thenReturn(new ExplainPlanAnalysis());
+
+        controller.analyzeQuery(
+            request("conn-1", "CREATE TABLE t_new (id INT PRIMARY KEY)", true),
+            httpRequest
+        );
+
+        ArgumentCaptor<QueryExecutionContext> captor = ArgumentCaptor.forClass(QueryExecutionContext.class);
+        verify(queryExecutionPolicyService).enforce(any(), captor.capture(), eq("postgres"));
+        assertThat(captor.getValue().origin()).isEqualTo(QueryExecutionOrigin.MCP);
+        assertThat(captor.getValue().mutationMode())
+            .isEqualTo(QueryExecutionContext.MutationMode.MAY_MUTATE);
+        assertThat(captor.getValue().actorIsAdmin()).isTrue();
     }
 
     @Test

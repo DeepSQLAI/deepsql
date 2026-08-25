@@ -245,9 +245,8 @@ their native runners. See `desktop/README.md` for the full picture.
 ## MCP Server
 
 - `mcp/deepsql-phase1-server.js` implements a Phase 1 stdio MCP server for internal rollout.
-- It exposes read-only tools only: listing connections, fetching schema/objects, asking DeepSQL questions, executing read-only SQL, and running EXPLAIN without ANALYZE.
-- It wraps existing backend APIs, so it reuses DeepSQL chat orchestration, RAG, connection management, and guardrails instead of exposing raw DB credentials.
-- Read-only enforcement is applied in `mcp/deepsql-phase1-lib.js` before calling backend execution endpoints.
+- Schema/retrieval tools stay read-only. `execute_sql` is role-gated: developers stay read-only; admins can run DML and non-destructive DDL (`CREATE`, `ALTER`) with the same two-step confirmation as the SQL Editor. `DROP` and `TRUNCATE` stay blocked on MCP even when confirmed.
+- It wraps existing backend APIs, so it reuses DeepSQL chat orchestration, RAG, connection management, and `QueryExecutionPolicyService` instead of exposing raw DB credentials.
 - Client config examples live in `.cursor/mcp.json` and `mcp/claude_desktop_config.example.json`.
 - Usage and env vars are documented in `docs/root/MCP_PHASE1.md`.
 
