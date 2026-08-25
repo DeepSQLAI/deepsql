@@ -6,6 +6,7 @@ import com.dbaagent.repository.CredentialRepository;
 import com.dbaagent.service.SystemConfigService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestClient;
@@ -34,6 +35,25 @@ public class SetupController {
     private final CredentialRepository credentialRepository;
     private final LlmConfigResolver llmConfigResolver;
 
+    /**
+     * Mirrors {@code security.google.enabled}. Surfaced on the public status
+     * endpoint so the login page can decide whether to offer Google sign-in —
+     * it is otherwise unauthenticated and has no way to know the server was
+     * configured for SSO. Deliberately NOT final: {@code @RequiredArgsConstructor}
+     * would pull a final field into the constructor and Spring has no bean to
+     * satisfy it.
+     */
+    @Value("${security.google.enabled:false}")
+    private boolean googleEnabled;
+
+    /**
+     * Mirrors {@code security.password.enabled}. Lets the login page hide the
+     * email/password form on SSO-only installs instead of rendering a form that
+     * always fails. Same non-final reasoning as above.
+     */
+    @Value("${security.password.enabled:true}")
+    private boolean passwordLoginEnabled;
+
     // ── GET /setup/status ─────────────────────────────────────────────────────
 
     /** Returns setup completion state. Public endpoint — no auth required. */
@@ -53,7 +73,9 @@ public class SetupController {
                 setupComplete,
                 hasOrgInfo,
                 hasConnections,
-                hasLlmConfig
+                hasLlmConfig,
+                googleEnabled,
+                passwordLoginEnabled
         );
     }
 
@@ -278,7 +300,11 @@ public class SetupController {
             boolean setupComplete,
             boolean hasOrganizationInfo,
             boolean hasConnections,
-            boolean hasLlmConfig
+            boolean hasLlmConfig,
+            /** Whether Google Workspace SSO is configured; drives the login page's SSO button. */
+            boolean googleEnabled,
+            /** Whether email+password sign-in is accepted; false hides the password form. */
+            boolean passwordLoginEnabled
     ) {}
 
     public record InitializeRequest(String orgName, String adminUsername, String adminEmail, String adminPassword) {}
