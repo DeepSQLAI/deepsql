@@ -167,7 +167,8 @@ public class AuthController {
                 return redirectToFrontend("/login?error=" + urlEncode(result.message()));
             }
 
-            if (result.sessionAuthentication() != null && result.user() != null && result.role() != null) {
+            // Gate on roleCode, not role: role is null for a custom-role user.
+            if (result.sessionAuthentication() != null && result.user() != null && result.roleCode() != null) {
                 authSessionService.writeSessionCookies(httpResponse, result.sessionAuthentication());
                 return redirectToFrontend("/dashboard");
             }
@@ -224,8 +225,8 @@ public class AuthController {
         }
         Map<String, Object> payload = toAuthPayload(
             effectiveUser,
-            effectiveUser.getRoleEnum(),
-            permissionService.getEffectivePermissionCodes(effectiveUser.getRoleEnum())
+            effectiveUser.getRoleCode(),
+            permissionService.getEffectivePermissionCodes(effectiveUser.getRoleCode())
         );
         impersonationService.decorateAuthPayload(httpRequest, user, payload);
         return ResponseEntity.ok(payload);
@@ -332,9 +333,9 @@ public class AuthController {
             return ResponseEntity.status(401).body(Map.of("message", "Not authenticated"));
         }
         User user = currentUserEntity();
-        Role role = user.getRoleEnum();
-        Set<String> permissions = permissionService.getEffectivePermissionCodes(role);
-        Map<String, Object> response = toAuthPayload(user, role, permissions);
+        String roleCode = user.getRoleCode();
+        Set<String> permissions = permissionService.getEffectivePermissionCodes(roleCode);
+        Map<String, Object> response = toAuthPayload(user, roleCode, permissions);
         impersonationService.decorateAuthPayload(httpRequest, user, response);
         return ResponseEntity.ok(response);
     }
@@ -378,13 +379,17 @@ public class AuthController {
         if (!result.success()) {
             return ResponseEntity.status(400).body(Map.of("message", result.message()));
         }
-        if (result.sessionAuthentication() != null && result.user() != null && result.role() != null) {
+        // Gate on roleCode, not role: result.role() is null for a user holding a custom
+        // role, which sent an otherwise-successful login down the "challenge required"
+        // branch below and then NPE'd in Map.of on a null challengeId — a 500 on every
+        // custom-role login. Observed live, not inferred.
+        if (result.sessionAuthentication() != null && result.user() != null && result.roleCode() != null) {
             authSessionService.writeSessionCookies(httpResponse, result.sessionAuthentication());
             authSessionService.clearImpersonationCookie(httpResponse);
             Set<String> permissionNames = result.permissions() == null ? Set.of() : result.permissions().stream()
                 .map(Enum::name)
                 .collect(Collectors.toSet());
-            return ResponseEntity.ok(toAuthPayload(result.user(), result.role(), permissionNames));
+            return ResponseEntity.ok(toAuthPayload(result.user(), result.roleCode(), permissionNames));
         }
         return ResponseEntity.ok(Map.of(
             "challengeId", result.nextChallengeId(),
@@ -401,10 +406,19 @@ public class AuthController {
     }
 
     private Map<String, Object> toAuthPayload(User user, Role role, Set<String> permissions) {
+        return toAuthPayload(user, role != null ? role.name() : user.getRoleCode(), permissions);
+    }
+
+    /**
+     * Auth payload keyed by role <em>code</em>, so a user holding a custom role reports
+     * that role rather than the nearest built-in one.
+     */
+    private Map<String, Object> toAuthPayload(User user, String roleCode, Set<String> permissions) {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("username", user.getUsername());
         response.put("email", user.getEmail());
-        response.put("role", role.name());
+        response.put("role", roleCode);
+        response.put("roleName", permissionService.describeRole(roleCode));
         response.put("permissions", permissions);
         response.put("emailVerified", user.isEmailVerified());
         response.put("accountStatus", user.getAccountStatus());

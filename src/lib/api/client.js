@@ -563,6 +563,39 @@ export const permissionsAPI = {
   },
 
   /**
+   * Create a custom role from a name plus an explicit permission list (ADMIN only).
+   */
+  createRole: async ({ name, description, permissions }) => {
+    const response = await apiClient.post("/api/permissions/roles", {
+      name,
+      description,
+      permissions,
+    });
+    return response.data;
+  },
+
+  /**
+   * Update a custom role (ADMIN only). Built-in roles are rejected by the backend —
+   * change those with an override instead.
+   */
+  updateRole: async (code, { name, description, permissions }) => {
+    const response = await apiClient.put(`/api/permissions/roles/${code}`, {
+      name,
+      description,
+      permissions,
+    });
+    return response.data;
+  },
+
+  /**
+   * Delete a custom role (ADMIN only). Refused while any user still holds it.
+   */
+  deleteRole: async (code) => {
+    const response = await apiClient.delete(`/api/permissions/roles/${code}`);
+    return response.data;
+  },
+
+  /**
    * Get all permission overrides (ADMIN only).
    */
   getOverrides: async () => {
@@ -2834,6 +2867,85 @@ export const retrievalAPI = {
     const response = await apiClient.post(
       `/api/training/context/${connectionId}`,
       { question },
+    );
+    return response.data;
+  },
+};
+
+/**
+ * Dashboard workspaces — named groups of dashboards with their own member list.
+ * Visibility is connection access AND workspace membership; admins see all.
+ */
+export const dashboardWorkspacesAPI = {
+  listByConnection: async (connectionId) => {
+    const response = await apiClient.get(
+      `/api/dashboard-workspaces/connection/${connectionId}`,
+    );
+    return response.data;
+  },
+
+  create: async ({ connectionId, name, description, color }) => {
+    const response = await apiClient.post("/api/dashboard-workspaces", {
+      connectionId,
+      name,
+      description,
+      color,
+    });
+    return response.data;
+  },
+
+  get: async (id) => {
+    const response = await apiClient.get(`/api/dashboard-workspaces/${id}`);
+    return response.data;
+  },
+
+  update: async (id, updates) => {
+    const response = await apiClient.put(
+      `/api/dashboard-workspaces/${id}`,
+      updates,
+    );
+    return response.data;
+  },
+
+  remove: async (id) => {
+    const response = await apiClient.delete(`/api/dashboard-workspaces/${id}`);
+    return response.data;
+  },
+
+  listDashboards: async (id) => {
+    const response = await apiClient.get(
+      `/api/dashboard-workspaces/${id}/dashboards`,
+    );
+    return response.data;
+  },
+
+  listMembers: async (id) => {
+    const response = await apiClient.get(
+      `/api/dashboard-workspaces/${id}/members`,
+    );
+    return response.data;
+  },
+
+  addMember: async (id, { username, workspaceRole }) => {
+    const response = await apiClient.post(
+      `/api/dashboard-workspaces/${id}/members`,
+      { username, workspaceRole },
+    );
+    return response.data;
+  },
+
+  removeMember: async (id, username) => {
+    const response = await apiClient.delete(
+      `/api/dashboard-workspaces/${id}/members/${encodeURIComponent(username)}`,
+    );
+    return response.data;
+  },
+
+  // Move a dashboard into a workspace, or out of one with a null/empty workspaceId.
+  moveDashboard: async (dashboardId, workspaceId) => {
+    const response = await apiClient.put(
+      `/api/dashboard-workspaces/dashboards/${dashboardId}`,
+      { workspaceId: workspaceId || "" },
     );
     return response.data;
   },

@@ -60,11 +60,11 @@ public class AuthInternalController {
                 .body(Map.of("message", "Admin user not found"));
         }
 
-        Role role = admin.getRoleEnum();
-        Set<Permission> permissions = permissionService.getEffectivePermissions(role);
+        String roleCode = admin.getRoleCode();
+        Set<Permission> permissions = permissionService.getEffectivePermissions(roleCode);
 
         AuthSessionService.SessionAuthentication session = authSessionService.createSession(
-            admin, role, permissions,
+            admin, roleCode, permissions,
             request.getRemoteAddr(),
             "DeepSQL-TestSuite/1.0",
             true

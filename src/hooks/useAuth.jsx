@@ -9,8 +9,8 @@ import { useConnectionStore } from '@/lib/stores/useConnectionStore'
 import { useDashboardStore } from '@/lib/stores/useDashboardStore'
 import { useNavStore } from '@/lib/stores/useNavStore'
 
-export { PERMISSIONS, ROLES, ROLE_LEVELS, normalizeRole, roleIsAtLeast } from '@/lib/permissions'
-import { PERMISSIONS, ROLES, ROLE_LEVELS, normalizeRole } from '@/lib/permissions'
+export { PERMISSIONS, ROLES, ROLE_LABELS, normalizeRole, roleLabel, isAdminRole, isBuiltInRole } from '@/lib/permissions'
+import { PERMISSIONS, ROLES, ROLE_BASELINE_PERMISSIONS, normalizeRole, isAdminRole, roleLabel } from '@/lib/permissions'
 
 const AuthContext = createContext(null)
 
@@ -86,6 +86,8 @@ export function AuthProvider({ children }) {
       email: payload?.email || '',
       emailVerified: payload?.emailVerified ?? false,
       accountStatus: payload?.accountStatus || null,
+      // Display label for a custom role, which has no entry in ROLE_LABELS.
+      roleName: payload?.roleName || null,
       emailTwoFactorEnabled: payload?.emailTwoFactorEnabled ?? false,
       mfaRequired: false,
       mfaEnrolled: false,
@@ -263,16 +265,28 @@ export function AuthProvider({ children }) {
     return role === normalizeRole(requiredRole)
   }, [role])
 
+  /**
+   * Whether the user holds every permission the named built-in role holds by default.
+   *
+   * <p>Formerly a rank comparison over a role hierarchy. The roles no longer nest, so
+   * the question "is my role at least X" is answered by permission containment instead:
+   * an Admin passes everything, and a custom role passes exactly when it was granted the
+   * same capabilities. Kept because PermissionGuard/ActionGuard still expose a minRole
+   * prop.
+   */
   const hasRoleLevel = useCallback((requiredRole) => {
-    const normalizedRole = normalizeRole(role)
+    if (isAdminRole(role)) return true
     const normalizedRequiredRole = normalizeRole(requiredRole)
-    const userLevel = normalizedRole ? (ROLE_LEVELS[normalizedRole] ?? -1) : -1
-    const requiredLevel = normalizedRequiredRole ? (ROLE_LEVELS[normalizedRequiredRole] ?? 999) : 999
-    return userLevel >= requiredLevel
-  }, [role])
+    if (!normalizedRequiredRole) return false
+    if (normalizedRequiredRole === normalizeRole(role)) return true
+    const required = ROLE_BASELINE_PERMISSIONS[normalizedRequiredRole]
+    if (!required) return false
+    return required.every((permission) => permissions.has(permission))
+  }, [role, permissions])
 
-  const isAdmin = useMemo(() => role === ROLES.ADMIN, [role])
-  const isDeveloper = useMemo(() => role === ROLES.DEVELOPER, [role])
+  const isAdmin = useMemo(() => isAdminRole(role), [role])
+  const isDeveloper = useMemo(() => normalizeRole(role) === ROLES.DEVELOPER, [role])
+  const roleDisplayName = useMemo(() => roleLabel(role, user?.roleName), [role, user?.roleName])
   const impersonating = Boolean(user?.impersonating)
   const canSwitchProfile = isAdmin || impersonating
 
@@ -298,6 +312,7 @@ export function AuthProvider({ children }) {
     impersonatorEmail: user?.impersonatorEmail || null,
     canSwitchProfile,
     role,
+    roleDisplayName,
     permissions: [...permissions],
     hasPermission,
     hasAnyPermission,
@@ -323,6 +338,7 @@ export function AuthProvider({ children }) {
     stopImpersonation,
     user,
     role,
+    roleDisplayName,
     permissions,
     impersonating,
     canSwitchProfile,

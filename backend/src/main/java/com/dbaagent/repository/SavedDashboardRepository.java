@@ -56,6 +56,16 @@ public interface SavedDashboardRepository extends JpaRepository<SavedDashboard, 
     long countByConnectionIdAndFolder(String connectionId, String folder);
 
     /**
+     * Dashboards inside one workspace, newest activity first.
+     */
+    List<SavedDashboard> findByWorkspaceIdOrderByUpdatedAtDesc(UUID workspaceId);
+
+    /**
+     * Count dashboards grouped into a workspace (shown on the workspace chip).
+     */
+    long countByWorkspaceId(UUID workspaceId);
+
+    /**
      * Get distinct folders for a connection
      */
     @Query("SELECT DISTINCT sd.folder FROM SavedDashboard sd WHERE sd.connectionId = :connectionId " +

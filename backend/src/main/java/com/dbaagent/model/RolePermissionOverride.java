@@ -23,9 +23,14 @@ public class RolePermissionOverride {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
-    @Enumerated(EnumType.STRING)
-    private Role role;
+    /**
+     * The role this override applies to, as a role code: either a built-in {@link Role}
+     * name or a {@link CustomRole#getCode()}. It was an {@code @Enumerated} {@link Role}
+     * before custom roles existed; the column is unchanged (both forms are the same
+     * uppercase string), so existing rows keep working.
+     */
+    @Column(name = "role", nullable = false, length = 64)
+    private String role;
 
     @Column(name = "permission_code", nullable = false)
     @Enumerated(EnumType.STRING)
@@ -58,7 +63,7 @@ public class RolePermissionOverride {
         this.updatedAt = LocalDateTime.now();
     }
 
-    public RolePermissionOverride(Role role, Permission permissionCode, boolean granted, String updatedBy) {
+    public RolePermissionOverride(String role, Permission permissionCode, boolean granted, String updatedBy) {
         this();
         this.role = role;
         this.permissionCode = permissionCode;
@@ -66,7 +71,7 @@ public class RolePermissionOverride {
         this.updatedBy = updatedBy;
     }
 
-    public RolePermissionOverride(Role role, Permission permissionCode, boolean granted, String reason, String updatedBy) {
+    public RolePermissionOverride(String role, Permission permissionCode, boolean granted, String reason, String updatedBy) {
         this(role, permissionCode, granted, updatedBy);
         this.reason = reason;
     }
@@ -85,11 +90,11 @@ public class RolePermissionOverride {
         this.id = id;
     }
 
-    public Role getRole() {
+    public String getRole() {
         return role;
     }
 
-    public void setRole(Role role) {
+    public void setRole(String role) {
         this.role = role;
     }
 
