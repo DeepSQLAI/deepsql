@@ -104,7 +104,7 @@ usually doesn't know about either; that's exactly why DeepSQL exists.
 | `optimize_slow_query(connectionId, queryText, avgExecutionTimeMs?)` | AI query REWRITE + plan diagnosis for one SQL (single-query scoped). NOT indexes — those need the whole workload; use `get_index_recommendations` or Workload Analysis. |
 | `get_table_growth(connectionId, tableName?, days?)` | Persistent stats history: per-table size/row time series + headline rollups. Use to answer "which tables are growing fastest?" or "how much has X grown in the last month?" without scanning the live DB. |
 | `get_growth_anomalies(connectionId, tableName?, unacknowledgedOnly?, days?)` | DeepSQL-flagged sudden growth spikes with severity (CRITICAL/WARNING/INFO), anomaly type, before/after sizes, confidence score. Check this BEFORE walking the user through a slow-query plan — a recent growth anomaly is often the real root cause. |
-| `execute_sql(connectionId, query, ...)` | Run any SQL — SELECT for everyone, DML/DDL for admins (two-step confirm). |
+| `execute_sql(connectionId, query, ...)` | Run SQL — SELECT for everyone; DML and CREATE/ALTER for admins (two-step confirm). DROP/TRUNCATE blocked. |
 | `analyze_query_plan(connectionId, query, useAnalyze=false)` | AI-enriched plan analysis (issues + index recs + summary). |
 | `get_current_user()` | Authenticated user + role + `callerCapabilities`. Read `doNotOffer` before suggesting any write. |
 | `test_connection(connectionId)` | Validates a saved connection (privilege report + SSH tunnel check). Read-only on the customer's DB. |
@@ -233,12 +233,15 @@ deepsql <command> [options] --caller-agent <your-agent-id> --json
   Tell the user: "Your DeepSQL role doesn't allow DML/DDL on this
   connection; ask the workspace admin to grant write access or to run the
   change."
-- **Admin + DML/DDL (no `confirmMutation`)** → returns
+- **Admin + CREATE/ALTER/DML (no `confirmMutation`)** → returns
   `requiresConfirmation: true` with a `warnings` array. **Show the
   warnings to the user verbatim. Wait for explicit OK.** Then re-call
   with `confirmMutation: true` (MCP) or `--write` (CLI). **Do not
   silently retry on the user's behalf** — that defeats the
   confirmation step.
+- **Admin + DROP/TRUNCATE** → blocked (`UNSAFE_MUTATION_BLOCKED`) even
+  with `confirmMutation: true`. Use database admin tooling, or
+  `apply_index_recommendation` for advisor-sourced index drops.
 
 ## Row limits
 

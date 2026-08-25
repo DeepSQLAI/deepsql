@@ -181,4 +181,13 @@ class McpTokenServiceTest {
         assertEquals(1, tokens.size());
         assertEquals(1L, tokens.get(0).getId());
     }
+
+    @Test
+    void isMcpAuthorizationHeaderDetectsBearerPrefix() {
+        assertTrue(McpTokenService.isMcpAuthorizationHeader("Bearer dsql_mcp_abc.secret"));
+        assertFalse(McpTokenService.isMcpAuthorizationHeader("Bearer eyJhbGciOi"));
+        assertFalse(McpTokenService.isMcpAuthorizationHeader("dsql_mcp_abc.secret"));
+        assertFalse(McpTokenService.isMcpAuthorizationHeader(null));
+        assertFalse(McpTokenService.isMcpAuthorizationHeader(""));
+    }
 }

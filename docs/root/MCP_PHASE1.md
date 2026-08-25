@@ -1,6 +1,6 @@
 # DeepSQL MCP Phase 1
 
-Phase 1 MCP is a **stdio MCP server** that wraps DeepSQL backend APIs and enforces **read-only** database access on both the client shim and the backend.
+Phase 1 MCP is a **stdio MCP server** that wraps DeepSQL backend APIs. Schema/retrieval tools stay read-only; `execute_sql` is role-gated (developers read-only, admins can run DML and CREATE/ALTER with confirmation; DROP/TRUNCATE stay blocked).
 
 ## Goals
 
@@ -139,7 +139,7 @@ A background scheduler refreshes the ledger every 6h (`performance.recommendatio
 #### `apply_index_recommendation`
 `POST /api/index-recommendations/{recommendationId}/apply?mode=&confirm=` — apply (or dry-run) a recommendation against its target connection and measure the before/after benefit on the contributing queries that motivated it.
 
-**This is the only write-capable tool in the phase-1 MCP surface.** All other tools are read-only.
+**This is the only MCP path that can drop an index.** `execute_sql` blocks every `DROP`/`TRUNCATE`. All other tools are read-only or confirm-gated writes that cannot remove objects.
 
 Modes:
 
@@ -184,12 +184,16 @@ What the backend allows depends on the actor's role:
 
 - **Developer (`ROLE_DEVELOPER`)** — SELECT / WITH / SHOW / EXPLAIN only. Any
   DML or DDL is rejected with `EDITOR_MUTATION_FORBIDDEN` (HTTP 403).
-- **Admin (`ROLE_ADMIN`)** — DDL/DML accepted but gated by a two-step
-  confirmation flow:
+- **Admin (`ROLE_ADMIN`)** — DML and non-destructive DDL (`CREATE`, `ALTER`,
+  `CREATE INDEX`) accepted but gated by a two-step confirmation flow:
   - First call with `confirmMutation=false` returns
     `requiresConfirmation: true` with a warnings list (e.g. "DELETE without
     WHERE is blocked" for unsafe shapes).
   - Client re-sends with `confirmMutation=true` to actually execute.
+- **DROP / TRUNCATE** — blocked on this surface (`UNSAFE_MUTATION_BLOCKED`)
+  even for confirmed admins, including EXPLAIN-wrapped forms. Use database
+  admin tooling, or `apply_index_recommendation` for advisor-sourced index
+  drops. The web SQL Editor still blocks only `DROP TABLE`.
 
 `EXPLAIN` and `EXPLAIN ANALYZE` are valid SQL — pass them as the query.
 `EXPLAIN ANALYZE` of a mutating statement (`EXPLAIN ANALYZE DELETE FROM …`)

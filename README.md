@@ -15,6 +15,10 @@ control except the prompts you send to the endpoint you chose.
 📄 **[Read the whitepaper](https://deepsql.ai/whitepaper)** — the architecture and the
 reasoning behind it.
 
+📦 **Latest release: [v1.3.0](https://github.com/DeepSQLAI/deepsql/releases/tag/v1.3.0)** —
+DeepSQL Desktop first ship + Agent/Brain/Editor hardening. Notes:
+[`docs/releases/RELEASE_NOTES-v1.3.0.md`](docs/releases/RELEASE_NOTES-v1.3.0.md).
+
 ---
 
 ## Quick start
