@@ -5,6 +5,7 @@ import com.dbaagent.model.DatabaseEvent;
 import com.dbaagent.model.SentinelRecommendation;
 import com.dbaagent.service.EventCorrelationService;
 import com.dbaagent.service.SentinelAnalyticsService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -23,16 +24,22 @@ import java.util.Map;
  * - Contextual Attribution: Event correlation
  * - Velocity & Acceleration: Growth derivatives
  * - AI Recommendations: Actionable insights
+ *
+ * <p><b>Authorization:</b> every endpoint here takes a caller-supplied connection id, so
+ * each one asserts access itself ({@code assertCanReadConnectionContent} for reads,
+ * {@code assertCanManageConnectionContent} for writes). {@code SecurityConfig} only
+ * requires an authenticated principal — nothing upstream inspects a connection id. See
+ * {@code ConnectionScopedAuthorizationSafetyTest}.
  */
 @RestController
 @RequestMapping("/sentinel")
 @RequiredArgsConstructor
 @Slf4j
-@CrossOrigin(origins = "*")
 public class SentinelAnalyticsController {
 
     private final SentinelAnalyticsService sentinelAnalytics;
     private final EventCorrelationService eventCorrelation;
+    private final AccessControlService accessControlService;
 
     /**
      * GET /api/sentinel/death-clock/{connectionId}
@@ -41,6 +48,7 @@ public class SentinelAnalyticsController {
      */
     @GetMapping("/death-clock/{connectionId}")
     public ResponseEntity<Map<String, Object>> getDeathClock(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             log.info("Fetching Death Clock for connection: {}", connectionId);
 
@@ -72,6 +80,7 @@ public class SentinelAnalyticsController {
     public ResponseEntity<Map<String, Object>> getForecasts(
             @PathVariable String connectionId,
             @RequestParam(required = false) String tableName) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         try {
             log.info("Fetching forecasts for connection: {}, table: {}", connectionId, tableName);
@@ -112,6 +121,7 @@ public class SentinelAnalyticsController {
     public ResponseEntity<Map<String, Object>> generateForecast(
             @PathVariable String connectionId,
             @RequestParam String tableName) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
 
         try {
             log.info("Generating forecast for connection: {}, table: {}", connectionId, tableName);
@@ -145,6 +155,7 @@ public class SentinelAnalyticsController {
             @PathVariable String connectionId,
             @RequestParam String tableName,
             @RequestParam(defaultValue = "30") int historicalDays) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         try {
             log.info("Calculating velocity/acceleration for table: {}", tableName);
@@ -181,6 +192,7 @@ public class SentinelAnalyticsController {
     public ResponseEntity<Map<String, Object>> getEvents(
             @PathVariable String connectionId,
             @RequestParam(required = false) Integer days) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         try {
             int daysToFetch = days != null ? days : 30;
@@ -215,6 +227,7 @@ public class SentinelAnalyticsController {
     public ResponseEntity<Map<String, Object>> logDeploymentEvent(@RequestBody Map<String, Object> eventData) {
         try {
             String connectionId = (String) eventData.get("connectionId");
+            accessControlService.assertCanManageConnectionContent(connectionId);
             String deploymentVersion = (String) eventData.get("deploymentVersion");
             String deploymentTag = (String) eventData.get("deploymentTag");
             @SuppressWarnings("unchecked")
@@ -256,6 +269,7 @@ public class SentinelAnalyticsController {
     public ResponseEntity<Map<String, Object>> logSchemaChangeEvent(@RequestBody Map<String, Object> eventData) {
         try {
             String connectionId = (String) eventData.get("connectionId");
+            accessControlService.assertCanManageConnectionContent(connectionId);
             String tableName = (String) eventData.get("tableName");
             String changeType = (String) eventData.get("changeType");
             String description = (String) eventData.get("description");
@@ -297,6 +311,7 @@ public class SentinelAnalyticsController {
             @PathVariable String connectionId,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String priority) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         try {
             log.info("Fetching recommendations for connection: {} (status: {}, priority: {})",
@@ -342,8 +357,9 @@ public class SentinelAnalyticsController {
             @RequestBody Map<String, String> statusData) {
 
         try {
+            assertCanManageRecommendation(recommendationId);
             String status = statusData.get("status");
-            String updatedBy = statusData.get("updatedBy");
+            String updatedBy = accessControlService.requireCurrentUsername();
 
             log.info("Updating recommendation {} status to: {}", recommendationId, status);
 
@@ -376,6 +392,7 @@ public class SentinelAnalyticsController {
      */
     @GetMapping("/summary/{connectionId}")
     public ResponseEntity<Map<String, Object>> getSentinelSummary(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             log.info("Generating Sentinel-DBA summary for connection: {}", connectionId);
 
@@ -504,5 +521,18 @@ public class SentinelAnalyticsController {
                 mostUrgent.getConfidenceScore(),
                 pendingRecs.size()
         );
+    }
+
+    /**
+     * Authorize a write keyed only on a recommendation id. The recommendation
+     * carries its own connectionId, so resolve that and assert against it — a
+     * recommendation id is not a capability. An unknown id reports 404 so the
+     * endpoint cannot be used to probe which recommendations exist.
+     */
+    private void assertCanManageRecommendation(String recommendationId) {
+        String connectionId = sentinelAnalytics.findConnectionIdForRecommendation(recommendationId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Recommendation not found"));
+        accessControlService.assertCanManageConnectionContent(connectionId);
     }
 }

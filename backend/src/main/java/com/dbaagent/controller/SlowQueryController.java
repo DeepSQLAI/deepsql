@@ -11,6 +11,7 @@ import com.dbaagent.model.SlowQuery;
 import com.dbaagent.model.SlowQueryAnalysis;
 import com.dbaagent.model.SlowQueryHistory;
 import com.dbaagent.service.*;
+import com.dbaagent.service.security.AccessControlService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +33,12 @@ import java.util.stream.Collectors;
 
 /**
  * REST API for slow query analysis
+ *
+ * <p><b>Authorization:</b> every endpoint here takes a caller-supplied connection id, so
+ * each one asserts access itself ({@code assertCanReadConnectionContent} for reads,
+ * {@code assertCanManageConnectionContent} for writes). {@code SecurityConfig} only
+ * requires an authenticated principal — nothing upstream inspects a connection id. See
+ * {@code ConnectionScopedAuthorizationSafetyTest}.
  */
 @RestController
 @RequestMapping("/slow-queries")
@@ -54,6 +61,7 @@ public class SlowQueryController {
     private final KeyCustomerService keyCustomerService;
     private final SlowQueryInsightsService slowQueryInsightsService;
     private final ObjectMapper objectMapper;
+    private final AccessControlService accessControlService;
 
     // Thread pool for SSE streaming — keeps SSE work off the Jetty request thread
     private static final ExecutorService sseExecutor =
@@ -70,6 +78,7 @@ public class SlowQueryController {
     public ResponseEntity<SlowQueryAnalysis> analyzeSlowQueries(
         @RequestBody SlowQueryRequest request
     ) {
+        accessControlService.assertCanManageConnectionContent(request.getConnectionId());
         try {
             log.info("Slow query analysis requested for connection: {}", request.getConnectionId());
 
@@ -107,6 +116,7 @@ public class SlowQueryController {
         @RequestParam(required = false, defaultValue = "100") Double threshold,
         @RequestParam(required = false, defaultValue = "10") Integer limit
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             log.info("Slow query analysis requested for connection: {}", connectionId);
 
@@ -142,6 +152,7 @@ public class SlowQueryController {
     public ResponseEntity<HistoryResponse> saveHistory(
         @RequestBody SaveHistoryRequest request
     ) {
+        accessControlService.assertCanManageConnectionContent(request.getConnectionId());
         try {
             log.info("Saving slow query history for connection: {}", request.getConnectionId());
 
@@ -169,6 +180,7 @@ public class SlowQueryController {
     public ResponseEntity<List<HistorySummaryResponse>> getHistory(
         @PathVariable String connectionId
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             log.info("Fetching slow query history summaries for connection: {}", connectionId);
 
@@ -195,6 +207,7 @@ public class SlowQueryController {
     public ResponseEntity<HistoryResponse> getLatestAnalysis(
         @PathVariable String connectionId
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             log.info("Fetching latest slow query analysis for connection: {}", connectionId);
 
@@ -227,6 +240,7 @@ public class SlowQueryController {
         @PathVariable String connectionId,
         @PathVariable String timeRange
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             log.info("Fetching slow query history summaries for connection: {} and timeRange: {}", connectionId, timeRange);
 
@@ -252,6 +266,7 @@ public class SlowQueryController {
     public ResponseEntity<HistoryResponse> getHistoryById(
         @PathVariable String id
     ) {
+        assertCanReadHistory(id);
         try {
             log.info("Fetching slow query history item: {}", id);
 
@@ -280,6 +295,7 @@ public class SlowQueryController {
     public ResponseEntity<Map<String, String>> deleteHistory(
         @PathVariable String id
     ) {
+        assertCanManageHistory(id);
         try {
             log.info("Deleting slow query history: {}", id);
             historyService.deleteHistory(id);
@@ -301,6 +317,7 @@ public class SlowQueryController {
     public ResponseEntity<Map<String, String>> deleteAllHistory(
         @PathVariable String connectionId
     ) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
         try {
             log.info("Deleting all slow query history for connection: {}", connectionId);
             historyService.deleteAllForConnection(connectionId);
@@ -324,6 +341,7 @@ public class SlowQueryController {
         @RequestParam("connectionId") String connectionId,
         @RequestParam(required = false, defaultValue = "mysql") String databaseType
     ) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
         try {
             log.info("Analyzing uploaded slow query log file for connection: {}, type: {}", connectionId, databaseType);
 
@@ -366,6 +384,7 @@ public class SlowQueryController {
     public ResponseEntity<SlowQueryAnalysis> analyzeSlowQueryLogFileFromS3(
         @RequestBody S3LogRequest request
     ) {
+        accessControlService.assertCanManageConnectionContent(request.getConnectionId());
         try {
             log.info("Analyzing S3 slow query log file for connection: {}, url: {}",
                 request.getConnectionId(), request.getS3Url());
@@ -410,6 +429,7 @@ public class SlowQueryController {
     public ResponseEntity<SlowQueryAnalysis> analyzeSlowQueryLogFromCloudWatch(
         @RequestBody CloudWatchLogRequest request
     ) {
+        accessControlService.assertCanManageConnectionContent(request.getConnectionId());
         try {
             log.info("Analyzing CloudWatch slow query logs for connection: {}, log group: {}",
                 request.getConnectionId(), request.getLogGroupName());
@@ -475,6 +495,7 @@ public class SlowQueryController {
             @PathVariable String connectionId,
             @RequestParam(defaultValue = "20") int limit,
             @RequestParam(required = false) String tableName) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             return keyCustomerService.analyze(connectionId, limit, tableName)
                 .map(ResponseEntity::ok)
@@ -496,6 +517,7 @@ public class SlowQueryController {
         @RequestParam(defaultValue = "7d") String window,
         @RequestParam(defaultValue = "20") int limit
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             SlowQueryInsightsResponse response = slowQueryInsightsService.getInsights(connectionId, window, limit);
             return ResponseEntity.ok(response);
@@ -516,6 +538,7 @@ public class SlowQueryController {
         @RequestParam(defaultValue = "7d") String window,
         @RequestParam(defaultValue = "20") int limit
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             SlowQueryInsightsResponse.RemediationInsights response =
                 slowQueryInsightsService.getRemediationInsights(connectionId, window, limit);
@@ -537,6 +560,7 @@ public class SlowQueryController {
         @RequestParam(defaultValue = "7d") String window,
         @RequestParam(defaultValue = "20") int limit
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             SlowQueryInsightsResponse.HotspotInsights response =
                 slowQueryInsightsService.getHotspotInsights(connectionId, window, limit);
@@ -558,6 +582,7 @@ public class SlowQueryController {
         @RequestParam(defaultValue = "7d") String window,
         @RequestParam(defaultValue = "20") int limit
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             SlowQueryInsightsResponse.SkewInsights response =
                 slowQueryInsightsService.getSkewInsights(connectionId, window, limit);
@@ -579,6 +604,7 @@ public class SlowQueryController {
         @RequestParam(defaultValue = "7d") String window,
         @RequestParam(defaultValue = "20") int limit
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             SlowQueryInsightsResponse.TailRiskInsights response =
                 slowQueryInsightsService.getTailRiskInsights(connectionId, window, limit);
@@ -600,6 +626,7 @@ public class SlowQueryController {
         @RequestParam(defaultValue = "7d") String window,
         @RequestParam(defaultValue = "20") int limit
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             SlowQueryInsightsResponse.PlanDriftInsights response =
                 slowQueryInsightsService.getPlanDriftInsights(connectionId, window, limit);
@@ -675,6 +702,7 @@ public class SlowQueryController {
     public ResponseEntity<QueryOptimizationService.OptimizationResult> optimizeQuery(
         @RequestBody OptimizeQueryRequest request
     ) {
+        accessControlService.assertCanManageConnectionContent(request.getConnectionId());
         try {
             log.info("Generating AI optimization for connection: {}", request.getConnectionId());
 
@@ -735,6 +763,7 @@ public class SlowQueryController {
         @RequestParam(required = false) String queryId,
         @RequestParam(defaultValue = "false") boolean forceRefresh
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         SseEmitter emitter = new SseEmitter(300_000L); // 5-minute timeout
 
         sseExecutor.submit(() -> {
@@ -913,6 +942,7 @@ public class SlowQueryController {
         @PathVariable String connectionId,
         @RequestParam(defaultValue = "5") int limit
     ) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
         try {
             log.info("Batch optimizing slow queries for connection: {}", connectionId);
 
@@ -946,6 +976,7 @@ public class SlowQueryController {
         @PathVariable String connectionId,
         @PathVariable String queryFingerprint
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             List<com.dbaagent.model.QueryOptimizationCandidateRun> candidates =
                 candidateService.getCandidates(connectionId, queryFingerprint);
@@ -975,6 +1006,7 @@ public class SlowQueryController {
         @PathVariable String queryFingerprint,
         @RequestBody(required = false) BenchmarkCandidatesRequest request
     ) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
         try {
             Integer runs = request != null ? request.getRuns() : null;
             Integer timeoutMs = request != null ? request.getTimeoutMs() : null;
@@ -999,6 +1031,7 @@ public class SlowQueryController {
         @PathVariable String connectionId,
         @PathVariable String queryFingerprint
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             QueryOptimizationService.OptimizationResult cached =
                 optimizationService.getCachedOptimization(connectionId, queryFingerprint);
@@ -1024,6 +1057,7 @@ public class SlowQueryController {
         @PathVariable String connectionId,
         @RequestBody List<String> fingerprints
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             Map<String, QueryOptimizationService.OptimizationResult> cached =
                 optimizationService.getCachedOptimizations(connectionId, fingerprints);
@@ -1044,6 +1078,7 @@ public class SlowQueryController {
     public ResponseEntity<Map<String, Object>> getOptimizationCacheStats(
         @PathVariable String connectionId
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             Map<String, Object> stats = optimizationService.getCacheStats(connectionId);
             return ResponseEntity.ok(stats);
@@ -1062,6 +1097,7 @@ public class SlowQueryController {
     public ResponseEntity<Void> clearOptimizationCache(
         @PathVariable String connectionId
     ) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
         try {
             optimizationService.clearConnectionCache(connectionId);
             return ResponseEntity.ok().build();
@@ -1082,6 +1118,7 @@ public class SlowQueryController {
     public ResponseEntity<SlowQueryAlertService.SlowQueryAlertSummary> getAlertSummary(
         @PathVariable String connectionId
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             SlowQueryAlertService.SlowQueryAlertSummary summary = alertService.getAlertSummary(connectionId);
             return ResponseEntity.ok(summary);
@@ -1099,10 +1136,15 @@ public class SlowQueryController {
     @PostMapping("/alerts/{alertId}/acknowledge")
     public ResponseEntity<PlaybookAlert> acknowledgeAlert(
         @PathVariable String alertId,
-        @RequestParam String userId
+        @RequestParam(required = false) String userId
     ) {
+        assertCanManageAlert(alertId);
         try {
-            PlaybookAlert alert = alertService.acknowledgeAlert(alertId, userId);
+            // The actor is the authenticated caller, never the userId query parameter:
+            // that was client-supplied, so the acknowledgement trail could name anyone.
+            // The parameter is still accepted so existing callers do not break, and ignored.
+            PlaybookAlert alert = alertService.acknowledgeAlert(
+                alertId, accessControlService.requireCurrentUsername());
             return ResponseEntity.ok(alert);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
@@ -1120,10 +1162,12 @@ public class SlowQueryController {
     @PostMapping("/alerts/{connectionId}/acknowledge-all")
     public ResponseEntity<Map<String, Integer>> acknowledgeAllAlerts(
         @PathVariable String connectionId,
-        @RequestParam String userId
+        @RequestParam(required = false) String userId
     ) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
         try {
-            int count = alertService.acknowledgeAllAlerts(connectionId, userId);
+            int count = alertService.acknowledgeAllAlerts(
+                connectionId, accessControlService.requireCurrentUsername());
             return ResponseEntity.ok(Map.of("acknowledged", count));
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
@@ -1141,6 +1185,7 @@ public class SlowQueryController {
         @PathVariable String connectionId,
         @RequestBody(required = false) AlertConfigRequest config
     ) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
         try {
             Optional<SlowQueryHistory> latestOpt = historyService.getLatestHistory(connectionId);
             if (latestOpt.isEmpty()) {
@@ -1181,6 +1226,8 @@ public class SlowQueryController {
         @RequestParam String historyId1,
         @RequestParam String historyId2
     ) {
+        assertCanReadHistory(historyId1);
+        assertCanReadHistory(historyId2);
         try {
             Optional<SlowQueryHistory> history1Opt = historyService.getHistoryById(historyId1);
             Optional<SlowQueryHistory> history2Opt = historyService.getHistoryById(historyId2);
@@ -1280,6 +1327,7 @@ public class SlowQueryController {
     public ResponseEntity<SlowQueryDashboardService.DashboardWidgetData> getDashboardWidgets(
         @PathVariable String connectionId
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             SlowQueryDashboardService.DashboardWidgetData data = dashboardService.getWidgetData(connectionId);
             return ResponseEntity.ok(data);
@@ -1298,6 +1346,7 @@ public class SlowQueryController {
     public ResponseEntity<SlowQueryDashboardService.OverviewWidget> getOverviewWidget(
         @PathVariable String connectionId
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             SlowQueryDashboardService.OverviewWidget data = dashboardService.getOverviewWidget(connectionId);
             return ResponseEntity.ok(data);
@@ -1316,6 +1365,7 @@ public class SlowQueryController {
     public ResponseEntity<SlowQueryDashboardService.TrendWidget> getTrendWidget(
         @PathVariable String connectionId
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             SlowQueryDashboardService.TrendWidget data = dashboardService.getTrendWidget(connectionId);
             return ResponseEntity.ok(data);
@@ -1336,6 +1386,7 @@ public class SlowQueryController {
     public ResponseEntity<QueryFingerprintService.FingerprintSummary> getFingerprintSummary(
         @PathVariable String connectionId
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             QueryFingerprintService.FingerprintSummary summary = fingerprintService.getSummary(connectionId);
             return ResponseEntity.ok(summary);
@@ -1358,6 +1409,7 @@ public class SlowQueryController {
         @RequestParam(required = false) Boolean regressingOnly,
         @RequestParam(defaultValue = "50") int limit
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             QueryFingerprint.TrendDirection direction = null;
             if (trendDirection != null && !trendDirection.isBlank()) {
@@ -1384,6 +1436,7 @@ public class SlowQueryController {
     public ResponseEntity<QueryFingerprintService.FingerprintTrend> getFingerprintTrend(
         @PathVariable String fingerprintId
     ) {
+        assertCanReadFingerprint(fingerprintId);
         try {
             QueryFingerprintService.FingerprintTrend trend = fingerprintService.getTrend(fingerprintId);
             return ResponseEntity.ok(trend);
@@ -1404,6 +1457,7 @@ public class SlowQueryController {
     public ResponseEntity<QueryFingerprint> resetFingerprintBaseline(
         @PathVariable String fingerprintId
     ) {
+        assertCanManageFingerprint(fingerprintId);
         try {
             QueryFingerprint fingerprint = fingerprintService.resetBaseline(fingerprintId);
             return ResponseEntity.ok(fingerprint);
@@ -1424,6 +1478,7 @@ public class SlowQueryController {
     public ResponseEntity<List<QueryFingerprint>> processFingerprints(
         @PathVariable String connectionId
     ) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
         try {
             Optional<SlowQueryHistory> latestOpt = historyService.getLatestHistory(connectionId);
             if (latestOpt.isEmpty()) {
@@ -1450,6 +1505,7 @@ public class SlowQueryController {
     public ResponseEntity<Map<String, Object>> getExplainPlan(
         @RequestBody ExplainQueryRequest request
     ) {
+        accessControlService.assertCanManageConnectionContent(request.getConnectionId());
         try {
             log.info("Running EXPLAIN for query in connection: {}", request.getConnectionId());
 
@@ -1482,6 +1538,7 @@ public class SlowQueryController {
         @PathVariable String connectionId,
         @RequestParam(defaultValue = "5") int limit
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             Optional<SlowQueryHistory> latestOpt = historyService.getLatestHistory(connectionId);
             if (latestOpt.isEmpty()) {
@@ -1711,5 +1768,48 @@ public class SlowQueryController {
         private Long highCount;
         private Double totalDatabaseTimeMs;
         private String timestamp;
+    }
+
+    // ── authorization helpers for endpoints keyed on a non-connection id ──────
+    //
+    // An id is not a capability: each of these entities carries its own
+    // connectionId, so resolve the owner and assert against that. An unknown id
+    // reports 404 rather than 403, so none of these can be used to probe which
+    // ids exist on connections the caller cannot see.
+
+    private String historyConnectionId(String historyId) {
+        return historyService.getHistoryById(historyId)
+                .map(com.dbaagent.model.SlowQueryHistory::getConnectionId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Analysis not found"));
+    }
+
+    private void assertCanReadHistory(String historyId) {
+        accessControlService.assertCanReadConnectionContent(historyConnectionId(historyId));
+    }
+
+    private void assertCanManageHistory(String historyId) {
+        accessControlService.assertCanManageConnectionContent(historyConnectionId(historyId));
+    }
+
+    private void assertCanManageAlert(String alertId) {
+        String connectionId = alertService.findConnectionIdForAlert(alertId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Alert not found"));
+        accessControlService.assertCanManageConnectionContent(connectionId);
+    }
+
+    private String fingerprintConnectionId(String fingerprintId) {
+        return fingerprintService.findConnectionIdForFingerprintId(fingerprintId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Fingerprint not found"));
+    }
+
+    private void assertCanReadFingerprint(String fingerprintId) {
+        accessControlService.assertCanReadConnectionContent(fingerprintConnectionId(fingerprintId));
+    }
+
+    private void assertCanManageFingerprint(String fingerprintId) {
+        accessControlService.assertCanManageConnectionContent(fingerprintConnectionId(fingerprintId));
     }
 }

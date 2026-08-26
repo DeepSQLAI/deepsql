@@ -709,6 +709,73 @@ it against a real database — not a theoretical hardening pass.
   `catch (ResponseStatusException e) { throw e; }` a 403 is swallowed and reported as a
   server error, so a client cannot tell "not yours" from "broken". The safety test
   asserts this too.
+- **Then it happened again, on 12 more controllers — 116 endpoints, zero checks.**
+  `BrainControllerAuthorizationSafetyTest` hardcodes one `Path.of(...)`, so it could not
+  see `SlowQueryController` (43), `SlowQueryAnalyticsController` (13),
+  `SchemaChangeController` (13), `SentinelAnalyticsController` (10),
+  `PerformanceActionController` (9), `QueryPerformanceController` (8),
+  `QueryPlanController` (8), `IndexAdvisorController` (7),
+  `PerformanceInsightsController` (5), `AdvisorController` (3),
+  `ResourceLimitsController` (3) or `BusinessRuleController` (3). Verified live, not
+  inferred: a DEVELOPER holding **no grant on any connection** read literal-bearing
+  slow-query SQL with real customer ids and names
+  (`/slow-query-analytics/{id}/query/{fp}/samples` → 200 while
+  `/slow-log-source/{id}` → 403 in the same session), enumerated another tenant's
+  schema, and **deleted that tenant's analysis history** via
+  `DELETE /slow-queries/history/connection/{id}`. All 116 are now guarded.
+  `ConnectionScopedAuthorizationSafetyTest` replaces the per-file approach: it scans
+  **every** `*Controller.java`, so a new controller is covered the day it is written.
+  Writing it immediately found 9 more unguarded endpoints in controllers nobody was
+  looking at, including `StatsController`, `ProjectController`, `DashboardController`
+  and a destructive `DELETE /sentinel/demo/cleanup/{connectionId}`.
+- **Two endpoints decrypted another user's credentials before anyone checked access.**
+  `GET /slow-query-analytics/{id}/tenant-column-suggestions` and `/config` reach
+  `suggestTenantColumns` → `getJdbcTemplateForBackgroundJob` →
+  `credentialService.getDecryptedConnection`, opening a live JDBC session to the target
+  database. An unguarded read is not only a data leak; it can be a credential-use
+  primitive. Check before the work, not after.
+- **A path-variable sweep is not enough — ids in the request body need their own
+  check.** Four holes survived exactly that kind of fix: `snapshots/compare` (two
+  snapshot ids, no `connectionId` at all — it would diff tenant A's schema against
+  tenant B's), `PUT /performance-actions/batch-status` (an arbitrary `actionIds` list,
+  no scope), and `changes/acknowledge` / `regressions/acknowledge` (path connection
+  authorized, body ids unchecked). `allChangesBelongTo` / `allComparisonsBelongTo`
+  verify membership, and **an id that resolves to nothing fails too** — otherwise
+  unknown ids can be mixed into an otherwise valid batch. The safety test has a
+  dedicated case for body-supplied id collections.
+- **An id is not a capability.** For `alertId`, `actionId`, `regressionId`,
+  `recommendationId`, `fingerprintId`, `planId`, `ruleId`, `snapshotId`, `historyId`:
+  resolve the owning connection and assert on that. Several services had no such
+  accessor, so `findConnectionIdFor*` was added to `QueryPerformanceService`,
+  `QueryPlanCacheService`, `SentinelAnalyticsService`, `BusinessRuleMemoryService`,
+  `SlowQueryAlertService`, `QueryFingerprintService` and `SchemaChangeTrackingService`.
+  These helpers report **404, not 403**, for an unknown id — a 403 confirms the row
+  exists, turning the endpoint into an id oracle. `regressionId` is a sequential
+  `Long`, so that mattered.
+- **Never take the actor from the request.** `POST /slow-queries/alerts/{id}/acknowledge`
+  took `@RequestParam String userId`, and three acknowledge endpoints took
+  `acknowledgedBy` defaulting to the literal string `"user"` — so the audit trail was
+  unauthenticated free text and could name any colleague. All seven sites now use
+  `accessControlService.requireCurrentUsername()`. The parameters are still accepted
+  (wire compatibility) and ignored.
+- **Guarded vs unguarded is an existence oracle.** A guarded endpoint 404s an unknown
+  connection id (`resolveCurrentUserAccess` wraps the lookup); an unguarded one returned
+  200. That difference alone enumerated valid connection ids.
+- **A `@ControllerAdvice` catch-all swallows a 403 the same way an in-method one does,
+  and it is easier to miss because it lives in another file.**
+  `IndexAdvisorExceptionHandler` has `@ExceptionHandler(Exception.class)`, so the newly
+  added guard on `/index-advisor/{id}/health-report` returned
+  `500 "Index operation failed"` with the 403's text in the body — the denial held, but
+  the response blamed the index store. Found by *testing the fix*, not by reading it: the
+  other 24 endpoints returned 403 and this one did not. It now has an
+  `@ExceptionHandler(ResponseStatusException.class)` that preserves the status, and
+  `ConnectionScopedAuthorizationSafetyTest` asserts every advice with a catch-all also
+  handles `ResponseStatusException`.
+- **`@CrossOrigin(origins = "*")` on a controller is dead code here, and worth
+  deleting.** `SentinelAnalyticsController` carried it. Tested: an evil-origin preflight
+  gets `403` with no `Access-Control-Allow-Origin` (the `SecurityConfig` allowlist wins),
+  while an allowed origin gets `200` + ACAO — so the annotation never had effect. It
+  still reads like an intentional hole to the next person.
 
 ### MCP & CLI Release Rules
 

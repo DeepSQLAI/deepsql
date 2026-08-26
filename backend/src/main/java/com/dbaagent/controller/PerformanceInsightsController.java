@@ -5,6 +5,7 @@ import com.dbaagent.model.DatabaseConnection;
 import com.dbaagent.model.PerformanceSnapshot;
 import com.dbaagent.service.CredentialService;
 import com.dbaagent.service.PerformanceInsightsService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -17,6 +18,12 @@ import java.util.*;
 /**
  * Performance Insights Controller
  * Provides AWS RDS Performance Insights-style APIs
+ *
+ * <p><b>Authorization:</b> every endpoint here takes a caller-supplied connection id, so
+ * each one asserts access itself ({@code assertCanReadConnectionContent} for reads,
+ * {@code assertCanManageConnectionContent} for writes). {@code SecurityConfig} only
+ * requires an authenticated principal — nothing upstream inspects a connection id. See
+ * {@code ConnectionScopedAuthorizationSafetyTest}.
  */
 @RestController
 @RequestMapping("/performance-insights")
@@ -27,6 +34,7 @@ public class PerformanceInsightsController {
 
     private final PerformanceInsightsService performanceInsightsService;
     private final CredentialService credentialService;
+    private final AccessControlService accessControlService;
 
     /**
      * GET /api/performance-insights/{connectionId}
@@ -36,6 +44,7 @@ public class PerformanceInsightsController {
     public ResponseEntity<?> getSnapshots(
             @PathVariable String connectionId,
             @RequestParam(defaultValue = "1") int hours) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         try {
             log.info("Fetching performance snapshots for connection: {}, hours: {}", connectionId, hours);
@@ -75,6 +84,7 @@ public class PerformanceInsightsController {
     public ResponseEntity<?> getRecentSnapshots(
             @PathVariable String connectionId,
             @RequestParam(defaultValue = "12") int limit) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         try {
             log.info("Fetching {} recent performance snapshots for connection: {}", limit, connectionId);
@@ -107,6 +117,7 @@ public class PerformanceInsightsController {
      */
     @PostMapping("/{connectionId}/collect")
     public ResponseEntity<?> collectSnapshot(@PathVariable String connectionId) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
 
         try {
             log.info("Manual snapshot collection triggered for connection: {}", connectionId);
@@ -145,6 +156,7 @@ public class PerformanceInsightsController {
     public ResponseEntity<?> getSummary(
             @PathVariable String connectionId,
             @RequestParam(defaultValue = "1") int hours) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         try {
             log.info("Fetching performance summary for connection: {}, hours: {}", connectionId, hours);
@@ -237,6 +249,7 @@ public class PerformanceInsightsController {
      */
     @GetMapping("/table-usage/{connectionId}")
     public ResponseEntity<?> getTableUsage(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         try {
             log.info("Fetching table usage for connection: {}", connectionId);

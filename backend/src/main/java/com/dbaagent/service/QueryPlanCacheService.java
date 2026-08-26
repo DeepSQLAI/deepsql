@@ -549,6 +549,14 @@ public class QueryPlanCacheService {
      * Set a plan as the baseline for a query
      */
     @Transactional
+    /**
+     * The connection a cached plan belongs to, for authorizing an endpoint keyed
+     * only on a plan id. Empty when the id does not exist.
+     */
+    public java.util.Optional<String> findConnectionIdForPlan(String planId) {
+        return planCacheRepository.findById(planId).map(p -> p.getConnectionId());
+    }
+
     public void setBaseline(String planId) {
         planCacheRepository.findById(planId).ifPresent(plan -> {
             // Clear existing baseline
@@ -634,6 +642,22 @@ public class QueryPlanCacheService {
     @Transactional
     public int acknowledgeRegressions(List<String> comparisonIds, String acknowledgedBy) {
         return comparisonRepository.acknowledgeByIds(comparisonIds, acknowledgedBy, LocalDateTime.now());
+    }
+
+    /**
+     * True when every given comparison id belongs to {@code connectionId}. The ids arrive
+     * in the request body, so the caller's authorization on the path connection does not
+     * constrain them — without this a caller could acknowledge another connection's plan
+     * regressions. An id that resolves to nothing fails too, so unknown ids cannot be
+     * mixed into an otherwise valid batch.
+     */
+    public boolean allComparisonsBelongTo(String connectionId, List<String> comparisonIds) {
+        if (comparisonIds == null || comparisonIds.isEmpty()) {
+            return true;
+        }
+        List<QueryPlanComparison> found = comparisonRepository.findAllById(comparisonIds);
+        return found.size() == comparisonIds.stream().distinct().count()
+            && found.stream().allMatch(c -> java.util.Objects.equals(connectionId, c.getConnectionId()));
     }
 
     /**

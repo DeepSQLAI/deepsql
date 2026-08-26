@@ -209,6 +209,15 @@ public class QueryPerformanceService {
     }
 
     /**
+     * The connection a regression belongs to, for authorizing an endpoint keyed
+     * only on the regression id. Empty when the id does not exist.
+     */
+    public Optional<String> findConnectionIdForRegression(Long regressionId) {
+        return regressionRepository.findById(regressionId)
+                .map(QueryPerformanceRegression::getConnectionId);
+    }
+
+    /**
      * Acknowledge a regression
      */
     @Transactional

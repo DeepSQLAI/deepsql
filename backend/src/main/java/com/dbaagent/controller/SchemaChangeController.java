@@ -4,6 +4,7 @@ import com.dbaagent.model.SchemaChange;
 import com.dbaagent.model.SchemaDriftConfig;
 import com.dbaagent.model.SchemaSnapshot;
 import com.dbaagent.service.SchemaChangeTrackingService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +15,12 @@ import java.util.Map;
 
 /**
  * REST API for schema change tracking and drift detection
+ *
+ * <p><b>Authorization:</b> every endpoint here takes a caller-supplied connection id, so
+ * each one asserts access itself ({@code assertCanReadConnectionContent} for reads,
+ * {@code assertCanManageConnectionContent} for writes). {@code SecurityConfig} only
+ * requires an authenticated principal — nothing upstream inspects a connection id. See
+ * {@code ConnectionScopedAuthorizationSafetyTest}.
  */
 @RestController
 @RequestMapping("/schema-changes")
@@ -23,6 +30,7 @@ public class SchemaChangeController {
 
     private final SchemaChangeTrackingService schemaChangeService;
     private final com.dbaagent.service.SchemaSnapshotService schemaSnapshotService;
+    private final AccessControlService accessControlService;
 
     // ==================== Snapshot Endpoints ====================
 
@@ -35,6 +43,7 @@ public class SchemaChangeController {
             @RequestParam(required = false) String name,
             @RequestParam(required = false, defaultValue = "MANUAL") String type,
             @RequestParam(required = false) String notes) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
 
         SchemaSnapshot.SnapshotType snapshotType = SchemaSnapshot.SnapshotType.valueOf(type.toUpperCase());
         // Was: schemaChangeService.captureSnapshot — moved into
@@ -50,6 +59,7 @@ public class SchemaChangeController {
      */
     @GetMapping("/{connectionId}/snapshots")
     public ResponseEntity<List<SchemaSnapshot>> getSnapshots(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(schemaChangeService.getSnapshots(connectionId));
     }
 
@@ -58,6 +68,7 @@ public class SchemaChangeController {
      */
     @GetMapping("/{connectionId}/snapshots/recent")
     public ResponseEntity<List<SchemaSnapshot>> getRecentSnapshots(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(schemaChangeService.getRecentSnapshots(connectionId));
     }
 
@@ -68,6 +79,7 @@ public class SchemaChangeController {
     public ResponseEntity<Map<String, String>> setBaseline(
             @PathVariable String connectionId,
             @PathVariable String snapshotId) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
 
         schemaChangeService.setBaseline(connectionId, snapshotId);
         return ResponseEntity.ok(Map.of(
@@ -84,6 +96,8 @@ public class SchemaChangeController {
             @RequestParam String snapshotId1,
             @RequestParam String snapshotId2) {
 
+        assertCanReadSnapshot(snapshotId1);
+        assertCanReadSnapshot(snapshotId2);
         return ResponseEntity.ok(schemaChangeService.compareSnapshots(snapshotId1, snapshotId2));
     }
 
@@ -94,6 +108,7 @@ public class SchemaChangeController {
      */
     @GetMapping("/{connectionId}/changes")
     public ResponseEntity<List<SchemaChange>> getChanges(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(schemaChangeService.getChanges(connectionId));
     }
 
@@ -102,6 +117,7 @@ public class SchemaChangeController {
      */
     @GetMapping("/{connectionId}/changes/unacknowledged")
     public ResponseEntity<List<SchemaChange>> getUnacknowledgedChanges(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(schemaChangeService.getUnacknowledgedChanges(connectionId));
     }
 
@@ -113,8 +129,10 @@ public class SchemaChangeController {
             @PathVariable String connectionId,
             @RequestBody List<String> changeIds,
             @RequestParam(required = false, defaultValue = "user") String acknowledgedBy) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
 
-        int count = schemaChangeService.acknowledgeChanges(changeIds, acknowledgedBy);
+        assertChangesBelongTo(connectionId, changeIds);
+        int count = schemaChangeService.acknowledgeChanges(changeIds, accessControlService.requireCurrentUsername());
         return ResponseEntity.ok(Map.of(
                 "status", "success",
                 "acknowledgedCount", count
@@ -128,8 +146,10 @@ public class SchemaChangeController {
     public ResponseEntity<Map<String, Object>> acknowledgeAllChanges(
             @PathVariable String connectionId,
             @RequestParam(required = false, defaultValue = "user") String acknowledgedBy) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
 
-        int count = schemaChangeService.acknowledgeAllChanges(connectionId, acknowledgedBy);
+        int count = schemaChangeService.acknowledgeAllChanges(
+                connectionId, accessControlService.requireCurrentUsername());
         return ResponseEntity.ok(Map.of(
                 "status", "success",
                 "acknowledgedCount", count
@@ -141,6 +161,7 @@ public class SchemaChangeController {
      */
     @GetMapping("/{connectionId}/changes/stats")
     public ResponseEntity<Map<String, Object>> getChangeStats(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(schemaChangeService.getChangeStats(connectionId));
     }
 
@@ -151,6 +172,7 @@ public class SchemaChangeController {
      */
     @GetMapping("/{connectionId}/drift-config")
     public ResponseEntity<SchemaDriftConfig> getDriftConfig(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return schemaChangeService.getDriftConfig(connectionId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
@@ -163,6 +185,7 @@ public class SchemaChangeController {
     public ResponseEntity<SchemaDriftConfig> configureDriftDetection(
             @PathVariable String connectionId,
             @RequestBody SchemaDriftConfig config) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
 
         return ResponseEntity.ok(schemaChangeService.configureDriftDetection(connectionId, config));
     }
@@ -172,11 +195,36 @@ public class SchemaChangeController {
      */
     @PostMapping("/{connectionId}/drift-check")
     public ResponseEntity<Map<String, Object>> triggerDriftCheck(@PathVariable String connectionId) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
         List<SchemaChange> changes = schemaChangeService.checkDrift(connectionId);
         return ResponseEntity.ok(Map.of(
                 "status", "success",
                 "changesDetected", changes.size(),
                 "changes", changes
         ));
+    }
+
+    /**
+     * Authorize a read keyed only on a snapshot id. The snapshot carries its own
+     * connectionId, so resolve that and assert against it. An unknown id reports
+     * 404 so the endpoint cannot be used to probe which snapshots exist.
+     */
+    private void assertCanReadSnapshot(String snapshotId) {
+        String connectionId = schemaChangeService.findConnectionIdForSnapshot(snapshotId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Snapshot not found"));
+        accessControlService.assertCanReadConnectionContent(connectionId);
+    }
+
+    /**
+     * The change ids arrive in the request body, so the path-variable check alone
+     * does not constrain them — a caller authorized on their own connection could
+     * otherwise acknowledge another connection's changes.
+     */
+    private void assertChangesBelongTo(String connectionId, List<String> changeIds) {
+        if (!schemaChangeService.allChangesBelongTo(connectionId, changeIds)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, "Change not found for this connection");
+        }
     }
 }

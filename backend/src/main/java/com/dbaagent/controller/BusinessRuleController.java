@@ -2,6 +2,7 @@ package com.dbaagent.controller;
 
 import com.dbaagent.model.brain.BrainRule;
 import com.dbaagent.service.BusinessRuleMemoryService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -11,6 +12,12 @@ import java.util.Map;
 
 /**
  * API endpoints for connection-scoped learned SQL business rules.
+ *
+ * <p><b>Authorization:</b> every endpoint here takes a caller-supplied connection id, so
+ * each one asserts access itself ({@code assertCanReadConnectionContent} for reads,
+ * {@code assertCanManageConnectionContent} for writes). {@code SecurityConfig} only
+ * requires an authenticated principal — nothing upstream inspects a connection id. See
+ * {@code ConnectionScopedAuthorizationSafetyTest}.
  */
 @RestController
 @RequestMapping("/business-rules")
@@ -18,6 +25,7 @@ import java.util.Map;
 public class BusinessRuleController {
 
     private final BusinessRuleMemoryService businessRuleMemoryService;
+    private final AccessControlService accessControlService;
 
     /**
      * Returns all active rules for the connection plus the subset applicable to an optional question.
@@ -26,6 +34,7 @@ public class BusinessRuleController {
     public ResponseEntity<Map<String, Object>> getRules(
             @PathVariable String connectionId,
             @RequestParam(required = false) String question) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         List<BrainRule> activeRules = businessRuleMemoryService.getActiveRules(connectionId);
         List<BusinessRuleMemoryService.SqlGuardrail> applicable = businessRuleMemoryService
             .resolveApplicableGuardrails(connectionId, question, null);
@@ -49,6 +58,7 @@ public class BusinessRuleController {
     public ResponseEntity<Map<String, Object>> learn(
             @PathVariable String connectionId,
             @RequestBody LearnRuleRequest request) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
         int learned = businessRuleMemoryService.learnFromFeedback(
             connectionId,
             request.text(),
@@ -70,6 +80,10 @@ public class BusinessRuleController {
      */
     @DeleteMapping("/rule/{ruleId}")
     public ResponseEntity<Map<String, Object>> deactivateRule(@PathVariable String ruleId) {
+        String connectionId = businessRuleMemoryService.findConnectionIdForRule(ruleId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Rule not found"));
+        accessControlService.assertCanManageConnectionContent(connectionId);
         boolean deactivated = businessRuleMemoryService.deactivateRule(ruleId);
         return ResponseEntity.ok(Map.of(
             "ruleId", ruleId,
