@@ -443,6 +443,7 @@ caching · nginx.
 - [`docs/README.md`](docs/README.md) — documentation index
 - [`AGENTS.md`](AGENTS.md) — codebase map
 - [`mcp/README.md`](mcp/README.md) — CLI and MCP server
+- [`docs/GOOGLE_SSO_SETUP.md`](docs/GOOGLE_SSO_SETUP.md) — Google Workspace SSO, and disabling password sign-in
 - [`SECURITY.md`](SECURITY.md) — reporting a vulnerability
 
 ## License
