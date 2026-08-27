@@ -13,7 +13,11 @@ const getApiBaseUrl = () => {
 export const API_BASE_URL = getApiBaseUrl();
 export const AUTH_CHANGE_EVENT = "deepsql-auth-change";
 
-const AUTH_PUBLIC_PATHS = ["/login", "/signup", "/activate"];
+// "/download" is reachable with no session on purpose: it is the public
+// desktop-client download page, linked from the marketing site by people who
+// do not have an account yet. Without it here, a logged-out visitor is bounced
+// to /login and never sees the installers.
+const AUTH_PUBLIC_PATHS = ["/login", "/signup", "/activate", "/download"];
 
 const isPublicAuthPath = (pathname = "") =>
   AUTH_PUBLIC_PATHS.some((prefix) => pathname.startsWith(prefix));

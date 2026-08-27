@@ -14,7 +14,8 @@ import { PERMISSIONS, ROLES, ROLE_BASELINE_PERMISSIONS, normalizeRole, isAdminRo
 
 const AuthContext = createContext(null)
 
-const AUTH_PUBLIC_PATHS = ['/login', '/signup', '/activate']
+// See the matching list in lib/api/client.js — '/download' is public.
+const AUTH_PUBLIC_PATHS = ['/login', '/signup', '/activate', '/download']
 
 const isPublicAuthPath = (pathname) => AUTH_PUBLIC_PATHS.some((prefix) => pathname.startsWith(prefix))
 
