@@ -39,6 +39,7 @@ for a project overview and the fastest path to a running instance.
 - **[PERFORMANCE_UI_IMPLEMENTATION.md](./PERFORMANCE_UI_IMPLEMENTATION.md)** — Performance dashboard implementation
 - **[PERFORMANCE_UI_BUGFIXES.md](./PERFORMANCE_UI_BUGFIXES.md)** — Performance UI fixes and improvements
 - **[RBAC_USAGE_GUIDE.md](./RBAC_USAGE_GUIDE.md)** — Roles, permissions, and access control
+- **[GOOGLE_SSO_SETUP.md](./GOOGLE_SSO_SETUP.md)** — Google Workspace SSO and password-login control
 
 ## Operations
 
