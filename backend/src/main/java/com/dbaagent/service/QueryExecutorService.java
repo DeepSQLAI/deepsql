@@ -170,6 +170,41 @@ public class QueryExecutorService {
                 ? loadForeignKeyColumns(connection, connRequest.getDatabase(), provider, connectionId)
                 : Collections.emptySet();
 
+            // Indexes for every table up front, in one round trip. Fetching them
+            // table-by-table inside the loop below meant one query per table — on a
+            // 567-table schema behind a tunnel that was minutes, and it ran again for
+            // every caller that missed the cache.
+            //
+            // Not every name is necessarily answered: a provider returns no entry for
+            // one it cannot resolve precisely, and an object qualified with a database
+            // other than this connection's is never offered in the first place. Either
+            // way the loop below sees no entry and falls back to the per-table query,
+            // which reads from the schema the name actually points at.
+            Map<String, List<TableIndex>> indexesByTable = Collections.emptyMap();
+            if (connection != null && provider != null) {
+                List<String> bulkTables = new ArrayList<>();
+                for (DatabaseObject obj : objects) {
+                    if (isBulkIndexable(obj, connRequest.getDatabase())) {
+                        bulkTables.add(obj.getName());
+                    }
+                }
+                if (!bulkTables.isEmpty()) {
+                    try {
+                        indexesByTable = provider.getAllTableIndexes(
+                            connection, connRequest.getDatabase(), bulkTables
+                        );
+                    } catch (Exception e) {
+                        // Fall back to the per-table path rather than losing index flags.
+                        log.warn(
+                            "Bulk index fetch failed for connection {} ({}); falling back to per-table",
+                            connectionId,
+                            e.getMessage()
+                        );
+                        indexesByTable = Collections.emptyMap();
+                    }
+                }
+            }
+
             for (DatabaseObject obj : objects) {
                 if (obj.getColumns() == null || obj.getColumns().isEmpty()) {
                     continue;
@@ -181,9 +216,15 @@ public class QueryExecutorService {
                     && obj.getType() != null
                     && "table".equalsIgnoreCase(obj.getType())) {
                     try {
-                        List<TableIndex> indexes = provider.getTableIndexes(
-                            connection, connRequest.getDatabase(), obj.getName()
-                        );
+                        String key = obj.getName() == null
+                            ? null
+                            : obj.getName().toLowerCase(Locale.ROOT);
+                        List<TableIndex> indexes = key == null ? null : indexesByTable.get(key);
+                        if (indexes == null) {
+                            indexes = provider.getTableIndexes(
+                                connection, connRequest.getDatabase(), obj.getName()
+                            );
+                        }
                         applyIndexFlags(obj, indexes);
                     } catch (Exception e) {
                         log.debug(
@@ -238,6 +279,22 @@ public class QueryExecutorService {
             log.debug("Foreign-key fetch failed for connection {}: {}", connectionId, e.getMessage());
         }
         return fkColumns;
+    }
+
+    /**
+     * True when the bulk (single-schema) index fetch can answer for this object.
+     * A name qualified with a different schema must not be answered from the
+     * connection database's index list.
+     */
+    private boolean isBulkIndexable(DatabaseObject obj, String database) {
+        if (obj == null || obj.getName() == null || !"table".equalsIgnoreCase(obj.getType())) {
+            return false;
+        }
+        int dot = obj.getName().lastIndexOf('.');
+        if (dot <= 0) {
+            return true;
+        }
+        return obj.getName().substring(0, dot).equalsIgnoreCase(database);
     }
 
     private void applyIndexFlags(DatabaseObject obj, List<TableIndex> indexes) {

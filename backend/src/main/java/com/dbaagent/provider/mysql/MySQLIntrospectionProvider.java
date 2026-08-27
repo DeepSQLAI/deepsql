@@ -148,6 +148,78 @@ public class MySQLIntrospectionProvider implements IntrospectionProvider {
         return columns;
     }
 
+    /**
+     * One query for the whole schema instead of one per table.
+     *
+     * <p>INFORMATION_SCHEMA.STATISTICS is not cheap on MySQL, and paying for it 567 times
+     * in a row across a tunnel is what made schema enrichment take minutes. Scoped to a
+     * single TABLE_SCHEMA so this stays bounded on servers hosting many databases.
+     */
+    @Override
+    public Map<String, List<TableIndex>> getAllTableIndexes(
+        Connection connection, String database, Collection<String> tableNames
+    ) throws SQLException {
+        String query = """
+            SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME, NON_UNIQUE, INDEX_TYPE, SEQ_IN_INDEX
+            FROM INFORMATION_SCHEMA.STATISTICS
+            WHERE TABLE_SCHEMA = ?
+            ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
+            """;
+
+        // table -> index name -> index, so multi-column indexes accumulate their columns
+        // in SEQ_IN_INDEX order the same way the per-table path builds them.
+        Map<String, Map<String, TableIndex>> byTable = new HashMap<>();
+
+        try (PreparedStatement stmt = connection.prepareStatement(query)) {
+            stmt.setString(1, database);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    String tableName = rs.getString("TABLE_NAME");
+                    if (tableName == null) {
+                        continue;
+                    }
+                    String indexName = rs.getString("INDEX_NAME");
+                    String columnName = rs.getString("COLUMN_NAME");
+                    boolean nonUnique = rs.getBoolean("NON_UNIQUE");
+                    String indexType = rs.getString("INDEX_TYPE");
+
+                    Map<String, TableIndex> indexMap =
+                        byTable.computeIfAbsent(tableName.toLowerCase(Locale.ROOT), k -> new LinkedHashMap<>());
+
+                    TableIndex index = indexMap.get(indexName);
+                    if (index == null) {
+                        index = new TableIndex();
+                        index.setName(indexName);
+                        index.setType(indexType);
+                        index.setUnique(!nonUnique);
+                        index.setPrimary("PRIMARY".equals(indexName));
+                        index.setColumns(new ArrayList<>());
+                        indexMap.put(indexName, index);
+                    }
+                    index.getColumns().add(columnName);
+                }
+            }
+        }
+
+        // Tables with no indexes at all must still be present, so callers can tell an
+        // unindexed table from one this scan never covered.
+        Map<String, List<TableIndex>> result = new HashMap<>();
+        for (String tableName : tableNames) {
+            if (tableName == null) {
+                continue;
+            }
+            // Callers look up by the name they passed in, but STATISTICS returns bare
+            // TABLE_NAMEs — so match on the bare name and key the result by the original.
+            String key = tableName.toLowerCase(Locale.ROOT);
+            int dot = key.lastIndexOf('.');
+            String bare = dot > 0 ? key.substring(dot + 1) : key;
+            Map<String, TableIndex> indexMap = byTable.get(bare);
+            result.put(key, indexMap == null ? new ArrayList<>() : new ArrayList<>(indexMap.values()));
+        }
+        return result;
+    }
+
     @Override
     public List<TableIndex> getTableIndexes(Connection connection, String database, String tableName) throws SQLException {
         List<TableIndex> indexes = new ArrayList<>();
