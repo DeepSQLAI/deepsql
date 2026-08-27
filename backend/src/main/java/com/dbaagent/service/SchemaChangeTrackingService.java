@@ -499,11 +499,20 @@ public class SchemaChangeTrackingService {
      */
     @Transactional
     public void setBaseline(String connectionId, String snapshotId) {
-        // Update the snapshot type to BASELINE
-        snapshotRepository.findById(snapshotId).ifPresent(snapshot -> {
-            snapshot.setSnapshotType(SchemaSnapshot.SnapshotType.BASELINE);
-            snapshotRepository.save(snapshot);
-        });
+        // The snapshot id arrives as its own path variable, so authorizing connectionId
+        // upstream says nothing about it. Without this bind, a caller with manage access
+        // on connection A could flip connection B's snapshot to BASELINE and point A's
+        // drift config at it. Rejected rather than skipped: silently no-op'ing the
+        // snapshot write while still updating the drift config would leave the config
+        // referencing a snapshot from another connection. Enforced here as well as in the
+        // controller so the invariant does not depend on which caller reaches this method.
+        SchemaSnapshot snapshot = snapshotRepository.findById(snapshotId)
+            .filter(s -> Objects.equals(connectionId, s.getConnectionId()))
+            .orElseThrow(() -> new IllegalArgumentException(
+                "Snapshot not found for this connection"));
+
+        snapshot.setSnapshotType(SchemaSnapshot.SnapshotType.BASELINE);
+        snapshotRepository.save(snapshot);
 
         // Update drift config
         driftConfigRepository.findByConnectionId(connectionId).ifPresent(config -> {

@@ -69,6 +69,51 @@ public class AccessControlService {
         assertAccess(connectionId, EffectiveConnectionAccess::canManageConfig, "Configuration access denied for this connection");
     }
 
+    /**
+     * As {@link #assertCanReadConnectionContent}, but reports 404 instead of 403 — for
+     * endpoints keyed on a row id rather than a connection id.
+     *
+     * <p>Returning 403 for a row the caller may not touch and 404 for one that does not
+     * exist tells the caller which ids are real. That is an enumeration primitive, and
+     * `query_performance_regression.id` is a sequential {@code Long}, so walking it is
+     * trivial. Collapsing both to 404 means "no such row, as far as you are concerned",
+     * which is the same answer {@code DashboardWorkspaceService.assertCanReadDashboard}
+     * already gives for a dashboard outside the caller's workspace.
+     *
+     * <p>Use this only where the caller supplied an <em>opaque row id</em>. Endpoints that
+     * take a {@code connectionId} directly should keep 403: the caller already knows the
+     * connection exists (they typed its id), so hiding it buys nothing and an actionable
+     * "access denied" is the better answer.
+     *
+     * @param entity human-readable name for the 404 message, e.g. {@code "Alert"}
+     */
+    public void assertCanReadConnectionContentOrNotFound(String connectionId, String entity) {
+        assertOrNotFound(connectionId, EffectiveConnectionAccess::canReadContent, entity);
+    }
+
+    /** Write-side counterpart to {@link #assertCanReadConnectionContentOrNotFound}. */
+    public void assertCanManageConnectionContentOrNotFound(String connectionId, String entity) {
+        assertOrNotFound(connectionId, EffectiveConnectionAccess::canManageContent, entity);
+    }
+
+    private void assertOrNotFound(
+        String connectionId,
+        java.util.function.Predicate<EffectiveConnectionAccess> predicate,
+        String entity
+    ) {
+        ConnectionAccessService.ResolvedConnectionAccess access;
+        try {
+            access = resolveCurrentUserAccess(connectionId);
+        } catch (ResponseStatusException e) {
+            // An unresolvable connection, or an unauthenticated caller, must look the same
+            // as a row that isn't there — otherwise the distinction leaks back in here.
+            throw new ResponseStatusException(NOT_FOUND, entity + " not found");
+        }
+        if (!predicate.test(access.getEffectiveAccess())) {
+            throw new ResponseStatusException(NOT_FOUND, entity + " not found");
+        }
+    }
+
     public ConnectionAccessService.ResolvedConnectionAccess resolveCurrentUserAccess(String connectionId) {
         if (!authEnabled && !ImpersonationContext.isActive()) {
             try {

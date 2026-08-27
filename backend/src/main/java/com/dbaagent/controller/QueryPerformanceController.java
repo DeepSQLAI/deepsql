@@ -280,14 +280,15 @@ public class QueryPerformanceController {
      * Authorize a write keyed only on a regression id. The regression carries
      * its own connectionId, so resolve that and assert against it — a
      * regression id is not a capability, and these ids are sequential Longs,
-     * so they are trivially enumerable. An unknown id reports 404 so the
-     * endpoint cannot be used to probe which regressions exist.
+     * so they are trivially enumerable — walking 1..N would otherwise map out every
+     * tenant's regressions. An unknown id and one the caller cannot manage both report
+     * 404, so the response does not distinguish them.
      */
     private void assertCanManageRegression(Long regressionId) {
         String connectionId = queryPerformanceService.findConnectionIdForRegression(regressionId)
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "Regression not found"));
-        accessControlService.assertCanManageConnectionContent(connectionId);
+        accessControlService.assertCanManageConnectionContentOrNotFound(connectionId, "Regression");
     }
 
     /** The authenticated caller. Never trust a client-supplied actor name. */

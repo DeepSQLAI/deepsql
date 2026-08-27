@@ -749,18 +749,48 @@ it against a real database — not a theoretical hardening pass.
   accessor, so `findConnectionIdFor*` was added to `QueryPerformanceService`,
   `QueryPlanCacheService`, `SentinelAnalyticsService`, `BusinessRuleMemoryService`,
   `SlowQueryAlertService`, `QueryFingerprintService` and `SchemaChangeTrackingService`.
-  These helpers report **404, not 403**, for an unknown id — a 403 confirms the row
-  exists, turning the endpoint into an id oracle. `regressionId` is a sequential
-  `Long`, so that mattered.
+  These helpers report **404 for both** "no such id" and "not yours", via
+  `assertCanRead/ManageConnectionContentOrNotFound`. The first attempt only 404'd the
+  *unknown* case and left an authorized-but-denied row at 403, which still confirms the
+  row exists — a review caught that the code comments claimed a property the code did not
+  have. `query_performance_regression.id` is a sequential `Long`, so walking 1..N would
+  have mapped every tenant's regressions. Same answer
+  `DashboardWorkspaceService.assertCanReadDashboard` already gives. Endpoints keyed on a
+  **connectionId** keep 403: the caller already knows that connection exists, so an
+  actionable "access denied" is better than a misleading 404.
 - **Never take the actor from the request.** `POST /slow-queries/alerts/{id}/acknowledge`
-  took `@RequestParam String userId`, and three acknowledge endpoints took
-  `acknowledgedBy` defaulting to the literal string `"user"` — so the audit trail was
-  unauthenticated free text and could name any colleague. All seven sites now use
-  `accessControlService.requireCurrentUsername()`. The parameters are still accepted
-  (wire compatibility) and ignored.
+  took `@RequestParam String userId`; `acknowledgedBy` defaulted to the literal string
+  `"user"`; `resolvedBy`, `updatedBy` and Sentinel's `initiatedBy` came from the request
+  body — so the audit trail was unauthenticated free text and could name any colleague.
+  All of them now use `accessControlService.requireCurrentUsername()`. The parameters are
+  still accepted (wire compatibility) and ignored, which is noted at each site so nobody
+  re-wires them.
 - **Guarded vs unguarded is an existence oracle.** A guarded endpoint 404s an unknown
   connection id (`resolveCurrentUserAccess` wraps the lookup); an unguarded one returned
   200. That difference alone enumerated valid connection ids.
+- **A scanner built on an allowlist of id names can only catch the ids someone
+  remembered.** `ConnectionScopedAuthorizationSafetyTest` first matched
+  `body.contains("connectionId")` plus a hand-written list
+  (`alertId|actionId|regressionId|…`). Both halves leaked: `ProjectController.createProject`
+  reads `request.getConnectionId()` — **capital C** — and `projectId` was not in the list,
+  so `POST /projects` and `GET|PUT|DELETE /projects/{projectId}` were invisible while the
+  suite reported every case green. Now the connection match is case-insensitive and *any*
+  `@PathVariable …Id` counts as connection-owned until proven otherwise, with genuine
+  exceptions in `NOT_CONNECTION_OWNED_IDS` carrying a reason. Inverting it immediately
+  surfaced four `PlaybookController` endpoints — those turned out to be true negatives
+  (`Playbook` has no `connectionId`; playbooks are global templates), and
+  `playbookExemptionHoldsOnlyWhilePlaybooksAreConnectionFree` fails the build if a
+  `connectionId` is ever added to that entity. **A safety test that reports green is
+  evidence only about what it can see.**
+- **Two path variables are as dangerous as a body id.**
+  `POST /schema-changes/{connectionId}/snapshots/{snapshotId}/set-baseline` authorized the
+  connection and then flipped *whatever snapshot id it was handed* to BASELINE and pointed
+  that connection's drift config at it — so manage access on A could retarget B's snapshot
+  and bind A's baseline to it. `setBaseline` now refuses a snapshot whose `connectionId`
+  differs, in the service as well as the controller, and **throws rather than silently
+  skipping**: no-op'ing the snapshot write while still writing the drift config would leave
+  the config pointing at another connection's snapshot. When a handler takes an id
+  alongside a `connectionId`, authorizing the connection is half the check.
 - **A `@ControllerAdvice` catch-all swallows a 403 the same way an in-method one does,
   and it is easier to miss because it lives in another file.**
   `IndexAdvisorExceptionHandler` has `@ExceptionHandler(Exception.class)`, so the newly

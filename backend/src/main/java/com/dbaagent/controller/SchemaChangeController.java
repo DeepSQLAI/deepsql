@@ -80,8 +80,14 @@ public class SchemaChangeController {
             @PathVariable String connectionId,
             @PathVariable String snapshotId) {
         accessControlService.assertCanManageConnectionContent(connectionId);
+        assertSnapshotBelongsTo(connectionId, snapshotId);
 
-        schemaChangeService.setBaseline(connectionId, snapshotId);
+        try {
+            schemaChangeService.setBaseline(connectionId, snapshotId);
+        } catch (IllegalArgumentException e) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, e.getMessage());
+        }
         return ResponseEntity.ok(Map.of(
                 "status", "success",
                 "message", "Snapshot set as baseline"
@@ -98,7 +104,15 @@ public class SchemaChangeController {
 
         assertCanReadSnapshot(snapshotId1);
         assertCanReadSnapshot(snapshotId2);
-        return ResponseEntity.ok(schemaChangeService.compareSnapshots(snapshotId1, snapshotId2));
+        try {
+            return ResponseEntity.ok(schemaChangeService.compareSnapshots(snapshotId1, snapshotId2));
+        } catch (IllegalArgumentException e) {
+            // Missing snapshot, or two snapshots from different connections. Both are
+            // "not something you can compare", not a server fault — a 500 here would read
+            // as a broken feature and hide the real reason.
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, e.getMessage());
+        }
     }
 
     // ==================== Change Endpoints ====================
@@ -128,7 +142,10 @@ public class SchemaChangeController {
     public ResponseEntity<Map<String, Object>> acknowledgeChanges(
             @PathVariable String connectionId,
             @RequestBody List<String> changeIds,
-            @RequestParam(required = false, defaultValue = "user") String acknowledgedBy) {
+            @RequestParam(required = false) String acknowledgedBy) {
+            // Accepted for wire compatibility and deliberately ignored: the actor is
+            // taken from the security context below. It previously defaulted to the
+            // literal string "user", so the trail named nobody.
         accessControlService.assertCanManageConnectionContent(connectionId);
 
         assertChangesBelongTo(connectionId, changeIds);
@@ -145,7 +162,10 @@ public class SchemaChangeController {
     @PostMapping("/{connectionId}/changes/acknowledge-all")
     public ResponseEntity<Map<String, Object>> acknowledgeAllChanges(
             @PathVariable String connectionId,
-            @RequestParam(required = false, defaultValue = "user") String acknowledgedBy) {
+            @RequestParam(required = false) String acknowledgedBy) {
+            // Accepted for wire compatibility and deliberately ignored: the actor is
+            // taken from the security context below. It previously defaulted to the
+            // literal string "user", so the trail named nobody.
         accessControlService.assertCanManageConnectionContent(connectionId);
 
         int count = schemaChangeService.acknowledgeAllChanges(
@@ -207,13 +227,14 @@ public class SchemaChangeController {
     /**
      * Authorize a read keyed only on a snapshot id. The snapshot carries its own
      * connectionId, so resolve that and assert against it. An unknown id reports
-     * 404 so the endpoint cannot be used to probe which snapshots exist.
+     * 404 — as does a snapshot on a connection the caller cannot read, so the endpoint
+     * cannot be used to probe which snapshots exist.
      */
     private void assertCanReadSnapshot(String snapshotId) {
         String connectionId = schemaChangeService.findConnectionIdForSnapshot(snapshotId)
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "Snapshot not found"));
-        accessControlService.assertCanReadConnectionContent(connectionId);
+        accessControlService.assertCanReadConnectionContentOrNotFound(connectionId, "Snapshot");
     }
 
     /**
@@ -225,6 +246,21 @@ public class SchemaChangeController {
         if (!schemaChangeService.allChangesBelongTo(connectionId, changeIds)) {
             throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.NOT_FOUND, "Change not found for this connection");
+        }
+    }
+
+    /**
+     * The snapshot id is a separate path variable from the connection id, so authorizing
+     * the connection says nothing about the snapshot. Without this a caller with manage
+     * access on connection A could flip connection B's snapshot to BASELINE and point A's
+     * drift config at it — the same body/path id-mismatch class as
+     * {@code changes/acknowledge}, just split across two path variables instead.
+     */
+    private void assertSnapshotBelongsTo(String connectionId, String snapshotId) {
+        String owner = schemaChangeService.findConnectionIdForSnapshot(snapshotId).orElse(null);
+        if (!connectionId.equals(owner)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, "Snapshot not found");
         }
     }
 }

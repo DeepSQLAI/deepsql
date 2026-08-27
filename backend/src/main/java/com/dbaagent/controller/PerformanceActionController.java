@@ -298,12 +298,13 @@ public class PerformanceActionController {
     /**
      * Authorize a write keyed only on an action id. The action carries its own
      * connectionId, so resolve that first and assert against it — an action id
-     * is not a capability. An unknown id reports 404 rather than 403 so the
-     * endpoint cannot be used to probe which action ids exist.
+     * is not a capability. An unknown id and one on a connection the caller cannot
+     * manage both report 404, so the endpoint cannot be used to probe which action
+     * ids exist.
      */
     private void assertCanManageAction(String actionId) {
         PerformanceAction action = aggregatorService.getActionById(actionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Action not found"));
-        accessControlService.assertCanManageConnectionContent(action.getConnectionId());
+        accessControlService.assertCanManageConnectionContentOrNotFound(action.getConnectionId(), "Action");
     }
 }

@@ -108,7 +108,10 @@ public class QueryPlanController {
     public ResponseEntity<Map<String, Object>> acknowledgeRegressions(
             @PathVariable String connectionId,
             @RequestBody List<String> comparisonIds,
-            @RequestParam(required = false, defaultValue = "user") String acknowledgedBy) {
+            @RequestParam(required = false) String acknowledgedBy) {
+            // Accepted for wire compatibility and deliberately ignored: the actor is
+            // taken from the security context below. It previously defaulted to the
+            // literal string "user", so the trail named nobody.
         accessControlService.assertCanManageConnectionContent(connectionId);
 
         if (!planCacheService.allComparisonsBelongTo(connectionId, comparisonIds)) {
@@ -135,12 +138,13 @@ public class QueryPlanController {
     /**
      * Authorize a write keyed only on a plan id. The cached plan carries its own
      * connectionId, so resolve that and assert against it. An unknown id reports
-     * 404 so the endpoint cannot be used to probe which plan ids exist.
+     * 404 — as does a plan belonging to a connection the caller cannot manage, so the
+     * endpoint cannot be used to probe which plan ids exist.
      */
     private void assertCanManagePlan(String planId) {
         String connectionId = planCacheService.findConnectionIdForPlan(planId)
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "Plan not found"));
-        accessControlService.assertCanManageConnectionContent(connectionId);
+        accessControlService.assertCanManageConnectionContentOrNotFound(connectionId, "Plan");
     }
 }

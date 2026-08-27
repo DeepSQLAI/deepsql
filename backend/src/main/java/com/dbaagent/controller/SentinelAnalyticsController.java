@@ -232,7 +232,9 @@ public class SentinelAnalyticsController {
             String deploymentTag = (String) eventData.get("deploymentTag");
             @SuppressWarnings("unchecked")
             List<String> affectedTables = (List<String>) eventData.get("affectedTables");
-            String initiatedBy = (String) eventData.get("initiatedBy");
+            // The actor is the authenticated caller; an "initiatedBy" in the body
+            // would let anyone attribute a deployment event to a colleague.
+            String initiatedBy = accessControlService.requireCurrentUsername();
 
             log.info("Logging deployment event: {} for connection {}", deploymentVersion, connectionId);
 
@@ -273,7 +275,9 @@ public class SentinelAnalyticsController {
             String tableName = (String) eventData.get("tableName");
             String changeType = (String) eventData.get("changeType");
             String description = (String) eventData.get("description");
-            String initiatedBy = (String) eventData.get("initiatedBy");
+            // The actor is the authenticated caller; an "initiatedBy" in the body
+            // would let anyone attribute a deployment event to a colleague.
+            String initiatedBy = accessControlService.requireCurrentUsername();
 
             log.info("Logging schema change event: {} on table {}", changeType, tableName);
 
@@ -526,13 +530,13 @@ public class SentinelAnalyticsController {
     /**
      * Authorize a write keyed only on a recommendation id. The recommendation
      * carries its own connectionId, so resolve that and assert against it — a
-     * recommendation id is not a capability. An unknown id reports 404 so the
-     * endpoint cannot be used to probe which recommendations exist.
+     * recommendation id is not a capability. An unknown id and one on a connection the
+     * caller cannot manage both report 404, so the two are indistinguishable.
      */
     private void assertCanManageRecommendation(String recommendationId) {
         String connectionId = sentinelAnalytics.findConnectionIdForRecommendation(recommendationId)
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "Recommendation not found"));
-        accessControlService.assertCanManageConnectionContent(connectionId);
+        accessControlService.assertCanManageConnectionContentOrNotFound(connectionId, "Recommendation");
     }
 }

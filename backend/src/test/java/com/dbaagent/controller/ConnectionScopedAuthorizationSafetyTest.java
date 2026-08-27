@@ -157,13 +157,65 @@ class ConnectionScopedAuthorizationSafetyTest {
      * yet mutates a row that belongs to one.
      */
     private static boolean touchesAConnection(String body) {
-        return body.contains("connectionId")
-            || Pattern.compile("@PathVariable[^)]*\\)?\\s*(?:Long|String)\\s+"
-                + "(alertId|actionId|regressionId|recommendationId|fingerprintId|planId|ruleId"
-                + "|snapshotId|historyId|changeId|comparisonId)").matcher(body).find()
-            || body.contains("historyId1")
-            || body.contains("snapshotId1");
+        if (CONNECTION_REF.matcher(body).find()) {
+            return true;
+        }
+        Matcher ids = OWNED_ID.matcher(body);
+        while (ids.find()) {
+            if (!NOT_CONNECTION_OWNED_IDS.contains(ids.group(1))) {
+                return true;
+            }
+        }
+        return false;
     }
+
+    /**
+     * Any mention of a connection id, in any casing a real signature uses.
+     *
+     * <p>This started as {@code body.contains("connectionId")} and that was a real hole:
+     * {@code ProjectController.createProject} reads the connection from
+     * {@code request.getConnectionId()} — capital C — so it did not match, and four
+     * unguarded endpoints were invisible while this test reported 6/6 green. Match the
+     * name case-insensitively and cover the {@code getConnectionId()} /
+     * {@code get("connectionId")} accessor forms explicitly.
+     */
+    private static final Pattern CONNECTION_REF = Pattern.compile(
+        "(?i)connection_?id");
+
+    /**
+     * Any id-shaped path variable, allowlist-free.
+     *
+     * <p>The previous version enumerated the id names it knew about
+     * ({@code alertId|actionId|regressionId|…}), which can only catch ids someone
+     * remembered to add — {@code projectId} was missing, so
+     * {@code GET|PUT|DELETE /projects/{projectId}} were never examined. Inverted: treat
+     * <em>every</em> {@code @PathVariable ...Id} as a row that plausibly belongs to a
+     * connection, and require the handler to prove otherwise by authorizing it. A genuine
+     * exception goes in {@link #NOT_CONNECTION_OWNED_IDS} with a reason, so adding one is
+     * a deliberate, reviewable act rather than an omission.
+     */
+    private static final Pattern OWNED_ID = Pattern.compile(
+        "@PathVariable[^)]*\\)?\\s*(?:Long|String|UUID)\\s+(\\w*[Ii]d)\\b");
+
+    /**
+     * Path-variable ids that identify something other than a connection-owned row. Each
+     * is scoped by its own mechanism, named here so the exemption is auditable.
+     */
+    private static final Set<String> NOT_CONNECTION_OWNED_IDS = Set.of(
+        "userId",       // user administration; role-gated, not connection-gated
+        "id",           // too generic to classify — handled per-controller
+        "chatId",       // AccessControlService.assertCanAccessChat owns this
+        "workspaceId",  // DashboardWorkspaceService membership owns this
+        "dashboardId",  // SavedDashboardService owns this
+        "tokenId",      // MCP tokens, scoped to the authenticated caller
+        "jobId",        // resolved to its connection by SlowLogSourceController
+        "threadId",     // agent conversation, scoped by userId
+        "conversationId",
+        // Playbooks are global templates: the Playbook entity has no connectionId at all,
+        // so there is no connection to authorize against. The endpoints in that controller
+        // which *do* carry one (execute, runs, alerts) are guarded — verified, not assumed.
+        "playbookId"
+    );
 
     @Test
     void everyConnectionScopedEndpointAuthorizesTheCaller() throws IOException {
@@ -274,6 +326,25 @@ class ConnectionScopedAuthorizationSafetyTest {
                 + "into a 500. Rethrow it first: catch (ResponseStatusException e) { throw e; } "
                 + "— or move the assert above the try.")
             .isEmpty();
+    }
+
+    /**
+     * {@code playbookId} is exempt because {@code Playbook} carries no {@code connectionId}
+     * — there is genuinely no connection to authorize against. That is a claim about the
+     * entity, so check it: if a {@code connectionId} is ever added to {@code Playbook}, the
+     * exemption silently starts hiding four unguarded endpoints
+     * ({@code GET|PUT|DELETE /playbooks/{id}} and {@code /toggle}).
+     */
+    @Test
+    void playbookExemptionHoldsOnlyWhilePlaybooksAreConnectionFree() throws IOException {
+        Path entity = Path.of("src/main/java/com/dbaagent/model/Playbook.java");
+        String source = Files.readString(entity);
+
+        assertThat(source)
+            .as("Playbook has gained a connectionId, so playbooks are no longer global "
+                + "templates. Remove \"playbookId\" from NOT_CONNECTION_OWNED_IDS and "
+                + "authorize the id-keyed playbook endpoints against the owning connection.")
+            .doesNotContain("connectionId");
     }
 
     /**

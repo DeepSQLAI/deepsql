@@ -1773,9 +1773,11 @@ public class SlowQueryController {
     // ── authorization helpers for endpoints keyed on a non-connection id ──────
     //
     // An id is not a capability: each of these entities carries its own
-    // connectionId, so resolve the owner and assert against that. An unknown id
-    // reports 404 rather than 403, so none of these can be used to probe which
-    // ids exist on connections the caller cannot see.
+    // connectionId, so resolve the owner and assert against that.
+    //
+    // Both "no such id" and "not yours" answer 404, via the *OrNotFound guards. Splitting
+    // them (404 vs 403) would confirm which ids are real, which is an enumeration
+    // primitive — same reasoning as DashboardWorkspaceService.assertCanReadDashboard.
 
     private String historyConnectionId(String historyId) {
         return historyService.getHistoryById(historyId)
@@ -1785,18 +1787,20 @@ public class SlowQueryController {
     }
 
     private void assertCanReadHistory(String historyId) {
-        accessControlService.assertCanReadConnectionContent(historyConnectionId(historyId));
+        accessControlService.assertCanReadConnectionContentOrNotFound(
+                historyConnectionId(historyId), "Analysis");
     }
 
     private void assertCanManageHistory(String historyId) {
-        accessControlService.assertCanManageConnectionContent(historyConnectionId(historyId));
+        accessControlService.assertCanManageConnectionContentOrNotFound(
+                historyConnectionId(historyId), "Analysis");
     }
 
     private void assertCanManageAlert(String alertId) {
         String connectionId = alertService.findConnectionIdForAlert(alertId)
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "Alert not found"));
-        accessControlService.assertCanManageConnectionContent(connectionId);
+        accessControlService.assertCanManageConnectionContentOrNotFound(connectionId, "Alert");
     }
 
     private String fingerprintConnectionId(String fingerprintId) {
@@ -1806,10 +1810,12 @@ public class SlowQueryController {
     }
 
     private void assertCanReadFingerprint(String fingerprintId) {
-        accessControlService.assertCanReadConnectionContent(fingerprintConnectionId(fingerprintId));
+        accessControlService.assertCanReadConnectionContentOrNotFound(
+                fingerprintConnectionId(fingerprintId), "Fingerprint");
     }
 
     private void assertCanManageFingerprint(String fingerprintId) {
-        accessControlService.assertCanManageConnectionContent(fingerprintConnectionId(fingerprintId));
+        accessControlService.assertCanManageConnectionContentOrNotFound(
+                fingerprintConnectionId(fingerprintId), "Fingerprint");
     }
 }
