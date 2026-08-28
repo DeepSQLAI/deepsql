@@ -46,21 +46,42 @@ jobs:
       - name: Self-test the SSH tunnel transport
         # Runs a real SSH server in-process, so it needs a display-free Electron.
         # xvfb is only required on Linux; the other runners have a window server.
+        #
+        # ELECTRON_DISABLE_SANDBOX: GitHub-hosted Linux runners ship Electron's
+        # chrome-sandbox without root:4755, so Chromium aborts with SIGTRAP
+        # before the test starts ("SUID sandbox helper binary … is not
+        # configured correctly"). Verified on desktop-v1.0.0. Sandbox is
+        # irrelevant for this headless selftest.
         working-directory: desktop
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
         run: ${{ matrix.os == 'ubuntu-latest' && 'xvfb-run --auto-servernum npm run selftest:tunnel' || 'npm run selftest:tunnel' }}
         shell: bash
 
       - name: Build installers
         working-directory: desktop
         env:
-          # Signing is skipped when these are unset; electron-builder warns and
-          # produces unsigned artifacts rather than failing the build.
-          CSC_LINK: ${{ secrets.DESKTOP_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.DESKTOP_CSC_KEY_PASSWORD }}
+          # Keep secrets in DESKTOP_* names first. Passing an empty CSC_LINK from
+          # an unset repository secret still counts as "set" for electron-builder,
+          # which then tries to open it as a file and fails macOS with
+          # "…/desktop not a file" (observed on desktop-v1.0.0). Only export the
+          # real CSC_* / Apple vars when a signing secret is actually configured.
+          DESKTOP_CSC_LINK: ${{ secrets.DESKTOP_CSC_LINK }}
+          DESKTOP_CSC_KEY_PASSWORD: ${{ secrets.DESKTOP_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx electron-builder ${{ matrix.target }} --publish never
+        run: |
+          set -euo pipefail
+          if [ -n "${DESKTOP_CSC_LINK:-}" ]; then
+            export CSC_LINK="$DESKTOP_CSC_LINK"
+            export CSC_KEY_PASSWORD="${DESKTOP_CSC_KEY_PASSWORD:-}"
+          else
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            echo "No DESKTOP_CSC_LINK secret — building unsigned installers."
+          fi
+          npx electron-builder ${{ matrix.target }} --publish never
+        shell: bash
 
       - uses: actions/upload-artifact@v4
         with:
