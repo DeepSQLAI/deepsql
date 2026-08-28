@@ -173,6 +173,14 @@ public class QueryFingerprintService {
     /**
      * Get trend data for a specific fingerprint
      */
+    /**
+     * The connection a fingerprint row belongs to, for authorizing an endpoint
+     * keyed only on a fingerprint id. Empty when the id does not exist.
+     */
+    public java.util.Optional<String> findConnectionIdForFingerprintId(String fingerprintId) {
+        return fingerprintRepository.findById(fingerprintId).map(f -> f.getConnectionId());
+    }
+
     public FingerprintTrend getTrend(String fingerprintId) {
         QueryFingerprint fp = fingerprintRepository.findById(fingerprintId)
             .orElseThrow(() -> new IllegalArgumentException("Fingerprint not found: " + fingerprintId));

@@ -462,6 +462,14 @@ public class BusinessRuleMemoryService {
     }
 
     @Transactional
+    /**
+     * The connection a rule belongs to, for authorizing an endpoint keyed only
+     * on a rule id. Empty when the id does not exist.
+     */
+    public java.util.Optional<String> findConnectionIdForRule(String ruleId) {
+        return brainRuleRepository.findById(ruleId).map(r -> r.getConnectionId());
+    }
+
     public boolean deactivateRule(String ruleId) {
         if (ruleId == null || ruleId.isBlank()) {
             return false;

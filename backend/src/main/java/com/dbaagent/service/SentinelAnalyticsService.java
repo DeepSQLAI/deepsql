@@ -499,6 +499,15 @@ public class SentinelAnalyticsService {
     /**
      * Update recommendation status
      */
+    /**
+     * The connection a recommendation belongs to, for authorizing an endpoint
+     * keyed only on a recommendation id. Empty when the id does not exist.
+     */
+    public java.util.Optional<String> findConnectionIdForRecommendation(String recommendationId) {
+        return recommendationRepository.findById(recommendationId)
+            .map(SentinelRecommendation::getConnectionId);
+    }
+
     public SentinelRecommendation updateRecommendationStatus(
             String recommendationId,
             SentinelRecommendation.Status status,

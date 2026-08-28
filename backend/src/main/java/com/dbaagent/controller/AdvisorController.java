@@ -3,6 +3,7 @@ package com.dbaagent.controller;
 import com.dbaagent.model.IndexRecommendation;
 import com.dbaagent.model.PerformanceAnalysis;
 import com.dbaagent.service.DatabaseAdvisorService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -10,6 +11,15 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * REST API for the performance advisor (analysis, missing indexes, health summary).
+ *
+ * <p><b>Authorization:</b> every endpoint here takes a caller-supplied connection id, so
+ * each one asserts access itself ({@code assertCanReadConnectionContent} for reads,
+ * {@code assertCanManageConnectionContent} for writes). {@code SecurityConfig} only
+ * requires an authenticated principal — nothing upstream inspects a connection id. See
+ * {@code ConnectionScopedAuthorizationSafetyTest}.
+ */
 @RestController
 @RequestMapping("/advisor")
 @RequiredArgsConstructor
@@ -17,6 +27,7 @@ import java.util.List;
 public class AdvisorController {
 
     private final DatabaseAdvisorService advisorService;
+    private final AccessControlService accessControlService;
 
     /**
      * Get comprehensive performance analysis
@@ -25,6 +36,7 @@ public class AdvisorController {
     public ResponseEntity<PerformanceAnalysis> analyzePerformance(
         @PathVariable String connectionId
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             log.info("Performance analysis requested for connection: {}", connectionId);
             PerformanceAnalysis analysis = advisorService.analyzePerformance(connectionId);
@@ -44,6 +56,7 @@ public class AdvisorController {
     public ResponseEntity<List<IndexRecommendation>> getMissingIndexes(
         @PathVariable String connectionId
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             log.info("Index recommendations requested for connection: {}", connectionId);
             PerformanceAnalysis analysis = advisorService.analyzePerformance(connectionId);
@@ -63,6 +76,7 @@ public class AdvisorController {
     public ResponseEntity<HealthSummary> getHealthSummary(
         @PathVariable String connectionId
     ) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         try {
             log.info("Health summary requested for connection: {}", connectionId);
             PerformanceAnalysis analysis = advisorService.analyzePerformance(connectionId);

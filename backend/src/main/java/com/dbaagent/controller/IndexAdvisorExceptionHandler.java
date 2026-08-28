@@ -61,6 +61,27 @@ public class IndexAdvisorExceptionHandler {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
     }
 
+    /**
+     * An authorization denial is a deliberate answer, not a failure of this feature.
+     * {@code handleGeneric} below matches {@code Exception}, so without this more specific
+     * handler a {@code ResponseStatusException} from
+     * {@code assertCanReadConnectionContent} was reported as
+     * {@code 500 "Index operation failed"} — the denial still held, but the caller could
+     * not tell "not yours" from "the index store is broken", and the message named the
+     * wrong subsystem. Verified: a non-granted user hitting
+     * {@code /index-advisor/{id}/health-report} got a 500 whose body carried the 403 text.
+     */
+    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public ResponseEntity<Map<String, Object>> handleStatus(
+            org.springframework.web.server.ResponseStatusException ex) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("timestamp", Instant.now().toString());
+        body.put("status", ex.getStatusCode().value());
+        body.put("error", ex.getStatusCode().toString());
+        body.put("message", ex.getReason() != null ? ex.getReason() : ex.getMessage());
+        return ResponseEntity.status(ex.getStatusCode()).body(body);
+    }
+
     /** Any other uncaught error from these endpoints → a clean message, not an opaque 500. */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGeneric(Exception ex) {

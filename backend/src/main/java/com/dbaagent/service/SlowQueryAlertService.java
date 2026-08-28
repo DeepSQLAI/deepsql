@@ -243,6 +243,14 @@ public class SlowQueryAlertService {
     /**
      * Acknowledge an alert
      */
+    /**
+     * The connection an alert belongs to, for authorizing an endpoint keyed only
+     * on an alert id. Empty when the id does not exist.
+     */
+    public java.util.Optional<String> findConnectionIdForAlert(String alertId) {
+        return alertRepository.findById(alertId).map(PlaybookAlert::getConnectionId);
+    }
+
     public PlaybookAlert acknowledgeAlert(String alertId, String userId) {
         PlaybookAlert alert = alertRepository.findById(alertId)
             .orElseThrow(() -> new IllegalArgumentException("Alert not found: " + alertId));

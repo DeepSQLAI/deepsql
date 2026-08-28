@@ -2,6 +2,7 @@ package com.dbaagent.controller;
 
 import com.dbaagent.service.IndexAdvisorService;
 import com.dbaagent.service.PerformanceMonitoringService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -12,6 +13,12 @@ import java.util.Map;
 
 /**
  * REST API for enhanced index advisor functionality
+ *
+ * <p><b>Authorization:</b> every endpoint here takes a caller-supplied connection id, so
+ * each one asserts access itself ({@code assertCanReadConnectionContent} for reads,
+ * {@code assertCanManageConnectionContent} for writes). {@code SecurityConfig} only
+ * requires an authenticated principal — nothing upstream inspects a connection id. See
+ * {@code ConnectionScopedAuthorizationSafetyTest}.
  */
 @RestController
 @RequestMapping("/index-advisor")
@@ -21,12 +28,14 @@ public class IndexAdvisorController {
 
     private final IndexAdvisorService indexAdvisorService;
     private final PerformanceMonitoringService performanceMonitoringService;
+    private final AccessControlService accessControlService;
 
     /**
      * Get comprehensive index health report
      */
     @GetMapping("/{connectionId}/health-report")
     public ResponseEntity<Map<String, Object>> getHealthReport(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(indexAdvisorService.getIndexHealthReport(connectionId));
     }
 
@@ -35,6 +44,7 @@ public class IndexAdvisorController {
      */
     @GetMapping("/{connectionId}/unused")
     public ResponseEntity<List<Map<String, Object>>> getUnusedIndexes(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(performanceMonitoringService.getUnusedIndexes(connectionId));
     }
 
@@ -43,6 +53,7 @@ public class IndexAdvisorController {
      */
     @GetMapping("/{connectionId}/duplicates")
     public ResponseEntity<List<Map<String, Object>>> getDuplicateIndexes(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(performanceMonitoringService.getDuplicateIndexes(connectionId));
     }
 
@@ -53,6 +64,7 @@ public class IndexAdvisorController {
     public ResponseEntity<Map<String, Object>> estimateIndexCreation(
             @PathVariable String connectionId,
             @RequestBody Map<String, Object> request) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         String tableName = (String) request.get("tableName");
         @SuppressWarnings("unchecked")
@@ -75,6 +87,7 @@ public class IndexAdvisorController {
     public ResponseEntity<Map<String, Object>> estimateIndexDrop(
             @PathVariable String connectionId,
             @RequestBody Map<String, Object> request) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
 
         String tableName = (String) request.get("tableName");
         String indexName = (String) request.get("indexName");
@@ -94,6 +107,7 @@ public class IndexAdvisorController {
     public ResponseEntity<List<Map<String, Object>>> getIndexUsageStats(
             @PathVariable String connectionId,
             @PathVariable String tableName) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(performanceMonitoringService.getIndexUsageStats(connectionId, tableName));
     }
 
@@ -102,6 +116,7 @@ public class IndexAdvisorController {
      */
     @GetMapping("/{connectionId}/cache-stats")
     public ResponseEntity<Map<String, Double>> getCacheStats(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(performanceMonitoringService.getCacheHitRatios(connectionId));
     }
 }

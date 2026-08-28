@@ -4,6 +4,7 @@ import com.dbaagent.model.*;
 import com.dbaagent.repository.*;
 import com.dbaagent.service.EventCorrelationService;
 import com.dbaagent.service.SentinelAnalyticsService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -15,6 +16,12 @@ import java.util.*;
 /**
  * Demo Data Generator for Sentinel-DBA
  * Creates sample resource limits, forecasts, events, and recommendations
+ *
+ * <p><b>Authorization:</b> every endpoint here takes a caller-supplied connection id, so
+ * each one asserts access itself ({@code assertCanReadConnectionContent} for reads,
+ * {@code assertCanManageConnectionContent} for writes). {@code SecurityConfig} only
+ * requires an authenticated principal — nothing upstream inspects a connection id. See
+ * {@code ConnectionScopedAuthorizationSafetyTest}.
  */
 @RestController
 @RequestMapping("/sentinel/demo")
@@ -29,6 +36,7 @@ public class SentinelDemoDataController {
     private final SentinelRecommendationRepository recommendationRepository;
     private final EventCorrelationService eventCorrelation;
     private final SentinelAnalyticsService sentinelAnalytics;
+    private final AccessControlService accessControlService;
 
     /**
      * POST /api/sentinel/demo/generate/{connectionId}
@@ -37,6 +45,7 @@ public class SentinelDemoDataController {
     @PostMapping("/generate/{connectionId}")
     public ResponseEntity<Map<String, Object>> generateDemoData(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             log.info("Generating Sentinel demo data for connection: {}", connectionId);
 
             Map<String, Object> results = new HashMap<>();
@@ -81,6 +90,7 @@ public class SentinelDemoDataController {
     @DeleteMapping("/cleanup/{connectionId}")
     public ResponseEntity<Map<String, Object>> cleanupDemoData(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             log.info("Cleaning up Sentinel demo data for connection: {}", connectionId);
 
             // Delete in reverse order of dependencies
