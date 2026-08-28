@@ -476,4 +476,73 @@ class EmbeddingServiceTest {
         assertThat(service.cosineSimilarity(List.of(1.0, 2.0, 3.0), List.of(1.0, 2.0, 3.0)))
                 .isCloseTo(1.0, org.assertj.core.data.Offset.offset(1e-9));
     }
+
+    @Test
+    void shrinksTheInputWhenTheProviderRejectsItAsTooLong() {
+        var resolver = mock(LlmConfigResolver.class);
+        var registry = mock(LlmProviderRegistry.class);
+        var provider = mock(LlmEmbeddingProvider.class);
+
+        when(resolver.resolveEmbedding()).thenReturn(creds());
+        when(registry.embeddingProvider("openai")).thenReturn(provider);
+        // Stands in for a model whose real token window is reached well before the
+        // character budget: anything over 15,000 chars is rejected outright.
+        when(provider.embed(anyString(), any())).thenAnswer(call -> {
+            String sent = call.getArgument(0);
+            if (sent.length() > 15_000) {
+                throw new RuntimeException("maximum context length is 8192 tokens");
+            }
+            return List.of(0.5);
+        });
+        when(provider.classify(any())).thenReturn(LlmErrorCategory.CONTEXT_LENGTH);
+
+        var service = new EmbeddingService(resolver, registry, 30_000, false);
+
+        // Without shrinking this document is dropped forever; the point of the fix is
+        // that it comes back embedded rather than empty.
+        assertThat(service.createEmbedding("x".repeat(50_000))).containsExactly(0.5);
+
+        var captor = ArgumentCaptor.forClass(String.class);
+        verify(provider, times(2)).embed(captor.capture(), any());
+        assertThat(captor.getAllValues().get(0)).hasSize(30_000);
+        assertThat(captor.getAllValues().get(1)).hasSize(15_000);
+    }
+
+    @Test
+    void givesUpAfterTheShrinkFloorAndStillHonoursFailOpen() {
+        var resolver = mock(LlmConfigResolver.class);
+        var registry = mock(LlmProviderRegistry.class);
+        var provider = mock(LlmEmbeddingProvider.class);
+
+        when(resolver.resolveEmbedding()).thenReturn(creds());
+        when(registry.embeddingProvider("openai")).thenReturn(provider);
+        when(provider.embed(anyString(), any()))
+                .thenThrow(new RuntimeException("maximum context length is 8192 tokens"));
+        when(provider.classify(any())).thenReturn(LlmErrorCategory.CONTEXT_LENGTH);
+
+        var service = new EmbeddingService(resolver, registry, 30_000, true);
+
+        // Shrinking is bounded, so a pathological document cannot loop forever.
+        assertThat(service.createEmbedding("x".repeat(50_000))).isEmpty();
+        verify(provider, times(5)).embed(anyString(), any()); // 30k, 15k, 7.5k, 3.75k, 1.875k
+    }
+
+    @Test
+    void doesNotShrinkForFailuresThatShrinkingCannotFix() {
+        var resolver = mock(LlmConfigResolver.class);
+        var registry = mock(LlmProviderRegistry.class);
+        var provider = mock(LlmEmbeddingProvider.class);
+
+        when(resolver.resolveEmbedding()).thenReturn(creds());
+        when(registry.embeddingProvider("openai")).thenReturn(provider);
+        when(provider.embed(anyString(), any())).thenThrow(new RuntimeException("nope"));
+        when(provider.classify(any())).thenReturn(LlmErrorCategory.AUTH);
+
+        var service = new EmbeddingService(resolver, registry, 30_000, true);
+
+        assertThat(service.createEmbedding("x".repeat(50_000))).isEmpty();
+        // A rejected credential says nothing about input size; retrying smaller would
+        // just multiply the failed calls.
+        verify(provider, times(1)).embed(anyString(), any());
+    }
 }
