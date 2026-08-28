@@ -91,6 +91,13 @@ environment variables to enable it:
 - macOS: `CSC_LINK`, `CSC_KEY_PASSWORD`, plus `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` for notarisation.
 - Windows: `CSC_LINK`, `CSC_KEY_PASSWORD` (or an Azure Trusted Signing config).
 
+CI (`.github/workflows/desktop-release.yml`) builds **unsigned** installers unless
+the repository secret `DESKTOP_CSC_LINK` is set. An empty `CSC_LINK` still counts
+as configured for electron-builder and fails the macOS job — the workflow only
+exports `CSC_*` when that secret is non-empty, and otherwise sets
+`CSC_IDENTITY_AUTO_DISCOVERY=false`. Linux selftests set `ELECTRON_DISABLE_SANDBOX=1`
+because hosted runners lack a correctly permissioned `chrome-sandbox`.
+
 **Auto-update** is opt-in. `package.json` sets `"publish": null`, so no update
 feed is baked in and the updater no-ops. To enable it, either set a `publish`
 target (GitHub Releases, S3, generic) before building, or point
