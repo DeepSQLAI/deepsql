@@ -509,7 +509,7 @@ class EmbeddingServiceTest {
     }
 
     @Test
-    void givesUpAfterTheShrinkFloorAndStillHonoursFailOpen() {
+    void givesUpAfterTheAttemptCapAndStillHonoursFailOpen() {
         var resolver = mock(LlmConfigResolver.class);
         var registry = mock(LlmProviderRegistry.class);
         var provider = mock(LlmEmbeddingProvider.class);
@@ -522,7 +522,8 @@ class EmbeddingServiceTest {
 
         var service = new EmbeddingService(resolver, registry, 30_000, true);
 
-        // Shrinking is bounded, so a pathological document cannot loop forever.
+        // Bounded by MAX_SHRINK_ATTEMPTS, not by MIN_EMBEDDING_CHARS: at a 30,000
+        // ceiling the cap is reached first. The floor is covered separately below.
         assertThat(service.createEmbedding("x".repeat(50_000))).isEmpty();
         verify(provider, times(5)).embed(anyString(), any()); // 30k, 15k, 7.5k, 3.75k, 1.875k
     }
@@ -544,5 +545,54 @@ class EmbeddingServiceTest {
         // A rejected credential says nothing about input size; retrying smaller would
         // just multiply the failed calls.
         verify(provider, times(1)).embed(anyString(), any());
+    }
+
+    @Test
+    void shrinksRelativeToTheInputNotTheConfiguredCeiling() {
+        var resolver = mock(LlmConfigResolver.class);
+        var registry = mock(LlmProviderRegistry.class);
+        var provider = mock(LlmEmbeddingProvider.class);
+
+        when(resolver.resolveEmbedding()).thenReturn(creds());
+        when(registry.embeddingProvider("openai")).thenReturn(provider);
+        when(provider.embed(anyString(), any())).thenAnswer(call -> {
+            String sent = call.getArgument(0);
+            if (sent.length() > 2_000) {
+                throw new RuntimeException("maximum context length is 8192 tokens");
+            }
+            return List.of(0.5);
+        });
+        when(provider.classify(any())).thenReturn(LlmErrorCategory.CONTEXT_LENGTH);
+
+        // 4,000 chars against a 30,000 ceiling. Seeding the budget from the ceiling would
+        // make the first halvings no-ops — 30,000 and 15,000 both send the same 4,000
+        // bytes — and burn the attempt cap on identical rejected calls.
+        new EmbeddingService(resolver, registry, 30_000, true)
+                .createEmbedding("x".repeat(4_000));
+
+        var captor = ArgumentCaptor.forClass(String.class);
+        verify(provider, times(2)).embed(captor.capture(), any());
+        assertThat(captor.getAllValues().get(0)).hasSize(4_000);
+        assertThat(captor.getAllValues().get(1)).hasSize(2_000);
+    }
+
+    @Test
+    void stopsAtTheCharacterFloorRatherThanEmbeddingATokenOfContent() {
+        var resolver = mock(LlmConfigResolver.class);
+        var registry = mock(LlmProviderRegistry.class);
+        var provider = mock(LlmEmbeddingProvider.class);
+
+        when(resolver.resolveEmbedding()).thenReturn(creds());
+        when(registry.embeddingProvider("openai")).thenReturn(provider);
+        when(provider.embed(anyString(), any()))
+                .thenThrow(new RuntimeException("maximum context length is 8192 tokens"));
+        when(provider.classify(any())).thenReturn(LlmErrorCategory.CONTEXT_LENGTH);
+
+        // A ceiling low enough that MIN_EMBEDDING_CHARS (1,000) is what stops the loop,
+        // not the attempt cap: 1,500 -> 1,000 -> give up.
+        var service = new EmbeddingService(resolver, registry, 1_500, true);
+
+        assertThat(service.createEmbedding("x".repeat(5_000))).isEmpty();
+        verify(provider, times(2)).embed(anyString(), any());
     }
 }
