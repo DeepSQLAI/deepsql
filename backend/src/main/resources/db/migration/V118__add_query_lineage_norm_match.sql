@@ -17,16 +17,21 @@
 -- at write time. On the same 34,976-row table, with the ~120-character prefix the caller
 -- actually sends: Index Scan, 0.428 ms.
 --
+-- The btrim matches Java's normalizeForMatching, which ends with .trim(). Without it a
+-- row stored with leading whitespace normalizes to " select ..." here but "select ..." in
+-- Java, so the prefix LIKE never matches and recovery silently returns the truncated
+-- sample. That flaw was present in the inline expression this replaces.
+--
 -- NOTE: this repo has no Flyway runtime (see CLAUDE.md). QueryLineageMatchIndexInitializer
 -- is what actually applies these statements at startup; this file is the changelog record.
 
 ALTER TABLE query_lineage
     ADD COLUMN IF NOT EXISTS normalized_match text
     GENERATED ALWAYS AS (
-        lower(regexp_replace(regexp_replace(
+        btrim(lower(regexp_replace(regexp_replace(
             replace(query_text, '`', ''),
             '\s*([.,();])\s*', '\1', 'g'),
-            '\s+', ' ', 'g'))
+            '\s+', ' ', 'g')))
     ) STORED;
 
 -- text_pattern_ops so LIKE 'prefix%' can use the index under any collation; the default
