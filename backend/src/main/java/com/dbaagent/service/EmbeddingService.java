@@ -31,6 +31,10 @@ public class EmbeddingService {
 
     /** Retry budget: 2 retries after the first try, matching the pre-delegation service. */
     private static final int MAX_RETRY_ATTEMPTS = 2;
+    /** Halvings allowed before giving up: 30,000 chars reaches ~1,875 in four. */
+    private static final int MAX_SHRINK_ATTEMPTS = 4;
+    /** Floor for shrinking. Below this the document is too small to be worth indexing. */
+    private static final int MIN_EMBEDDING_CHARS = 1_000;
     private static final long RETRY_BACKOFF_MS = 750L;
 
     /**
@@ -87,9 +91,23 @@ public class EmbeddingService {
         this.maxRetryAfter = maxRetryAfter;
     }
 
-    /** text-embedding-3-large accepts 8192 tokens, roughly 4 chars per token. */
-    private String truncate(String text) {
-        return (text != null && text.length() > maxChars) ? text.substring(0, maxChars) : text;
+    /**
+     * Cut {@code text} to a character budget.
+     *
+     * <p>The budget is a <em>guess</em> at the model's token window, and it is wrong often
+     * enough to matter. The old default assumed "roughly 4 chars per token", which holds
+     * for prose but not for what this service actually embeds: schema and relationship
+     * documents are dense identifiers — {@code ORDERS.customer_id}, underscores,
+     * punctuation, repeated scaffolding — that tokenize closer to 2-3 chars per token. At
+     * that density the 30,000-char default is 10,000-15,000 tokens, well past the 8,192 a
+     * text-embedding-3-large call accepts, and the provider rejects the request outright.
+     *
+     * <p>No fixed ratio is safe across content, so the budget is not trusted to be right.
+     * {@link #embedWithShrink} lets the provider's own CONTEXT_LENGTH rejection drive the
+     * budget down until the call fits.
+     */
+    private String truncate(String text, int budget) {
+        return (text != null && text.length() > budget) ? text.substring(0, budget) : text;
     }
 
     /**
@@ -98,8 +116,62 @@ public class EmbeddingService {
     public List<Double> createEmbedding(String text) {
         LlmCredentials credentials = requireCredentials();
         LlmEmbeddingProvider provider = registry.embeddingProvider(credentials.providerId());
-        return attempt(provider, credentials,
-                () -> provider.embed(truncate(text), credentials), List.of());
+        return embedWithShrink(provider, credentials,
+                budget -> provider.embed(truncate(text, budget), credentials),
+                List.of(),
+                text == null ? 0 : text.length());
+    }
+
+    /**
+     * Run an embedding call, halving the character budget each time the provider says the
+     * input is too long.
+     *
+     * <p>{@link LlmErrorCategory#CONTEXT_LENGTH} already documents itself as "never retry;
+     * the caller may trim" — but until now no caller trimmed. The rejection fell through to
+     * fail-open, the document was skipped, and because the input is deterministic it was
+     * skipped again on every subsequent rebuild. That is a permanent hole in the index
+     * wearing the costume of a transient blip.
+     *
+     * <p>Shrinking is deliberately driven by the provider rather than by counting tokens
+     * locally: it needs no tokenizer dependency, and it stays correct for any content and
+     * any model window, including ones whose ratio we have never measured.
+     *
+     * <p>Only CONTEXT_LENGTH shrinks. Every other category keeps its existing behaviour —
+     * retries and fail-open are unchanged — because shrinking the input answers nothing
+     * about a rate limit or a bad credential.
+     */
+    private <T> T embedWithShrink(LlmEmbeddingProvider provider, LlmCredentials credentials,
+                                  java.util.function.IntFunction<T> call, T failOpenValue,
+                                  int longestInput) {
+        // Anchor to what is actually being sent, not to the configured ceiling. Seeding
+        // from maxChars makes the first halvings no-ops whenever the input is already
+        // under it — the same bytes, resent and rejected — and leaves anything below
+        // maxChars/2^MAX_SHRINK_ATTEMPTS unable to shrink at all, which is the very
+        // document this method exists to rescue.
+        int budget = Math.min(maxChars, Math.max(longestInput, 1));
+        for (int shrink = 0; ; shrink++) {
+            final int attemptBudget = budget;
+            try {
+                // attemptOrThrow, not attempt: a CONTEXT_LENGTH rejection has to reach us
+                // unlogged. Fail-open would turn it into an empty vector indistinguishable
+                // from a real one, and the logging path would report a failure for a call
+                // that is about to succeed.
+                return attemptOrThrow(provider, credentials, () -> call.apply(attemptBudget));
+            } catch (RuntimeException e) {
+                LlmErrorCategory category = provider.classify(e);
+                if (category != LlmErrorCategory.CONTEXT_LENGTH
+                        || shrink >= MAX_SHRINK_ATTEMPTS
+                        || budget <= MIN_EMBEDDING_CHARS) {
+                    // Out of room to shrink, or not a length problem: honour the operator's
+                    // fail-open setting exactly as before this method existed. This is the
+                    // one place a terminal failure is logged.
+                    return handleFailure(category, credentials, e, failOpenValue, failOpen);
+                }
+                int next = Math.max(MIN_EMBEDDING_CHARS, budget / 2);
+                log.warn("Embedding rejected as too long at {} chars sent; retrying at {}", budget, next);
+                budget = next;
+            }
+        }
     }
 
     /**
@@ -110,10 +182,23 @@ public class EmbeddingService {
     public List<List<Double>> createEmbeddings(List<String> texts) {
         LlmCredentials credentials = requireCredentials();
         LlmEmbeddingProvider provider = registry.embeddingProvider(credentials.providerId());
-        List<String> truncated = texts.stream().map(this::truncate).toList();
-        return attempt(provider, credentials,
-                () -> provider.embedBatch(truncated, credentials),
-                Collections.nCopies(texts.size(), List.of()));
+        // The budget is per-request, not per-member, so a halving forced by one oversized
+        // text also trims every other member above the new budget. That is a real cost and
+        // not something this method can avoid: the provider rejects the request, not a
+        // document, and it does not say which member was at fault. Seeding from the
+        // longest member keeps the first halving meaningful; callers that cannot afford
+        // collateral truncation should embed individually.
+        //
+        // Note also that a provider may reject on the request's AGGREGATE token count, in
+        // which case trimming members is the right lever but the floor may be reached
+        // before the batch fits.
+        int longest = texts.stream().filter(java.util.Objects::nonNull)
+                .mapToInt(String::length).max().orElse(0);
+        return embedWithShrink(provider, credentials,
+                budget -> provider.embedBatch(
+                        texts.stream().map(t -> truncate(t, budget)).toList(), credentials),
+                Collections.nCopies(texts.size(), List.of()),
+                longest);
     }
 
     /**
@@ -166,10 +251,6 @@ public class EmbeddingService {
      * <p>The decision is {@link LlmErrorCategory#isRetryable()}, not a message substring:
      * that taxonomy exists precisely so retry policy stops being provider-specific.
      */
-    private <T> T attempt(LlmEmbeddingProvider provider, LlmCredentials credentials,
-                          Supplier<T> call, T failOpenValue) {
-        return attempt(provider, credentials, call, failOpenValue, failOpen);
-    }
 
     /**
      * As above, but with fail-open decided per call site rather than by configuration.
@@ -180,6 +261,25 @@ public class EmbeddingService {
      */
     private <T> T attempt(LlmEmbeddingProvider provider, LlmCredentials credentials,
                           Supplier<T> call, T failOpenValue, boolean mayFailOpen) {
+        try {
+            return attemptOrThrow(provider, credentials, call);
+        } catch (RuntimeException e) {
+            return handleFailure(provider.classify(e), credentials, e, failOpenValue, mayFailOpen);
+        }
+    }
+
+    /**
+     * The retry loop with no opinion about failure: exhausted retries rethrow.
+     *
+     * <p>Separating this from {@link #handleFailure} is what lets {@link #embedWithShrink}
+     * treat a CONTEXT_LENGTH rejection as a step in a working algorithm rather than an
+     * incident. Routing intermediate attempts through the logging path made every
+     * successful shrink emit "Embedding failed" and a stack trace for a call that then
+     * succeeded — noise that would fire any alert keyed on that string, and log a terminal
+     * failure twice with contradictory failOpen values.
+     */
+    private <T> T attemptOrThrow(LlmEmbeddingProvider provider, LlmCredentials credentials,
+                                 Supplier<T> call) {
         for (int retries = 0; ; retries++) {
             try {
                 return call.get();
@@ -187,7 +287,7 @@ public class EmbeddingService {
                 LlmErrorCategory category = provider.classify(e);
                 if (retries >= MAX_RETRY_ATTEMPTS || !category.isRetryable()
                         || !backoff(retries, category, credentials, retryAfterHint(provider, e))) {
-                    return handleFailure(category, credentials, e, failOpenValue, mayFailOpen);
+                    throw e;
                 }
             }
         }
