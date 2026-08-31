@@ -27,6 +27,12 @@ import java.util.Map;
 @Slf4j
 public class WorkloadAnalysisController {
 
+    // Reads use canReadContent; only `run` requires canManageContent. The reads were all
+    // gated on manage, which is the write tier — EffectiveConnectionAccess's own comment
+    // lists slow-query analytics under read. Latent today because every grant resolves to
+    // FULL_CONTENT (so both predicates are true), but it would deny the whole Workload tab
+    // to a read-only grant the moment one is reintroduced.
+
     private final WorkloadAnalysisService workloadAnalysisService;
     private final WorkloadAnalysisReportRepository reportRepository;
     private final AccessControlService accessControlService;
@@ -64,7 +70,7 @@ public class WorkloadAnalysisController {
     /** Lightweight poll payload — status + progress without the full report blob. */
     @GetMapping("/{connectionId}/status")
     public ResponseEntity<Map<String, Object>> status(@PathVariable String connectionId) {
-        accessControlService.assertCanManageConnectionContent(connectionId);
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return reportRepository.findFirstByConnectionIdOrderByStartedAtDesc(connectionId)
             .map(r -> ResponseEntity.ok(Map.<String, Object>of(
                 "reportId", r.getId(),
@@ -81,7 +87,7 @@ public class WorkloadAnalysisController {
     /** The full latest report (with the composed sections). 204 if none yet. */
     @GetMapping("/{connectionId}/latest")
     public ResponseEntity<WorkloadAnalysisReport> latest(@PathVariable String connectionId) {
-        accessControlService.assertCanManageConnectionContent(connectionId);
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return reportRepository.findFirstByConnectionIdOrderByStartedAtDesc(connectionId)
             .map(ResponseEntity::ok)
             .orElseGet(() -> ResponseEntity.noContent().build());
@@ -92,7 +98,7 @@ public class WorkloadAnalysisController {
     public ResponseEntity<WorkloadAnalysisReport> getReport(@PathVariable String reportId) {
         return reportRepository.findById(reportId)
             .map(r -> {
-                accessControlService.assertCanManageConnectionContent(r.getConnectionId());
+                accessControlService.assertCanReadConnectionContent(r.getConnectionId());
                 return ResponseEntity.ok(r);
             })
             .orElseGet(() -> ResponseEntity.notFound().build());
@@ -101,7 +107,7 @@ public class WorkloadAnalysisController {
     /** Recent report history (newest first), metadata only via the entity. */
     @GetMapping("/{connectionId}/history")
     public ResponseEntity<List<WorkloadAnalysisReport>> history(@PathVariable String connectionId) {
-        accessControlService.assertCanManageConnectionContent(connectionId);
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(reportRepository.findTop20ByConnectionIdOrderByStartedAtDesc(connectionId));
     }
 }
