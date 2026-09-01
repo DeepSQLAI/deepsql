@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { workloadAnalysisAPI } from "@/lib/api/client";
 import { HelpTooltip } from "@/components/tabs/Brain/components/HelpTooltip";
+import { QueryError } from "./components";
 import styles from "./WorkloadAnalysisPanel.module.css";
 
 const fmtMs = (v) => {
@@ -194,8 +195,17 @@ export default function WorkloadAnalysisPanel({ connectionId }) {
         </div>
       )}
 
+      {/* load failure — distinct from "never run", which looks identical otherwise */}
+      {latestQ.isError && (
+        <QueryError
+          error={latestQ.error}
+          what="workload analysis"
+          className={styles.empty}
+        />
+      )}
+
       {/* empty state — never run */}
-      {!latest && !latestQ.isLoading && (
+      {!latest && !latestQ.isLoading && !latestQ.isError && (
         <div className={styles.emptyState}>
           <Zap size={30} style={{ opacity: 0.4, marginBottom: 8 }} />
           <h3 className={styles.emptyTitle}>No workload analysis yet</h3>

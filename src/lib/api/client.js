@@ -3878,54 +3878,62 @@ export const slackDigestAPI = {
 export const slowQueryAnalyticsAPI = {
   getQueries: (connectionId) =>
     apiClient
-      .get(`/api/slow-query-analytics/${connectionId}/queries`)
+      .get(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/queries`)
       .then((r) => r.data),
   getTimeline: (connectionId, fingerprint) =>
     apiClient
-      .get(`/api/slow-query-analytics/${connectionId}/timeline/${fingerprint}`)
+      .get(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/timeline/${encodeURIComponent(fingerprint)}`)
       .then((r) => r.data),
   getRegressions: (connectionId, minFactor = 1.5) =>
     apiClient
-      .get(`/api/slow-query-analytics/${connectionId}/regressions`, {
+      .get(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/regressions`, {
         params: { minFactor },
       })
       .then((r) => r.data),
   getCustomers: (connectionId, fingerprint, day = null) =>
     apiClient
       .get(
-        `/api/slow-query-analytics/${connectionId}/query/${fingerprint}/customers`,
+        `/api/slow-query-analytics/${encodeURIComponent(connectionId)}/query/${encodeURIComponent(fingerprint)}/customers`,
         { params: day ? { day } : {} },
       )
       .then((r) => r.data),
   getSamples: (connectionId, fingerprint) =>
     apiClient
-      .get(`/api/slow-query-analytics/${connectionId}/query/${fingerprint}/samples`)
+      .get(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/query/${encodeURIComponent(fingerprint)}/samples`)
       .then((r) => r.data),
   listCustomers: (connectionId) =>
     apiClient
-      .get(`/api/slow-query-analytics/${connectionId}/customers`)
+      .get(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/customers`)
       .then((r) => r.data),
+  // customerId is a literal value from the tenant column, so it is application data and
+  // may contain "/", "?" or "#". It cannot go in a path segment: raw, the slash splits
+  // the path; percent-encoded, Jetty answers 400 "Ambiguous URI path separator". Both
+  // were reproduced with the real tenant value `acct/77?x=1`, whose rows silently showed
+  // as "no queries rolled up yet". axios encodes `params` for us.
   getCustomerQueries: (connectionId, customerId) =>
     apiClient
-      .get(`/api/slow-query-analytics/${connectionId}/customer/${customerId}/queries`)
+      .get(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/customer-queries`, {
+        params: { customerId },
+      })
       .then((r) => r.data),
   getCustomerQuerySamples: (connectionId, customerId, fingerprint) =>
     apiClient
       .get(
-        `/api/slow-query-analytics/${connectionId}/customer/${customerId}/query/${fingerprint}/samples`,
+        `/api/slow-query-analytics/${encodeURIComponent(connectionId)}/customer-query-samples`,
+        { params: { customerId, fingerprint } },
       )
       .then((r) => r.data),
   getTenantColumnSuggestions: (connectionId) =>
     apiClient
-      .get(`/api/slow-query-analytics/${connectionId}/tenant-column-suggestions`)
+      .get(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/tenant-column-suggestions`)
       .then((r) => r.data),
   getConfig: (connectionId) =>
     apiClient
-      .get(`/api/slow-query-analytics/${connectionId}/config`)
+      .get(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/config`)
       .then((r) => r.data),
   putConfig: (connectionId, body) =>
     apiClient
-      .put(`/api/slow-query-analytics/${connectionId}/config`, body)
+      .put(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/config`, body)
       .then((r) => r.data),
   analyzeNow: (connectionId) =>
     apiClient

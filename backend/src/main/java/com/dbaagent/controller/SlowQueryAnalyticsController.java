@@ -78,7 +78,41 @@ public class SlowQueryAnalyticsController {
         return ResponseEntity.ok(analyticsService.listCustomers(connectionId));
     }
 
-    /** Every slow query attributed to one customer, ranked by their mean exec time. */
+    /**
+     * Every slow query attributed to one customer, ranked by their mean exec time.
+     *
+     * <p>The customer id is a <b>query parameter</b>, not a path segment, because it is a
+     * literal value read out of the tenant column — application data, which can contain
+     * {@code /}, {@code ?} or {@code #}. Such an id is unreachable as a path segment under
+     * any encoding: raw, the slash splits the path; percent-encoded, Jetty rejects it with
+     * {@code 400 Ambiguous URI path separator}. Both were reproduced against this backend
+     * with the tenant value {@code acct/77?x=1}, whose rows were simply invisible in the
+     * By-Customer view.
+     */
+    @GetMapping("/{connectionId}/customer-queries")
+    public ResponseEntity<List<SlowQueryAnalyticsService.CustomerQueryRow>> customerQueries(
+            @PathVariable String connectionId,
+            @RequestParam String customerId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
+        return ResponseEntity.ok(analyticsService.queriesForCustomer(connectionId, customerId));
+    }
+
+    /** Literal-bearing samples for one (customer, query) pair — copyable SQL. */
+    @GetMapping("/{connectionId}/customer-query-samples")
+    public ResponseEntity<List<SlowQueryAnalyticsService.QuerySample>> customerQuerySamples(
+            @PathVariable String connectionId,
+            @RequestParam String customerId,
+            @RequestParam String fingerprint) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
+        return ResponseEntity.ok(
+            analyticsService.samplesForCustomerQuery(connectionId, customerId, fingerprint));
+    }
+
+    /**
+     * @deprecated superseded by {@link #customerQueries}; a customer id containing a
+     *     slash cannot be expressed here. Retained so existing clients keep working.
+     */
+    @Deprecated
     @GetMapping("/{connectionId}/customer/{customerId}/queries")
     public ResponseEntity<List<SlowQueryAnalyticsService.CustomerQueryRow>> queriesForCustomer(
             @PathVariable String connectionId,
@@ -87,7 +121,10 @@ public class SlowQueryAnalyticsController {
         return ResponseEntity.ok(analyticsService.queriesForCustomer(connectionId, customerId));
     }
 
-    /** Literal-bearing samples for one (customer, query) pair — copyable SQL. */
+    /**
+     * @deprecated superseded by {@link #customerQuerySamples}; see above.
+     */
+    @Deprecated
     @GetMapping("/{connectionId}/customer/{customerId}/query/{fingerprint}/samples")
     public ResponseEntity<List<SlowQueryAnalyticsService.QuerySample>> samplesForCustomerQuery(
             @PathVariable String connectionId,

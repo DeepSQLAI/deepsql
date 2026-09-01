@@ -21,6 +21,7 @@ import { RefreshCw, TrendingUp, AlertTriangle, Clock, Users, Copy, Check, FileTe
 import { slowQueryAnalyticsAPI } from "@/lib/api/client";
 import { useConnectionManager } from "@/lib/hooks/useConnectionManager";
 import SlowQuerySourceModal from "@/components/SlowQuerySourceModal";
+import { QueryError } from "./components";
 import styles from "./QueryTrendsTab.module.css";
 
 /** Human-readable duration: ms under a second, seconds under a minute, else minutes. */
@@ -356,7 +357,10 @@ export default function QueryTrendsTab({ connectionId }) {
               <div className={styles.chartCard}>
                 <div className={styles.cardTitle}>Mean execution time / day</div>
                 {timelineQ.isLoading && <div className={styles.muted}>Loading timeline…</div>}
-                {!timelineQ.isLoading && timeline.length === 0 && (
+                {timelineQ.isError && (
+                  <QueryError error={timelineQ.error} what="timeline" className={styles.muted} />
+                )}
+                {!timelineQ.isLoading && !timelineQ.isError && timeline.length === 0 && (
                   <div className={styles.muted}>No timeline data yet for this query.</div>
                 )}
                 {timeline.length > 0 && (
@@ -405,7 +409,10 @@ export default function QueryTrendsTab({ connectionId }) {
                   <Users size={14} /> Per-customer breakdown
                 </div>
                 {customersQ.isLoading && <div className={styles.muted}>Loading…</div>}
-                {!customersQ.isLoading && customers.length === 0 && (
+                {customersQ.isError && (
+                  <QueryError error={customersQ.error} what="customer breakdown" className={styles.muted} />
+                )}
+                {!customersQ.isLoading && !customersQ.isError && customers.length === 0 && (
                   <div className={styles.muted}>
                     No per-customer data for this query — it isn’t filtered by the
                     tenant column, or no literal-bearing sample was captured.

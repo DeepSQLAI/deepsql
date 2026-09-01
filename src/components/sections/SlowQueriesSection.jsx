@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Activity, FileText, LineChart, Settings, Users } from 'lucide-react'
 import { useConnectionManager } from '@/lib/hooks/useConnectionManager'
 import { useSlowLogSourceConfig } from '@/lib/hooks/queries'
@@ -33,6 +33,28 @@ const LOG_SOURCE_HELP = {
 export default function SlowQueriesSection() {
   const { connectionId, selectedConnection } = useConnectionManager()
   const [tab, setTab] = useState('trends')
+  const tabRefs = useRef({})
+
+  /** Arrow / Home / End move between tabs, as the ARIA tabs pattern expects. */
+  const onTabKeyDown = (e) => {
+    const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key]
+    if (step === undefined && e.key !== 'Home' && e.key !== 'End') return
+    e.preventDefault()
+    // Resolve the next tab from the *current* state, not the `tab` captured when this
+    // handler was created: two keypresses within one render would otherwise both move
+    // relative to the same starting index and selection would stick after the first.
+    setTab((current) => {
+      const i = TABS.findIndex((t) => t.id === current)
+      const next = e.key === 'Home' ? 0
+        : e.key === 'End' ? TABS.length - 1
+        : (i + step + TABS.length) % TABS.length
+      const id = TABS[next].id
+      // Focus follows selection, per the ARIA tabs pattern. Deferred so the tab is
+      // already rendered with tabIndex=0 when we focus it.
+      queueMicrotask(() => tabRefs.current[id]?.focus())
+      return id
+    })
+  }
   const [logSourceModalOpen, setLogSourceModalOpen] = useState(false)
   const logSourceQ = useSlowLogSourceConfig(connectionId)
   const hasLogSource = Boolean(logSourceQ.data?.id)
@@ -86,16 +108,28 @@ export default function SlowQueriesSection() {
       ) : (
         <>
           <div className={styles.toolbar}>
-            <div className={styles.tabBar} role="tablist" aria-label="Performance views">
+            <div
+              className={styles.tabBar}
+              role="tablist"
+              aria-label="Performance views"
+              onKeyDown={onTabKeyDown}
+            >
               {TABS.map((t) => {
                 const Icon = t.icon
                 const active = tab === t.id
                 return (
                   <button
                     key={t.id}
+                    id={`perf-tab-${t.id}`}
                     type="button"
                     role="tab"
                     aria-selected={active}
+                    aria-controls={`perf-panel-${t.id}`}
+                    // Roving tabindex: the tablist is one tab stop and the arrow keys move
+                    // within it, per the ARIA tabs pattern. Without it every tab was its
+                    // own stop and arrow keys did nothing.
+                    tabIndex={active ? 0 : -1}
+                    ref={(el) => { tabRefs.current[t.id] = el }}
                     className={`${styles.tabButton} ${active ? styles.tabButtonActive : ''}`}
                     onClick={() => setTab(t.id)}
                   >
@@ -115,7 +149,13 @@ export default function SlowQueriesSection() {
             </button>
           </div>
 
-          <div className={styles.content}>
+          <div
+            className={styles.content}
+            role="tabpanel"
+            id={`perf-panel-${tab}`}
+            aria-labelledby={`perf-tab-${tab}`}
+            tabIndex={0}
+          >
             {tab === 'trends' && <QueryTrendsTab connectionId={connectionId} />}
             {tab === 'customers' && <CustomerExplorer connectionId={connectionId} />}
             {tab === 'workload' && <WorkloadAnalysisPanel connectionId={connectionId} />}
