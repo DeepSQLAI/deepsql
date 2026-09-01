@@ -58,6 +58,12 @@ jobs:
         run: ${{ matrix.os == 'ubuntu-latest' && 'xvfb-run --auto-servernum npm run selftest:tunnel' || 'npm run selftest:tunnel' }}
         shell: bash
 
+      - name: Install Linux packaging tools
+        if: matrix.os == 'ubuntu-latest'
+        # electron-builder's rpm target shells out to rpmbuild; ubuntu-latest
+        # runners do not ship it by default.
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
       - name: Build installers
         working-directory: desktop
         env:
