@@ -1,9 +1,15 @@
 {
   "name": "deepsql-desktop",
   "productName": "DeepSQL",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "private": true,
   "description": "DeepSQL desktop client \u2014 connect to a self-hosted DeepSQL VM over TLS or an SSH tunnel.",
+  "homepage": "https://github.com/DeepSQLAI/deepsql",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DeepSQLAI/deepsql.git",
+    "directory": "desktop"
+  },
   "license": "Apache-2.0",
   "author": {
     "name": "DeepSQL",
