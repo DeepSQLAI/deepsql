@@ -53,9 +53,13 @@ of the transport layer knows or cares which one is in use.
 | Windows | `DeepSQL Setup <version>.exe` (NSIS), portable `.exe` |
 | Linux | `.AppImage`, `.deb`, `.rpm` |
 
-macOS builds are unsigned unless you supply signing credentials, so the first
-launch needs **right-click → Open** (or `xattr -dr com.apple.quarantine
-/Applications/DeepSQL.app`).
+macOS builds are unsigned unless you supply signing credentials, so Gatekeeper
+blocks a normal double-click on first launch (&ldquo;DeepSQL&rdquo; Not Opened).
+Use one of:
+
+1. **Right-click → Open** on `DeepSQL.app`, then click **Open** in the dialog.
+2. **System Settings → Privacy & Security → Open Anyway** after the block.
+3. Terminal: `xattr -dr com.apple.quarantine /Applications/DeepSQL.app`
 
 ### From source
 

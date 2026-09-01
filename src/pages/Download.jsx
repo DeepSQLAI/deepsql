@@ -240,6 +240,8 @@ export default function Download() {
               </div>
             )}
 
+            {detected === 'mac' && <MacGatekeeperNotice />}
+
             {Object.entries(PLATFORMS).map(([key, meta]) => {
               const assets = grouped[key] || []
               if (!assets.length) return null
@@ -328,17 +330,49 @@ function PlatformSection({ platform, assets, highlight, showMacNote }) {
         ))}
       </div>
 
-      {showMacNote && (
-        <p className="mt-3 text-xs text-gray-400 leading-relaxed">
-          Builds are unsigned unless signing credentials are configured, so the first
-          launch needs <span className="text-gray-600">right-click → Open</span> (or{' '}
-          <code className="text-gray-600">
-            xattr -dr com.apple.quarantine /Applications/DeepSQL.app
-          </code>
-          ).
-        </p>
-      )}
+      {showMacNote && <MacGatekeeperNotice compact />}
     </section>
+  )
+}
+
+/** macOS builds ship unsigned unless signing secrets are configured in CI. */
+function MacGatekeeperNotice({ compact = false }) {
+  return (
+    <div
+      className={`rounded-xl border border-amber-200 bg-amber-50 text-amber-950 ${
+        compact ? 'mt-3 px-4 py-3' : 'mb-10 px-5 py-4'
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="h-4 w-4 text-amber-700 mt-0.5 shrink-0" />
+        <div className="text-sm leading-relaxed">
+          <p className={`font-semibold text-amber-950 ${compact ? 'mb-1' : 'mb-2'}`}>
+            macOS may block the first launch
+          </p>
+          <p className="text-amber-900/90 mb-3">
+            Installers are not Apple-notarized yet, so double-clicking can show
+            &ldquo;DeepSQL&rdquo; Not Opened with only <strong>Done</strong> and{' '}
+            <strong>Move to Trash</strong>. That is expected — use one of these instead:
+          </p>
+          <ol className="list-decimal pl-5 space-y-2 text-amber-900/90">
+            <li>
+              In Finder, <strong>right-click DeepSQL.app → Open</strong>, then click{' '}
+              <strong>Open</strong> in the dialog. You only need to do this once.
+            </li>
+            <li>
+              Or open <strong>System Settings → Privacy &amp; Security</strong>, scroll
+              down after the block, and click <strong>Open Anyway</strong>.
+            </li>
+            <li>
+              Or run in Terminal:{' '}
+              <code className="text-xs bg-amber-100/80 px-1.5 py-0.5 rounded">
+                xattr -dr com.apple.quarantine /Applications/DeepSQL.app
+              </code>
+            </li>
+          </ol>
+        </div>
+      </div>
+    </div>
   )
 }
 
