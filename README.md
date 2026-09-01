@@ -248,7 +248,13 @@ your schema — all from one shared brain.
 ### DeepSQL Desktop (optional)
 
 A thin Electron client for a self-hosted VM — direct TLS or an in-process SSH tunnel —
-without bundling a second copy of the web UI. Separate npm project:
+without bundling a second copy of the web UI.
+
+**Download installers** (macOS, Windows, Linux) from the public page at `/download` on
+your DeepSQL instance, or browse
+[GitHub Releases](https://github.com/DeepSQLAI/deepsql/releases) for `desktop-v*` tags.
+
+To build from source (separate npm project):
 
 ```bash
 cd desktop
