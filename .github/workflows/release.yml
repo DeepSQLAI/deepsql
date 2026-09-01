@@ -49,7 +49,7 @@ jobs:
           sha512sum -c SHA512SUMS
 
       - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deepsql-${{ github.ref_name }}
           path: release-artifacts/${{ github.ref_name }}/
