@@ -411,6 +411,12 @@ export const queryKeys = {
   },
 
   // ==================== Saved Items ====================
+  llmUsage: {
+    summary: (days) => ["llmUsage", "summary", days],
+    recent: (days, page, size) => ["llmUsage", "recent", days, page, size],
+    pricing: () => ["llmUsage", "pricing"],
+  },
+
   savedQueries: {
     all: (connectionId) => ["savedQueries", connectionId],
     detail: (id) => ["savedQueries", "detail", id],

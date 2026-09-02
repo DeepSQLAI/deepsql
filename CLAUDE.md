@@ -311,6 +311,82 @@ embedding model and read through another raises no error — retrieval just degr
 (pgvector's `text`-column fallback has no dimension constraint and cosine similarity still
 returns a number).
 
+## LLM Usage & Cost Accounting
+
+Every model call writes one `llm_usage` row (`V119__create_llm_usage.sql`), surfaced at
+**Settings → AI Usage & Cost** (`LlmUsageTab.jsx`) via `GET /admin/llm-usage/summary`.
+Admin-only and not connection-scoped, so it carries a class-level `@PreAuthorize` rather
+than an `assertCan*` call — the case `Endpoint Authorization Rules` describes as
+"an endpoint with no connection scope at all is admin-only".
+
+- **Recording happens at the two provider funnels, never in feature code.**
+  `RefreshableChatModel.call/stream` and `EmbeddingService.createEmbedding(s)` are the only
+  call sites, so a thirteenth service that reaches a model is accounted for without
+  touching it. `LlmUsageRecorder` swallows its own failures by design: accounting must
+  never be able to break the call it measures.
+- **Rows are written in their own transaction** (`LlmUsageWriter`, `REQUIRES_NEW`). It is a
+  separate bean on purpose — self-invoking a `@Transactional` method bypasses the Spring
+  proxy, and the row would then roll back with a failed chat turn, which is exactly the
+  case it exists to record. Same trap `McpTokenRepository.deleteByUserId` documents.
+- **`estimated` distinguishes metered from derived counts.** Chat providers return real
+  token counts; `LlmEmbeddingProvider` returns vectors only, so embedding tokens are
+  derived from input length at 3 chars/token (schema text is denser than prose — see
+  `EmbeddingService.truncate`). Both land in the same columns so one spend total is
+  possible, but a vendor-invoice reconciliation can tell the halves apart.
+- **An unpriced model stores `NULL` cost, never `0`.** `LlmPricingService` reads rates from
+  `system_config` (`llm.pricing.<model>.{input,output,cached-input}-per-1m`) and ships **no
+  default prices** — a stale bundled price list produces confident wrong totals nobody
+  thinks to check. The UI reports unpriced calls rather than silently understating spend.
+- **Rates are edited in the UI**, in the Model pricing panel of the same tab
+  (`LlmPricingPanel.jsx` → `GET|PUT /admin/llm-usage/pricing`). The list is every model the
+  ledger has seen plus every model with a rate configured, unpriced first. Writes take
+  effect on the next call with no restart, since `LlmPricingService` reads `system_config`
+  per call. Three details are load-bearing:
+  - **A cleared field writes `""`, not a deleted row.** `rate()` already treats blank as
+    absent, and `SystemConfigService` has no delete — adding one for a single caller would
+    widen a shared service. Sending the whole set means an emptied box genuinely clears
+    that rate rather than leaving the old value behind.
+  - **A model name can contain dots** (`gpt-5.4`), so `configuredModels()` strips the known
+    suffix from the *end* of the key. Splitting on the first `.` after the prefix reports
+    `gpt-5` and loses the row. The controller mapping is `{model:.+}` for the same reason.
+  - **A name containing a slash cannot go in the path at all**, even percent-encoded:
+    Spring Security's default `StrictHttpFirewall` rejects `%2F` with a bare 400 before any
+    controller runs — verified in QA, and it applies to every endpoint, not just this one.
+    Self-hosted ids look like `meta-llama/Llama-3-8b`, so `PUT /pricing` (no path segment)
+    takes the name in the body, and `client.js` switches to it when the name contains `/`.
+    Relaxing the firewall would be the wrong trade for a naming convenience.
+  - **A failed save must still say so.** Spring's default 500 body carries no `message`, so
+    the client had nothing to display and a save against a broken config store showed the
+    user *nothing at all* — no error, no toast, silent. The handler now returns a `message`
+    on any non-`IllegalArgumentException` failure, and the panel catches the `mutateAsync`
+    rejection rather than letting it escape the click handler (an uncaught rejection there
+    is what stopped the `isError` banner from rendering). Both found by taking
+    `system_config` away mid-save.
+  - **A negative rate is rejected at write time**, not just ignored on read: a value that
+    silently does nothing after the UI said "Saved" is worse than an error at entry.
+- **Editing a rate does not re-cost recorded calls.** `estimated_cost_usd` is a snapshot
+  written at record time, which is what an audit trail wants — but it means a mid-window
+  price change shows as a step in the daily chart, not a uniform restatement. The panel
+  says so.
+- **Attribution cannot ride a ThreadLocal alone.** `LlmUsageAttributionFilter` labels each
+  request from its URI, but chat returns a `Flux` and does its model work later on a
+  `CompletableFuture` — the servlet, and any thread-local set during it, is gone by then.
+  `ChatService` re-establishes `LlmUsageContext.with(...)` inside `runAsync` exactly where
+  it already re-establishes `QueryActorContextHolder.withActor`; `DashboardAlertService`
+  declares its own scope since scheduled work has no request at all. Verified live: every
+  row read `feature = unknown` until this was added, while a single-threaded unit test of
+  the filter passed.
+- **`ResponsesApiChatModel.buildMetadata` used to discard `usage` entirely**, which cost
+  nothing while nothing read it and became a silent zero the moment accounting summed it —
+  real billed calls recorded 0 tokens and $0.00. It now reads both dialects
+  (`prompt_tokens`/`completion_tokens` and `input_tokens`/`output_tokens`) plus cached-token
+  details, and the streaming path sends `stream_options.include_usage` and emits the late
+  usage event as a text-free chunk. `RefreshableChatModel.meteredStream` records **one row
+  per stream**, taking the last reported usage rather than summing chunks: providers that
+  report running totals would otherwise have every partial added to the final figure.
+- Usage belongs to `QueryActorContextHolder` first and the security principal second, so
+  under **View as** the spend is attributed to the target user, not the admin.
+
 ## Key Rules & Patterns
 
 ### Backend Rules
@@ -853,6 +929,10 @@ DEEPSQL_EMBEDDING_API_KEY=<key>
 DEEPSQL_EMBEDDING_MODEL=text-embedding-3-large
 # Optional chat tuning: DEEPSQL_CHAT_TEMPERATURE, DEEPSQL_CHAT_API_VERSION,
 # DEEPSQL_CHAT_USE_RESPONSES_API (true|false|auto).
+# Model prices are NOT environment variables. They live in system_config and are edited in
+# Settings -> AI Usage & Cost -> Model pricing; there are deliberately no defaults:
+#   llm.pricing.<model>.input-per-1m / .output-per-1m / .cached-input-per-1m
+# An unpriced model still records tokens; its cost is NULL and the UI flags it.
 
 # Only if using Azure AI Search instead of pgvector for the vector store.
 azure.search.api-key=<key>

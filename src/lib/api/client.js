@@ -479,6 +479,47 @@ export const adminAPI = {
   },
 };
 
+// LLM usage and cost accounting (ADMIN only)
+export const llmUsageAPI = {
+  getSummary: async (days = 30) => {
+    const response = await apiClient.get("/api/admin/llm-usage/summary", {
+      params: { days },
+    });
+    return response.data;
+  },
+
+  getRecent: async ({ days = 30, page = 0, size = 50 } = {}) => {
+    const response = await apiClient.get("/api/admin/llm-usage/recent", {
+      params: { days, page, size },
+    });
+    return response.data;
+  },
+
+  purge: async (olderThanDays) => {
+    const response = await apiClient.delete("/api/admin/llm-usage/purge", {
+      params: { olderThanDays },
+    });
+    return response.data;
+  },
+
+  getPricing: async () => {
+    const response = await apiClient.get("/api/admin/llm-usage/pricing");
+    return response.data;
+  },
+
+  // A dotted name (gpt-5.4) travels fine in the path, but a slash cannot: Spring
+  // Security's StrictHttpFirewall rejects %2F with a bare 400 before the controller
+  // runs. Self-hosted ids look like meta-llama/Llama-3-8b, so those go in the body
+  // instead, against the pathless route.
+  updatePricing: async (model, rates) => {
+    const url = model.includes("/")
+      ? "/api/admin/llm-usage/pricing"
+      : `/api/admin/llm-usage/pricing/${encodeURIComponent(model)}`;
+    const response = await apiClient.put(url, { ...rates, model });
+    return response.data;
+  },
+};
+
 export const slackLinkAPI = {
   getCurrentLinkCode: async () => {
     const response = await apiClient.get('/api/slack/link/code')

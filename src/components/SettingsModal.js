@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Users, Settings, Shield, Activity, KeyRound } from "lucide-react";
+import { X, Users, Settings, Shield, Activity, KeyRound, Coins } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { PERMISSIONS } from "@/lib/permissions";
 import AdminWorkspaceSettings from "@/components/settings/AdminWorkspaceSettings";
@@ -9,6 +9,7 @@ import SlackAccessCodePanel from "@/components/settings/SlackAccessCodePanel";
 import McpTokensPanel from "@/components/settings/McpTokensPanel";
 import UsersTab from "./tabs/admin/UsersTab";
 import AuditLogsTab from "./tabs/admin/AuditLogsTab";
+import LlmUsageTab from "./tabs/admin/LlmUsageTab";
 import styles from "./SettingsModal.module.css";
 
 export default function SettingsModal({ isOpen, onClose }) {
@@ -56,6 +57,12 @@ export default function SettingsModal({ isOpen, onClose }) {
             label: "Audit Logs",
             description: "Review editor and security activity",
           },
+          {
+            id: "llm-usage",
+            icon: Coins,
+            label: "AI Usage & Cost",
+            description: "Track model spend by feature and user",
+          },
         ]
       : []),
     {
@@ -86,6 +93,8 @@ export default function SettingsModal({ isOpen, onClose }) {
         return isAdmin ? <UsersTab /> : null;
       case "audit-logs":
         return isAdmin ? <AuditLogsTab /> : null;
+      case "llm-usage":
+        return isAdmin ? <LlmUsageTab /> : null;
       case "mcp-tokens":
         return <McpTokensPanel />;
       case "general":

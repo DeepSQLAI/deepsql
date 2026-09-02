@@ -6,6 +6,8 @@ import com.dbaagent.llm.api.LlmCredentials;
 import com.dbaagent.llm.api.LlmEmbeddingProvider;
 import com.dbaagent.llm.api.LlmErrorCategory;
 import com.dbaagent.llm.api.LlmNotConfiguredException;
+import com.dbaagent.model.LlmUsageRole;
+import com.dbaagent.service.llm.LlmUsageRecorder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,6 +39,9 @@ public class EmbeddingService {
     private static final int MIN_EMBEDDING_CHARS = 1_000;
     private static final long RETRY_BACKOFF_MS = 750L;
 
+    /** See {@link #recordEmbeddingUsage}: schema text is denser than prose. */
+    private static final int ESTIMATED_CHARS_PER_TOKEN = 3;
+
     /**
      * Ceiling on a provider-supplied {@code Retry-After}. Brain init embeds documents on
      * a bounded worker pool, so a long sleep here stalls the whole stage; 30s is longer
@@ -60,6 +65,18 @@ public class EmbeddingService {
      */
     private final ConcurrentHashMap<String, Integer> dimensionsBySignature =
             new ConcurrentHashMap<>();
+
+    /**
+     * Usage accounting. Injected through a setter rather than the constructor so the three
+     * existing test seams below keep working unchanged, and so a null recorder (any test
+     * constructing this directly) simply means "do not account".
+     */
+    private LlmUsageRecorder usageRecorder;
+
+    @Autowired(required = false)
+    public void setUsageRecorder(LlmUsageRecorder usageRecorder) {
+        this.usageRecorder = usageRecorder;
+    }
 
     @Autowired
     public EmbeddingService(
@@ -116,10 +133,21 @@ public class EmbeddingService {
     public List<Double> createEmbedding(String text) {
         LlmCredentials credentials = requireCredentials();
         LlmEmbeddingProvider provider = registry.embeddingProvider(credentials.providerId());
-        return embedWithShrink(provider, credentials,
-                budget -> provider.embed(truncate(text, budget), credentials),
-                List.of(),
-                text == null ? 0 : text.length());
+        long startedAt = System.nanoTime();
+        try {
+            List<Double> result = embedWithShrink(provider, credentials,
+                    budget -> provider.embed(truncate(text, budget), credentials),
+                    List.of(),
+                    text == null ? 0 : text.length());
+            // Fail-open returns an empty vector for a call that actually failed. Recording
+            // that as a success would put phantom tokens on the ledger for work the
+            // provider never did.
+            recordEmbeddingUsage(credentials, charsOf(text), startedAt, !result.isEmpty(), null);
+            return result;
+        } catch (RuntimeException e) {
+            recordEmbeddingUsage(credentials, charsOf(text), startedAt, false, e);
+            throw e;
+        }
     }
 
     /**
@@ -194,11 +222,72 @@ public class EmbeddingService {
         // before the batch fits.
         int longest = texts.stream().filter(java.util.Objects::nonNull)
                 .mapToInt(String::length).max().orElse(0);
-        return embedWithShrink(provider, credentials,
-                budget -> provider.embedBatch(
-                        texts.stream().map(t -> truncate(t, budget)).toList(), credentials),
-                Collections.nCopies(texts.size(), List.of()),
-                longest);
+        long totalChars = texts.stream().filter(java.util.Objects::nonNull)
+                .mapToLong(String::length).sum();
+        long startedAt = System.nanoTime();
+        try {
+            List<List<Double>> result = embedWithShrink(provider, credentials,
+                    budget -> provider.embedBatch(
+                            texts.stream().map(t -> truncate(t, budget)).toList(), credentials),
+                    Collections.nCopies(texts.size(), List.of()),
+                    longest);
+            boolean succeeded = result.stream().anyMatch(v -> !v.isEmpty());
+            recordEmbeddingUsage(credentials, totalChars, startedAt, succeeded, null);
+            return result;
+        } catch (RuntimeException e) {
+            recordEmbeddingUsage(credentials, totalChars, startedAt, false, e);
+            throw e;
+        }
+    }
+
+    private static long charsOf(String text) {
+        return text == null ? 0L : text.length();
+    }
+
+    /**
+     * Records one embedding call with <em>estimated</em> token counts.
+     *
+     * <p>{@link LlmEmbeddingProvider} returns vectors and nothing else — no usage block —
+     * so unlike the chat path there is no metered figure to store. Rather than leave
+     * embeddings out of the ledger (they are a real and, during a Brain rebuild, large
+     * cost) the count is derived from input length and the row is flagged
+     * {@code estimated}, so a reconciliation against the vendor invoice can tell the two
+     * halves apart.
+     *
+     * <p>The divisor is deliberately 3, not the widely-quoted 4. This service embeds
+     * schema and relationship documents — dense identifiers, underscores, punctuation —
+     * which tokenize closer to 2-3 characters per token, a fact {@link #truncate} already
+     * documents from the same content. Four would understate the bill on exactly the
+     * workload that dominates it.
+     *
+     * <p>Never throws: accounting must not be able to fail an indexing run.
+     */
+    private void recordEmbeddingUsage(LlmCredentials credentials, long chars,
+                                      long startedAt, boolean succeeded, RuntimeException failure) {
+        if (usageRecorder == null) {
+            return;
+        }
+        try {
+            long promptTokens = succeeded ? Math.max(0, chars) / ESTIMATED_CHARS_PER_TOKEN : 0;
+            String errorCategory = failure == null ? null
+                    : String.valueOf(registry.embeddingProvider(credentials.providerId())
+                            .classify(failure));
+
+            usageRecorder.record(new LlmUsageRecorder.Call(
+                    LlmUsageRole.EMBEDDING,
+                    credentials.providerId(),
+                    credentials.getOrDefault("model", "unknown"),
+                    promptTokens,
+                    0,
+                    promptTokens,
+                    0,
+                    true,
+                    (System.nanoTime() - startedAt) / 1_000_000L,
+                    succeeded,
+                    errorCategory));
+        } catch (RuntimeException e) {
+            log.warn("Could not record embedding usage; the embedding itself was unaffected", e);
+        }
     }
 
     /**
