@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { authAPI, setupAPI } from '@/lib/api/client'
-import { ArrowLeft, Database, KeyRound, Mail, ShieldCheck, Sparkles, Zap, Activity, LineChart } from 'lucide-react'
+import { ArrowLeft, Database, Download, KeyRound, Mail, ShieldCheck, Sparkles, Zap, Activity, LineChart } from 'lucide-react'
 
 const STEP_LOGIN = 'login'
 const STEP_OTP = 'otp'
@@ -303,6 +303,14 @@ export default function Login() {
               </div>
             ))}
           </div>
+
+          <Link
+            to="/download"
+            className="mt-10 inline-flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Download DeepSQL Desktop
+          </Link>
         </div>
       </div>
 
@@ -352,8 +360,13 @@ export default function Login() {
           )}
         </div>
 
-        <div className="absolute bottom-6 left-0 right-0 text-center text-gray-500 text-sm px-6">
-          &copy; 2026 DeepSQL. Built for developers who love databases.
+        <div className="absolute bottom-6 left-0 right-0 text-center text-gray-500 text-sm px-6 space-y-1">
+          <p>
+            <Link to="/download" className="text-gray-600 hover:text-gray-900 underline underline-offset-2">
+              Download DeepSQL Desktop
+            </Link>
+          </p>
+          <p>&copy; 2026 DeepSQL. Built for developers who love databases.</p>
         </div>
       </div>
     </div>
