@@ -90,11 +90,27 @@ Every row verified against a live instance via `pg_locks` and
 | `RENAME COLUMN` | AccessExclusive | no | SAFE (breaks app code, not the DB) |
 | `CREATE INDEX` | AccessExclusive + Share | n/a | DANGER: blocks writes for the build |
 | `CREATE INDEX CONCURRENTLY` | ShareUpdateExclusive | n/a | SAFE, can leave an invalid index |
+| `ADD CHECK` (validating) | AccessExclusive | no | CAUTION (full scan to validate) |
+| `ADD CHECK ... NOT VALID` | AccessExclusive | no | SAFE (no scan; validate separately) |
+| `ADD FOREIGN KEY` (validating) | ShareRowExclusive **on both tables** | no | DANGER: blocks writes on the referenced table too |
+| `ADD FOREIGN KEY ... NOT VALID` | ShareRowExclusive on both tables | no | CAUTION (still locks both, but skips the scan) |
+| `VALIDATE CONSTRAINT` | ShareUpdateExclusive | no | SAFE (concurrent writes allowed) |
 
 **Lock type and duration are independent axes.** `ADD COLUMN` with no default takes
 AccessExclusive — the strongest lock — yet is harmless because it is held for
 milliseconds. The same lock across a 48M-row rewrite is the outage. The tool must
 report both; reporting the lock name alone is alarming and useless.
+
+**A statement can lock tables it does not name.** `ADD FOREIGN KEY` takes
+`ShareRowExclusiveLock` on the *referenced* table as well as the altered one —
+measured, and the reason `child`-side migrations cause unexplained write stalls on
+a parent table nobody touched. The output therefore reports locks **per table**,
+not as a single field, and names every table affected.
+
+`NOT VALID` is the alternative worth surfacing for both constraint types: it takes
+the same lock but skips the validating scan, so the expensive half moves to a
+separate `VALIDATE CONSTRAINT` that runs under `ShareUpdateExclusiveLock` and
+allows concurrent writes. Two cheap steps instead of one long block.
 
 ### Output shape
 
@@ -105,8 +121,9 @@ report both; reporting the lock name alone is alarming and useless.
   "safeToRun": false,
   "operation": "ADD_COLUMN",
   "table": "orders",
-  "lockMode": "AccessExclusiveLock",
-  "blocks": ["read", "write"],
+  "locks": [
+    { "table": "orders", "mode": "AccessExclusiveLock", "blocks": ["read", "write"] }
+  ],
   "rewritesTable": true,
   "tableRows": 48000000,
   "tableSizeBytes": 9200000000,
@@ -119,7 +136,9 @@ report both; reporting the lock name alone is alarming and useless.
 ```
 
 `estimatedDuration` is a coarse bucket, never a false-precision number — real time
-depends on disk, cache and load.
+depends on disk, cache and load, none of which table size predicts. A numeric
+range would imply an accuracy the inputs cannot support; the bucket is the
+honest form of the answer.
 
 ### Placement
 
