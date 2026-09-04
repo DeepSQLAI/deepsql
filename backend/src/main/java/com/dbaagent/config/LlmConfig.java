@@ -4,6 +4,7 @@ import com.dbaagent.llm.LlmConfigResolver;
 import com.dbaagent.llm.LlmProviderRegistry;
 import com.dbaagent.llm.spring.ProviderBackedEmbeddingModel;
 import com.dbaagent.service.EmbeddingService;
+import com.dbaagent.service.llm.LlmUsageRecorder;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.context.annotation.Bean;
@@ -24,8 +25,9 @@ public class LlmConfig {
 
     @Bean
     @Primary
-    public ChatModel chatModel(LlmConfigResolver resolver, LlmProviderRegistry registry) {
-        return new RefreshableChatModel(resolver, registry);
+    public ChatModel chatModel(LlmConfigResolver resolver, LlmProviderRegistry registry,
+                               LlmUsageRecorder usageRecorder) {
+        return new RefreshableChatModel(resolver, registry, usageRecorder);
     }
 
     /**
