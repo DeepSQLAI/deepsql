@@ -65,6 +65,9 @@ public class DdlStatementParser {
     private Optional<DdlFacts> fromAlter(Alter alter, String rawSql, boolean notValid) {
         List<AlterExpression> exprs = alter.getAlterExpressions();
         if (exprs == null || exprs.isEmpty()) return Optional.empty();
+        // A single DdlFacts cannot honestly represent more than one clause; refuse rather than
+        // judge the statement on the first clause alone.
+        if (exprs.size() > 1) return Optional.empty();
         AlterExpression e = exprs.get(0);
         String table = strip(alter.getTable().getName());
         String op = e.getOperation() == null ? "" : e.getOperation().name().toUpperCase(Locale.ROOT);
@@ -84,7 +87,10 @@ public class DdlStatementParser {
                 return Optional.of(new DdlFacts(DdlOperation.ADD_FOREIGN_KEY, table, null, null, null,
                         null, null, false, notValid, false, referencedTable(rawSql), rawSql));
             }
-            if (rawSql.toUpperCase(Locale.ROOT).contains("CHECK")) {
+            // A constraint clause (ADD CONSTRAINT ... CHECK / ADD CHECK) parses with a non-null
+            // Index and no column data type; a plain ADD COLUMN never sets one. Checking a whole-
+            // statement substring instead would misclassify an ordinary column named e.g. check_flag.
+            if (e.getIndex() != null) {
                 return Optional.of(new DdlFacts(DdlOperation.ADD_CHECK, table, null, null, null,
                         null, null, false, notValid, false, null, rawSql));
             }

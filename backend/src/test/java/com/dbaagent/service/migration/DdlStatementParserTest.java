@@ -83,4 +83,41 @@ class DdlStatementParserTest {
     void selectStatement_returnsEmpty() {
         assertThat(parser.parse("SELECT * FROM orders")).isEmpty();
     }
+
+    // A single DdlFacts cannot honestly represent two clauses; must fail closed rather than
+    // judge the statement on the harmless first clause alone.
+    @Test
+    void multiClauseAlter_returnsEmptySoCallerFailsClosed() {
+        assertThat(parser.parse(
+            "ALTER TABLE t ADD COLUMN a text, ADD COLUMN b uuid DEFAULT gen_random_uuid()")).isEmpty();
+    }
+
+    @Test
+    void addColumnNamedCheckFlag_isNotMisclassifiedAsAddCheck() {
+        var f = parser.parse("ALTER TABLE orders ADD COLUMN check_flag boolean DEFAULT true").orElseThrow();
+        assertThat(f.operation()).isEqualTo(DdlOperation.ADD_COLUMN);
+        assertThat(f.column()).isEqualTo("check_flag");
+    }
+
+    @Test
+    void addColumnDefaultLiteralMentioningReferences_hasNoReferencedTable() {
+        var f = parser.parse(
+            "ALTER TABLE t ADD COLUMN note text DEFAULT 'see references docs(1)'").orElseThrow();
+        assertThat(f.referencedTable()).isNull();
+    }
+
+    @Test
+    void dropColumn_capturesColumnName() {
+        var f = parser.parse("ALTER TABLE orders DROP COLUMN c").orElseThrow();
+        assertThat(f.operation()).isEqualTo(DdlOperation.DROP_COLUMN);
+        assertThat(f.column()).isEqualTo("c");
+    }
+
+    @Test
+    void renameColumn_capturesNewNameOnly() {
+        var f = parser.parse("ALTER TABLE orders RENAME COLUMN a TO b").orElseThrow();
+        assertThat(f.operation()).isEqualTo(DdlOperation.RENAME_COLUMN);
+        assertThat(f.newColumnName()).isEqualTo("b");
+        assertThat(f.column()).isNull();
+    }
 }
