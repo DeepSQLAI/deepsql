@@ -18,6 +18,8 @@ public class PostgresMigrationRiskProvider implements MigrationRiskProvider {
     private static final String INDEX_DOCS = "https://www.postgresql.org/docs/18/sql-createindex.html";
     private static final Set<String> VOLATILE_FALLBACK =
             Set.of("random", "gen_random_uuid", "clock_timestamp", "uuid_generate_v4");
+    private static final Set<String> STABLE_FALLBACK =
+            Set.of("now", "current_timestamp", "current_date", "current_time", "transaction_timestamp");
 
     private static final List<String> RW = List.of("read", "write");
     private static final List<String> W = List.of("write");
@@ -40,6 +42,10 @@ public class PostgresMigrationRiskProvider implements MigrationRiskProvider {
 
     private boolean isVolatile(String fn) {
         return fn != null && VOLATILE_FALLBACK.contains(fn.toLowerCase());
+    }
+
+    private boolean isStable(String fn) {
+        return fn != null && STABLE_FALLBACK.contains(fn.toLowerCase());
     }
 
     private String bucket(TableFacts t) {
@@ -65,6 +71,16 @@ public class PostgresMigrationRiskProvider implements MigrationRiskProvider {
                     "Add the column without a default, backfill in batches, then set the default "
                     + "for future rows.", ALTER_DOCS);
         }
+        if (f.defaultFunction() != null && !isStable(f.defaultFunction())) {
+            return report("CAUTION", false, f, t, locks, false, "unknown",
+                    "DeepSQL cannot verify the volatility of " + f.defaultFunction()
+                    + "(). A VOLATILE default would force a full table rewrite under ACCESS "
+                    + "EXCLUSIVE; a STABLE or IMMUTABLE one would not. Check "
+                    + "SELECT provolatile FROM pg_proc WHERE proname = '" + f.defaultFunction()
+                    + "' before running this.",
+                    "If the function is VOLATILE, add the column without a default, backfill in "
+                    + "batches, then set the default for future rows.", ALTER_DOCS);
+        }
         return report("SAFE", true, f, t, locks, false, "milliseconds",
                 "Adding a column with no default, a constant default, or a STABLE default "
                 + "(such as now()) is metadata-only in PostgreSQL 11+. The ACCESS EXCLUSIVE lock "
@@ -83,8 +99,9 @@ public class PostgresMigrationRiskProvider implements MigrationRiskProvider {
                 List.of(new LockRef(f.table(), "AccessExclusiveLock", RW)),
                 true, bucket(t),
                 "Changing a column type generally rewrites the whole table under ACCESS EXCLUSIVE. "
-                + "(Widening within the same type family — varchar(50) to varchar(100) — is the "
-                + "exception and does not rewrite.)",
+                + "(Some conversions, such as widening within the same type family, are known "
+                + "exceptions that PostgreSQL can skip rewriting for — but DeepSQL cannot confirm "
+                + "which case this is, so the conservative rewrite verdict is reported here.)",
                 "Add a new column, backfill in batches, swap the names, then drop the old column.",
                 ALTER_DOCS);
     }

@@ -42,6 +42,25 @@ class PostgresMigrationRiskRulesTest {
         assertThat(r.verdict()).isEqualTo("CAUTION");
     }
 
+    // Finding 1 fix: an unrecognised default function must not be reported SAFE.
+    @Test
+    void addColumnWithUnrecognisedDefaultFunction_isCautionNotSafe() {
+        var r = provider.classify(addColumn("my_custom_uuid", false), big);
+        assertThat(r.verdict()).isEqualTo("CAUTION");
+        assertThat(r.safeToRun()).isFalse();
+        assertThat(r.rewritesTable()).isFalse();
+        assertThat(r.reason()).containsIgnoringCase("cannot verify");
+    }
+
+    @Test
+    void addColumnWithConstantDefault_isSafe() {
+        var f = new DdlFacts(DdlOperation.ADD_COLUMN, "orders", "c", null, "text",
+                "'x'", null, false, false, false, null, "sql");
+        var r = provider.classify(f, big);
+        assertThat(r.verdict()).isEqualTo("SAFE");
+        assertThat(r.rewritesTable()).isFalse();
+    }
+
     @Test
     void addColumnNotNullNoDefaultOnNonEmptyTable_isFailsOutright() {
         var r = provider.classify(addColumn(null, true), big);
@@ -93,6 +112,64 @@ class PostgresMigrationRiskRulesTest {
         var r = provider.classify(f, big);
         assertThat(r.rewritesTable()).isFalse();
         assertThat(r.verdict()).isEqualTo("SAFE");
+    }
+
+    @Test
+    void renameColumn_isMetadataOnly() {
+        var f = new DdlFacts(DdlOperation.RENAME_COLUMN, "orders", "a", "b", null,
+                null, null, false, false, false, null, "sql");
+        var r = provider.classify(f, big);
+        assertThat(r.rewritesTable()).isFalse();
+        assertThat(r.verdict()).isEqualTo("SAFE");
+    }
+
+    @Test
+    void alterColumnType_rewritesAndIsDangerOnBigTable() {
+        var f = new DdlFacts(DdlOperation.ALTER_COLUMN_TYPE, "orders", "c", null, "uuid",
+                null, null, false, false, false, null, "sql");
+        var r = provider.classify(f, big);
+        assertThat(r.rewritesTable()).isTrue();
+        assertThat(r.verdict()).isEqualTo("DANGER");
+        assertThat(r.safeToRun()).isFalse();
+    }
+
+    @Test
+    void setNotNull_isSafeOnSmallTableAndCautionOnLarge() {
+        var f = new DdlFacts(DdlOperation.SET_NOT_NULL, "orders", "c", null, null,
+                null, null, false, false, false, null, "sql");
+        var small = provider.classify(f, this.small);
+        var large = provider.classify(f, big);
+        assertThat(small.verdict()).isEqualTo("SAFE");
+        assertThat(small.rewritesTable()).isFalse();
+        assertThat(large.verdict()).isEqualTo("CAUTION");
+        assertThat(large.safeToRun()).isFalse();
+    }
+
+    @Test
+    void addCheckNotValid_isSafe() {
+        var f = new DdlFacts(DdlOperation.ADD_CHECK, "orders", null, null, null,
+                null, null, false, true, false, null, "sql");
+        var r = provider.classify(f, big);
+        assertThat(r.verdict()).isEqualTo("SAFE");
+    }
+
+    @Test
+    void addCheckValidating_isDangerOnBigTable() {
+        var f = new DdlFacts(DdlOperation.ADD_CHECK, "orders", null, null, null,
+                null, null, false, false, false, null, "sql");
+        var r = provider.classify(f, big);
+        assertThat(r.verdict()).isEqualTo("DANGER");
+        assertThat(r.safeToRun()).isFalse();
+    }
+
+    @Test
+    void validateConstraint_isSafe() {
+        var f = new DdlFacts(DdlOperation.VALIDATE_CONSTRAINT, "orders", null, null, null,
+                null, null, false, false, false, null, "sql");
+        var r = provider.classify(f, big);
+        assertThat(r.verdict()).isEqualTo("SAFE");
+        assertThat(r.rewritesTable()).isFalse();
+        assertThat(r.locks()).anySatisfy(l -> assertThat(l.mode()).isEqualTo("ShareUpdateExclusiveLock"));
     }
 
     @Test
