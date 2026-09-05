@@ -120,4 +120,47 @@ class DdlStatementParserTest {
         assertThat(f.newColumnName()).isEqualTo("b");
         assertThat(f.column()).isNull();
     }
+
+    // The parser used to keep only the first of several statements, so a hidden DROP TABLE
+    // riding along after a harmless ALTER reported SAFE. Must fail closed instead.
+    @Test
+    void multiStatementSql_returnsEmptySoCallerFailsClosed() {
+        assertThat(parser.parse("ALTER TABLE t ADD COLUMN a text; DROP TABLE users;")).isEmpty();
+    }
+
+    @Test
+    void singleStatementWithTrailingSemicolon_stillParses() {
+        var f = parser.parse("ALTER TABLE orders ADD COLUMN a text;").orElseThrow();
+        assertThat(f.operation()).isEqualTo(DdlOperation.ADD_COLUMN);
+    }
+
+    // DROP CONSTRAINT shares operation=DROP with DROP COLUMN but names no column; it used to
+    // be misclassified as DROP_COLUMN with a false "metadata-only, VACUUM reclaims it" reason
+    // and locks that omitted the referenced table. Must fail closed instead.
+    @Test
+    void dropConstraint_returnsEmptySoCallerFailsClosed() {
+        assertThat(parser.parse("ALTER TABLE pc_child DROP CONSTRAINT fk")).isEmpty();
+    }
+
+    @Test
+    void dropConstraintCascade_returnsEmptySoCallerFailsClosed() {
+        assertThat(parser.parse("ALTER TABLE pc_child DROP CONSTRAINT fk CASCADE")).isEmpty();
+    }
+
+    // The DROP CONSTRAINT fix must not break the ordinary DROP COLUMN path it shares an
+    // operation code with.
+    @Test
+    void dropColumnStillClassifiesCorrectly_afterDropConstraintFix() {
+        var f = parser.parse("ALTER TABLE orders DROP COLUMN c").orElseThrow();
+        assertThat(f.operation()).isEqualTo(DdlOperation.DROP_COLUMN);
+        assertThat(f.column()).isEqualTo("c");
+    }
+
+    // DROP NOT NULL used to fall into the same weak ALTER branch as ALTER COLUMN TYPE and
+    // was misreported as a table-rewriting type change. It is metadata-only, but no existing
+    // rule models that correctly, so it must report UNKNOWN rather than a wrong DANGER.
+    @Test
+    void dropNotNull_returnsEmptySoCallerFailsClosed() {
+        assertThat(parser.parse("ALTER TABLE orders ALTER COLUMN a DROP NOT NULL")).isEmpty();
+    }
 }

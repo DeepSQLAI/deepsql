@@ -44,12 +44,17 @@ public class DdlStatementParser {
                     null, null, null, null, null, false, notValid, false, null, sql));
         }
 
-        Statement stmt;
+        List<Statement> statements;
         try {
-            stmt = CCJSqlParserUtil.parse(normalized);
+            statements = CCJSqlParserUtil.parseStatements(normalized);
         } catch (Exception e) {
             return Optional.empty();
         }
+        // Postgres executes every statement in the string, not just the first; a single
+        // DdlFacts cannot honestly represent more than one, so refuse rather than judge
+        // the string on its first statement alone.
+        if (statements.size() != 1) return Optional.empty();
+        Statement stmt = statements.get(0);
 
         if (stmt instanceof CreateIndex ci) {
             return Optional.of(new DdlFacts(DdlOperation.CREATE_INDEX,
@@ -72,7 +77,10 @@ public class DdlStatementParser {
         String table = strip(alter.getTable().getName());
         String op = e.getOperation() == null ? "" : e.getOperation().name().toUpperCase(Locale.ROOT);
 
-        if ("DROP".equals(op)) {
+        // DROP CONSTRAINT arrives with the same operation=DROP and a null column name;
+        // only a genuine DROP COLUMN names a column. A dropped constraint also takes a
+        // lock on the referenced table, which this parser has no data for — fail closed.
+        if ("DROP".equals(op) && e.getColumnName() != null) {
             return Optional.of(new DdlFacts(DdlOperation.DROP_COLUMN, table, strip(e.getColumnName()),
                     null, null, null, null, false, notValid, false, null, rawSql));
         }
@@ -114,6 +122,9 @@ public class DdlStatementParser {
                         strip(cdt.getColumnName()), null, null, null, null, true,
                         notValid, false, null, rawSql));
             }
+            // "DROP NOT NULL" arrives with colDataType=null, specs=[DROP, NOT, NULL] — it is
+            // metadata-only, not a type change, but no rule models it correctly; fail closed.
+            if (cdt.getColDataType() == null) return Optional.empty();
             return Optional.of(new DdlFacts(DdlOperation.ALTER_COLUMN_TYPE, table,
                     strip(cdt.getColumnName()), null, type, null, null, false,
                     notValid, false, null, rawSql));
