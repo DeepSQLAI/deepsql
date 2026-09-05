@@ -666,6 +666,7 @@ function buildOpts(parsed) {
     // SQL execution
     write: !!f.write,
     analyze: !!f.analyze,
+    sql: f.sql || null,
     // Origin tagging for audit
     callerAgent: f.callerAgent || null,
     // Setup wizard

@@ -1937,6 +1937,25 @@ function summarizeExplain(payload) {
   return `EXPLAIN completed for ${planType}.`;
 }
 
+// Task 4 returns Java's Long.MAX_VALUE for tableRows when it couldn't measure
+// the table, meaning "assume the worst, don't treat this as safe." JS numbers
+// can't round-trip that value exactly, so treat anything implausibly close to
+// it the same way rather than requiring an exact match.
+const MIGRATION_ROW_COUNT_SENTINEL = 9223372036854775807;
+const MIGRATION_ROW_COUNT_SENTINEL_FLOOR = 9e18;
+
+function isMigrationRowCountUnknown(tableRows) {
+  if (tableRows == null) return false;
+  const n = Number(tableRows);
+  return Number.isFinite(n) && n >= MIGRATION_ROW_COUNT_SENTINEL_FLOOR;
+}
+
+function migrationVerdictMarker(verdict) {
+  if (verdict === "DANGER" || verdict === "FAILS") return "✗ ";
+  if (verdict === "CAUTION") return "⚠ ";
+  return "";
+}
+
 function summarizeMigrationRisk(r) {
   if (!r) return "No analysis returned.";
   if (r.verdict === "UNKNOWN") {
@@ -1945,11 +1964,14 @@ function summarizeMigrationRisk(r) {
   const locks = (Array.isArray(r.locks) ? r.locks : [])
     .map((l) => `${l.table}: ${l.mode}${Array.isArray(l.blocks) && l.blocks.length ? ` (blocks ${l.blocks.join(" + ")})` : ""}`)
     .join("; ");
+  const rowsLine = isMigrationRowCountUnknown(r.tableRows)
+    ? "Table size unknown — treated as large."
+    : (r.tableRows != null ? `Table has ~${Number(r.tableRows).toLocaleString()} rows.` : "");
   const parts = [
-    `${r.verdict} — ${r.operation} on ${r.table}.`,
+    `${migrationVerdictMarker(r.verdict)}${r.verdict} — ${r.operation} on ${r.table}.`,
     r.rewritesTable ? "Rewrites the whole table." : "No table rewrite.",
     locks ? `Locks — ${locks}.` : "",
-    r.tableRows != null ? `Table has ~${Number(r.tableRows).toLocaleString()} rows.` : "",
+    rowsLine,
     r.estimatedDuration ? `Estimated duration: ${r.estimatedDuration}.` : "",
     r.reason || "",
     r.saferAlternative ? `Safer: ${r.saferAlternative}` : "",
@@ -2804,6 +2826,8 @@ module.exports = {
   summarizeCallerCapabilities,
   summarizeConnections,
   summarizeCurrentUser,
+  summarizeMigrationRisk,
+  isMigrationRowCountUnknown,
   buildCallerCapabilities,
   resetToolCaches,
   validateReadOnlySql,
