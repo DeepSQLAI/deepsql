@@ -28,6 +28,7 @@ public class PostgresDialect implements DatabaseDialect {
     private final PostgresQueryExecutionProvider queryExecutionProvider;
     private final PostgresPrivilegeCheckProvider privilegeCheckProvider;
     private final PostgresSamplingProvider samplingProvider;
+    private final PostgresMigrationRiskProvider migrationRiskProvider;
 
     @Override
     public String getCanonicalName() {
@@ -92,5 +93,10 @@ public class PostgresDialect implements DatabaseDialect {
     @Override
     public SamplingProvider sampling() {
         return samplingProvider;
+    }
+
+    @Override
+    public MigrationRiskProvider migrationRisk() {
+        return migrationRiskProvider;
     }
 }

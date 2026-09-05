@@ -28,6 +28,7 @@ public class MySQLDialect implements DatabaseDialect {
     private final MySQLQueryExecutionProvider queryExecutionProvider;
     private final MySQLPrivilegeCheckProvider privilegeCheckProvider;
     private final MySQLSamplingProvider samplingProvider;
+    private final MySQLMigrationRiskProvider migrationRiskProvider;
 
     @Override
     public String getCanonicalName() {
@@ -92,5 +93,10 @@ public class MySQLDialect implements DatabaseDialect {
     @Override
     public SamplingProvider sampling() {
         return samplingProvider;
+    }
+
+    @Override
+    public MigrationRiskProvider migrationRisk() {
+        return migrationRiskProvider;
     }
 }
