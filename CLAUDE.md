@@ -387,6 +387,77 @@ than an `assertCan*` call — the case `Endpoint Authorization Rules` describes 
 - Usage belongs to `QueryActorContextHolder` first and the security principal second, so
   under **View as** the spend is attributed to the target user, not the admin.
 
+## Pre-flight Migration Review
+
+`POST /migrations/analyze` (`MigrationRiskController` → `MigrationRiskService` →
+`DatabaseDialect.migrationRisk()`) classifies a DDL statement's blast radius —
+verdict, locks (per table), whether it rewrites the table, a coarse duration bucket,
+and a safer alternative — before anyone runs it. It is **deterministic by
+convention**, same as `IndexAdvisorService` and `ExplainPlanService`: the rule table
+and the target table's real size (`pg_class.reltuples` / `pg_total_relation_size`)
+decide the verdict; nothing here asks an LLM to judge risk. An LLM may narrate the
+report in chat, but it never computes it.
+
+- **The Postgres rule table is engine-verified, not hand-derived.** A Testcontainers
+  suite runs each rule's DDL against a real `postgres:18`, reading
+  `pg_relation_filenode` before/after to detect an actual rewrite and `pg_locks` to
+  read the actual lock mode taken — not PostgreSQL documentation summarized from
+  memory. If a rule disagrees with what the engine measured, the rule is wrong,
+  full stop.
+- **`DEFAULT now()` does NOT force a table rewrite — this is measured, not a bug.**
+  `now()` is STABLE (it returns the same value for the whole transaction), and
+  Postgres 11+ adds a column with a STABLE or constant default as a metadata-only
+  operation. Only a VOLATILE default (`random()`, `gen_random_uuid()`,
+  `clock_timestamp()`, `uuid_generate_v4()`) forces a full rewrite, because a
+  volatile function must be evaluated per row. Wrote this down after getting it
+  wrong from memory twice before the Testcontainers run corrected it.
+- **`ADD FOREIGN KEY` takes `ShareRowExclusiveLock` on the referenced table too**,
+  not just the table being altered — confirmed live: `ALTER TABLE child ADD
+  CONSTRAINT fk FOREIGN KEY (t_id) REFERENCES t(id)` returns a `locks` array with
+  two entries, `child` and `t`. This is why `MigrationRiskReport.locks` is a
+  per-table array rather than a single lock on the altered table — a statement can
+  block writes on a table it never names, and that is the finding an operator is
+  least likely to expect from reading the SQL alone.
+- **The JSqlParser 5.2 shim exists because the library cannot parse the forms this
+  tool exists to recommend.** JSqlParser has no grammar for `NOT VALID` or `CREATE
+  INDEX CONCURRENTLY` — both fail to parse outright, which would make the analyzer
+  unable to evaluate the very migration pattern (`ADD CONSTRAINT ... NOT VALID` +
+  `VALIDATE CONSTRAINT`, `CREATE INDEX CONCURRENTLY`) it recommends as the safer
+  alternative. `DdlStatementParser` pre-strips both into flags (`notValid`,
+  `concurrently`) before handing the rest to JSqlParser. Do not remove this step —
+  removing it silently turns every NOT VALID / CONCURRENTLY statement into a parse
+  failure, which fails closed (UNKNOWN) but defeats the point of the feature for
+  exactly the statements it is meant to bless as safe.
+- **Fail-closed, not best-effort.** Unparseable SQL, an ALTER with more than one
+  clause (a single `DdlFacts` cannot honestly represent two clauses' worth of risk),
+  an unrecognised default function DeepSQL cannot confirm the volatility of, and
+  MySQL (no verified rule table exists yet — `MySQLMigrationRiskProvider` always
+  returns `UNKNOWN`) all report `UNKNOWN` or `CAUTION` rather than guessing `SAFE`.
+  Verified live: `{"sql":"not sql"}` returns `verdict: UNKNOWN`, `safeToRun: false`.
+- **Known limitation: `ALTER COLUMN TYPE` over-warns.** `DdlFacts` carries no old
+  column type, only the new one, so the provider cannot tell a same-family widening
+  (`varchar(50)` → `varchar(100)`, which Postgres does NOT rewrite) from a genuine
+  type change (which does). It reports the conservative rewrite verdict for both
+  rather than risk a false SAFE.
+- **Lock strength is ranked by an explicit ordering list, not `max(mode)`.**
+  Postgres lock mode names sort alphabetically in a way that has nothing to do with
+  strength — `"ShareLock".compareTo("AccessExclusiveLock") > 0`, so a naive
+  string-max would report a statement that also takes `ShareLock` as the stronger
+  of the two, when `AccessExclusiveLock` is in fact the most exclusive mode
+  Postgres has. Any code that needs "the worst lock this statement takes" must
+  rank against Postgres's real lock hierarchy, not compare mode names.
+- **Authorization is asserted in the service, before parsing, credential
+  decryption, or session opening** (`MigrationRiskService.analyze` calls
+  `accessControlService.assertCanReadConnectionContent` first). The controller is
+  exempted from the static `ConnectionScopedAuthorizationSafetyTest` sweep
+  (`AUTHORIZED_ELSEWHERE`) on that basis, same reasoning as
+  `DashboardWorkspaceController`. Verified live, not just by the mocked unit test
+  and the static scanner: a second user with zero grants on the target connection
+  (confirmed empty in `connection_access_grant`) received a genuine `403` from
+  `POST /migrations/analyze`, with no stack trace in the logs — proof the
+  controller's `catch (ResponseStatusException e) { throw e; }` before the
+  catch-all is live and not swallowing the 403 into a 500.
+
 ## Key Rules & Patterns
 
 ### Backend Rules
