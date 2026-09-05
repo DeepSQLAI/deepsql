@@ -1,7 +1,9 @@
 package com.dbaagent.service.migration;
 
 import org.junit.jupiter.api.Test;
+import java.time.Duration;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 class DdlStatementParserTest {
 
@@ -162,5 +164,31 @@ class DdlStatementParserTest {
     @Test
     void dropNotNull_returnsEmptySoCallerFailsClosed() {
         assertThat(parser.parse("ALTER TABLE orders ALTER COLUMN a DROP NOT NULL")).isEmpty();
+    }
+
+    // NOT VALID used to be detected with a regex whose \s+ tail was quadratic on attacker-
+    // controlled input (CodeQL alerts 152/153) — 80KB of padding stalled parse() for 35s.
+    // The index-based scan must stay linear regardless of how much whitespace precedes it.
+    @Test
+    void notValidDetection_staysFastOnAdversarialWhitespace() {
+        String sql = "ALTER TABLE orders ADD CONSTRAINT ck CHECK (id > 0) NOT VALID"
+            + " ".repeat(50_000);
+        assertTimeoutPreemptively(Duration.ofSeconds(2), () -> {
+            var f = parser.parse(sql).orElseThrow();
+            assertThat(f.notValid()).isTrue();
+        });
+    }
+
+    @Test
+    void notValidWithMultipleInternalSpaces_stillDetected() {
+        var f = parser.parse("ALTER TABLE orders ADD CONSTRAINT ck CHECK (id > 0) NOT    VALID").orElseThrow();
+        assertThat(f.notValid()).isTrue();
+    }
+
+    @Test
+    void notValidWithTrailingSemicolon_stillParsesAndDetected() {
+        var f = parser.parse("ALTER TABLE orders ADD CONSTRAINT ck CHECK (id > 0) NOT VALID;").orElseThrow();
+        assertThat(f.operation()).isEqualTo(DdlOperation.ADD_CHECK);
+        assertThat(f.notValid()).isTrue();
     }
 }

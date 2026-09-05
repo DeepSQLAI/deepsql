@@ -15,7 +15,6 @@ import java.util.regex.Pattern;
 @Component
 public class DdlStatementParser {
 
-    private static final Pattern NOT_VALID = Pattern.compile("(?i)\\s+NOT\\s+VALID\\s*;?\\s*$");
     private static final Pattern CONCURRENTLY =
             Pattern.compile("(?i)\\bCREATE\\s+(UNIQUE\\s+)?INDEX\\s+CONCURRENTLY\\b");
     private static final Pattern DEFAULT_FN =
@@ -28,8 +27,9 @@ public class DdlStatementParser {
     public Optional<DdlFacts> parse(String sql) {
         if (sql == null || sql.isBlank()) return Optional.empty();
 
-        boolean notValid = NOT_VALID.matcher(sql).find();
-        String normalized = notValid ? NOT_VALID.matcher(sql).replaceAll("") : sql;
+        int notValidAt = notValidStart(sql);
+        boolean notValid = notValidAt >= 0;
+        String normalized = notValid ? sql.substring(0, notValidAt) : sql;
 
         boolean concurrently = CONCURRENTLY.matcher(normalized).find();
         if (concurrently) {
@@ -144,5 +144,33 @@ public class DdlStatementParser {
 
     private String strip(String s) {
         return s == null ? null : s.replace("\"", "");
+    }
+
+    private static int trimEnd(String s) {
+        int e = s.length();
+        while (e > 0) {
+            char c = s.charAt(e - 1);
+            if (c == ';' || Character.isWhitespace(c)) e--;
+            else break;
+        }
+        return e;
+    }
+
+    // A regex tail-match here (\s+NOT\s+VALID...$ via find()) is quadratic on attacker-
+    // controlled input: CodeQL flagged it, and it measured at 35s for 80KB of input.
+    // The clause can only ever be a bounded tail, so scan indices instead of the whole string.
+    private static int notValidStart(String s) {
+        int e = trimEnd(s);
+        int p = e - 5;
+        if (p < 0 || !s.regionMatches(true, p, "VALID", 0, 5)) return -1;
+        int q = p;
+        while (q > 0 && Character.isWhitespace(s.charAt(q - 1))) q--;
+        if (q == p) return -1;
+        int r = q - 3;
+        if (r < 0 || !s.regionMatches(true, r, "NOT", 0, 3)) return -1;
+        int t = r;
+        while (t > 0 && Character.isWhitespace(s.charAt(t - 1))) t--;
+        if (t == r) return -1;
+        return t;
     }
 }
