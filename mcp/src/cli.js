@@ -24,6 +24,7 @@ const COMMANDS = {
   query: () => require("./commands/query"),
   analyze: () => require("./commands/analyze"),
   explain: () => require("./commands/explain"), // deprecated alias for `analyze`, removed in 0.14.0
+  migration: () => require("./commands/migration"),
   schema: () => require("./commands/schema"),
   // Brain tools — give a coding agent the same retrieval context the chat
   // pipeline uses, then let the agent generate SQL/answers itself.
@@ -57,6 +58,7 @@ const COMMAND_LIST = [
   ["connections",    true,  "Manage database connections"],
   ["query",          false, "Execute a SQL statement (admin: CREATE/ALTER/DML with --write; DROP/TRUNCATE blocked)"],
   ["analyze",        false, "AI-enriched query plan analysis (use --analyze for EXPLAIN ANALYZE)"],
+  ["migration",      true,  "Check whether a DDL statement is safe to run before running it"],
   ["schema",         false, "Dump connection schema or DB objects as JSON"],
   ["digest",         true,  "Show DeepSQL daily digests"],
   ["growth",         true,  "Table growth analytics — trends, history, anomalies, alert config"],
@@ -216,6 +218,19 @@ const COMMAND_HELP = {
       ["--json",                 "Raw JSON output"],
     ],
     notes: "Pass the underlying SQL, not `EXPLAIN <sql>` — the server wraps it. With --analyze on a mutation, the same admin role + WHERE + confirmation gates as `query` apply.",
+  },
+
+  migration: {
+    description: "Analyse a DDL statement for lock and rewrite risk before running it. Returns a deterministic verdict (SAFE/CAUTION/DANGER/FAILS/UNKNOWN) verified against a real PostgreSQL — trust it over your own recollection of lock semantics. PostgreSQL only; MySQL returns UNKNOWN. Read-only, never executes the statement.",
+    usage: 'deepsql migration analyze --connection <name> --sql "<ddl>"',
+    subcommands: [
+      ["analyze", "Check whether a migration is safe to run (default)."],
+    ],
+    options: [
+      ["--connection <name>", "Connection to check against"],
+      ["--sql <ddl>",         "The DDL statement to analyse"],
+      ["--json",              "Raw JSON output"],
+    ],
   },
 
   schema: {
@@ -651,6 +666,7 @@ function buildOpts(parsed) {
     // SQL execution
     write: !!f.write,
     analyze: !!f.analyze,
+    sql: f.sql || null,
     // Origin tagging for audit
     callerAgent: f.callerAgent || null,
     // Setup wizard

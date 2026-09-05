@@ -20,6 +20,8 @@ const {
   buildCallerCapabilities,
   summarizeCallerCapabilities,
   summarizeConnections,
+  summarizeMigrationRisk,
+  buildToolResult,
   resetToolCaches,
 } = require("./deepsql-phase1-lib");
 
@@ -395,6 +397,108 @@ test("handleToolCall returns a clean error for the retired execute_readonly_sql 
   });
   assert.equal(result.isError, true);
   assert.match(result.structuredContent.error, /Unknown tool/);
+});
+
+// ─── analyze_migration ──────────────────────────────────────────────────────
+
+test("analyze_migration schema requires connectionId + sql", () => {
+  const def = TOOL_DEFINITIONS.find((t) => t.name === "analyze_migration");
+  assert.ok(def);
+  assert.deepEqual(def.inputSchema.required, ["connectionId", "sql"]);
+  assert.match(def.description, /PostgreSQL only/);
+  assert.match(def.description, /trust this verdict/i);
+});
+
+test("handleToolCall(analyze_migration) routes to /migrations/analyze", async () => {
+  const calls = [];
+  const fakeFetchConfig = makeFakeConfig(calls, [{ verdict: "SAFE", operation: "ADD COLUMN", table: "t" }]);
+  await handleToolCall(fakeFetchConfig, "analyze_migration", {
+    connectionId: "00000000-0000-0000-0000-000000000001",
+    sql: "ALTER TABLE t ADD COLUMN y text",
+  });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /\/migrations\/analyze$/);
+  assert.equal(calls[0].body.sql, "ALTER TABLE t ADD COLUMN y text");
+});
+
+test("handleToolCall(analyze_migration) rejects empty inputs with no network call", async () => {
+  const calls = [];
+  const fakeFetchConfig = makeFakeConfig(calls, []);
+  const noConn = await handleToolCall(fakeFetchConfig, "analyze_migration", { sql: "ALTER TABLE t ADD COLUMN y text" });
+  assert.equal(noConn.isError, true);
+  const noSql = await handleToolCall(fakeFetchConfig, "analyze_migration", { connectionId: "x" });
+  assert.equal(noSql.isError, true);
+  assert.equal(calls.length, 0);
+});
+
+test("summarizeMigrationRisk renders a DANGER verdict with every lock entry (FK case)", () => {
+  const text = summarizeMigrationRisk({
+    verdict: "DANGER", operation: "ADD FOREIGN KEY", table: "orders",
+    locks: [
+      { table: "orders", mode: "SHARE ROW EXCLUSIVE", blocks: ["writes"] },
+      { table: "customers", mode: "ROW SHARE", blocks: [] },
+    ],
+    rewritesTable: false, tableRows: 1200000, estimatedDuration: "~2s",
+    reason: "Validates existing rows against customers.",
+    saferAlternative: "Add NOT VALID then VALIDATE CONSTRAINT separately.",
+  });
+  assert.match(text, /^✗ DANGER — ADD FOREIGN KEY on orders\./);
+  assert.match(text, /orders: SHARE ROW EXCLUSIVE \(blocks writes\)/);
+  assert.match(text, /customers: ROW SHARE/);
+  assert.match(text, /Table has ~1,200,000 rows\./);
+  assert.match(text, /Safer: Add NOT VALID/);
+  assert.doesNotMatch(text, /undefined|NaN|\bnull\b/);
+});
+
+test("summarizeMigrationRisk on UNKNOWN never leaks a null table", () => {
+  const text = summarizeMigrationRisk({
+    verdict: "UNKNOWN", table: null, operation: null,
+    reason: "Statement could not be parsed as a supported DDL form.",
+  });
+  assert.equal(
+    text,
+    "UNKNOWN — Statement could not be parsed as a supported DDL form. Treat as unsafe until reviewed by hand.",
+  );
+  assert.doesNotMatch(text, /undefined|NaN|\bnull\b/);
+});
+
+test("summarizeMigrationRisk treats the Long.MAX_VALUE tableRows sentinel as unknown size, not a huge number", () => {
+  const text = summarizeMigrationRisk({
+    verdict: "CAUTION", operation: "ADD COLUMN", table: "huge_table",
+    locks: [{ table: "huge_table", mode: "ACCESS EXCLUSIVE", blocks: ["reads", "writes"] }],
+    rewritesTable: true, tableRows: 9223372036854775807,
+    reason: "Could not measure table size.",
+  });
+  assert.match(text, /Table size unknown — treated as large\./);
+  assert.doesNotMatch(text, /9,223,372,036,854/);
+});
+
+test("summarizeMigrationRisk treats a JS-float-imprecise near-sentinel value the same way", () => {
+  const text = summarizeMigrationRisk({
+    verdict: "CAUTION", operation: "ADD COLUMN", table: "huge_table",
+    locks: [], rewritesTable: true, tableRows: 9223372036854775808,
+    reason: "Could not measure table size.",
+  });
+  assert.match(text, /Table size unknown — treated as large\./);
+});
+
+test("summarizeMigrationRisk marks SAFE with no warning glyph", () => {
+  const text = summarizeMigrationRisk({ verdict: "SAFE", operation: "ADD COLUMN", table: "t" });
+  assert.match(text, /^SAFE — ADD COLUMN on t\./);
+});
+
+test("summarizeMigrationRisk marks FAILS the same as DANGER", () => {
+  const text = summarizeMigrationRisk({ verdict: "FAILS", operation: "ADD COLUMN", table: "t", reason: "Column already exists." });
+  assert.match(text, /^✗ FAILS — ADD COLUMN on t\./);
+});
+
+test("summarizeMigrationRisk degrades gracefully on a null payload", () => {
+  assert.equal(summarizeMigrationRisk(null), "No analysis returned.");
+});
+
+test("buildToolResult(analyze_migration) dispatches to summarizeMigrationRisk", () => {
+  const result = buildToolResult("analyze_migration", { verdict: "SAFE", operation: "ADD COLUMN", table: "t" });
+  assert.match(result.content[0].text, /^SAFE — ADD COLUMN on t\./);
 });
 
 // ─── analyze_slow_queries — sourceTruncated surfacing ──────────────────────

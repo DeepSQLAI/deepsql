@@ -33,10 +33,10 @@ server, and the statement you ran.** Don't be sloppy.
 
 ## The tools you have
 
-The MCP server exposes **44 tools** as of 0.26.0 — the original 16 +
+The MCP server exposes **45 tools** as of 0.29.0 — the original 16 +
 0.18.x's 5 slow-query tools + 0.19.0's 20 CLI-parity additions + 0.26.0's
 3 brain-notes tools (`list_brain_recommendations`, `save_brain_note`,
-`list_brain_notes`). Most
+`list_brain_notes`) + 0.29.0's `analyze_migration`. Most
 take a `connectionId` (UUID returned by `list_connections`); a few
 take server-resolved row ids (`apply_index_recommendation` →
 `recommendationId`, `dismiss_index_recommendation` →
@@ -82,6 +82,7 @@ in this version; ask before mid-session admin work.
 | **`apply_index_recommendation`** | Apply (or dry-run) a recommendation against its target connection and measure the before/after benefit on contributing queries. `DRY_RUN` (default) uses HypoPG (Postgres-only) for zero-write cost-delta. `APPLY` runs real `CREATE/DROP INDEX CONCURRENTLY` (configurable via `concurrent`). `APPLY_AND_MEASURE` additionally runs `EXPLAIN ANALYZE` for wall-clock timings. Write modes require `confirm: true`. The DDL is server-generated from the recommendation row — clients never supply SQL. This is the only MCP path that can drop an index; `execute_sql` blocks `DROP`. |
 | **`execute_sql`** | **Run a SQL statement.** Policy is server-enforced: developers can run SELECT/WITH/SHOW/EXPLAIN; admins can also run DML and non-destructive DDL (`CREATE`, `ALTER`, `CREATE INDEX`) with a two-step confirmation. `DROP` and `TRUNCATE` are blocked on this surface even for confirmed admins. EXPLAIN and EXPLAIN ANALYZE are just SQL — no separate flag. |
 | **`analyze_query_plan`** | **AI-enriched plan analysis** for a query. Returns the parsed plan tree, performance issues, index recommendations, and a written summary that takes the connection's schema and business rules into account. Pass `useAnalyze: true` to run `EXPLAIN ANALYZE` (actually executes the query). |
+| **`analyze_migration`** | **Check whether a DDL statement is safe to run, before running it.** Deterministic verdict (SAFE/CAUTION/DANGER/FAILS/UNKNOWN) verified against a real PostgreSQL — trust it over your own recollection of Postgres lock semantics. Returns the exact locks taken (per table — `ADD FOREIGN KEY` locks the referenced table too), whether the table is rewritten, a duration estimate scaled by live table size, and a safer alternative where one exists. PostgreSQL only; MySQL returns `UNKNOWN` rather than a guess. Read-only — never executes the statement. |
 
 ---
 

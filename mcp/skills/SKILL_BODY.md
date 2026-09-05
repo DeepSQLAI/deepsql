@@ -2,8 +2,8 @@
 
 You have two DeepSQL surfaces available:
 
-1. **MCP tools** — JSON-RPC tools loaded into your session (44 of them
-   as of 0.19.0). The MCP surface mirrors the CLI for almost every
+1. **MCP tools** — JSON-RPC tools loaded into your session (45 of them
+   as of 0.29.0). The MCP surface mirrors the CLI for almost every
    read/diagnostic operation, plus the two execute tools and the index-
    apply tool.
 
@@ -106,6 +106,7 @@ usually doesn't know about either; that's exactly why DeepSQL exists.
 | `get_growth_anomalies(connectionId, tableName?, unacknowledgedOnly?, days?)` | DeepSQL-flagged sudden growth spikes with severity (CRITICAL/WARNING/INFO), anomaly type, before/after sizes, confidence score. Check this BEFORE walking the user through a slow-query plan — a recent growth anomaly is often the real root cause. |
 | `execute_sql(connectionId, query, ...)` | Run SQL — SELECT for everyone; DML and CREATE/ALTER for admins (two-step confirm). DROP/TRUNCATE blocked. |
 | `analyze_query_plan(connectionId, query, useAnalyze=false)` | AI-enriched plan analysis (issues + index recs + summary). |
+| `analyze_migration(connectionId, sql)` | **Before suggesting or running any DDL.** Deterministic lock/rewrite verdict verified against a real PostgreSQL — trust it over your own recollection of lock semantics. PostgreSQL only. |
 | `get_current_user()` | Authenticated user + role + `callerCapabilities`. Read `doNotOffer` before suggesting any write. |
 | `test_connection(connectionId)` | Validates a saved connection (privilege report + SSH tunnel check). Read-only on the customer's DB. |
 | `show_connection(connectionId)` | Full saved config with secrets masked. Diagnose host/port/SSL/SSH issues. |
@@ -155,6 +156,7 @@ deepsql query "SELECT 1" --connection prod-pg --caller-agent claude-code --json
 | `deepsql connections list\|use\|current\|unset\|schema\|add\|update\|remove\|test\|show\|init` | Full connection CRUD | partial: `list_connections`, `get_schema` |
 | `deepsql query "<sql>" --connection <c>` | Execute SQL (admin: `--write` for mutations) | `execute_sql` |
 | `deepsql analyze "<sql>" --connection <c>` | AI plan analysis (`--analyze` for EXPLAIN ANALYZE) | `analyze_query_plan` |
+| `deepsql migration analyze --connection <c> --sql "<ddl>"` | Check whether a DDL statement is safe to run (locks, rewrite, duration estimate) | `analyze_migration` |
 | `deepsql schema [tables\|objects] --connection <c>` | Dump full schema as JSON | `get_schema` / `get_database_objects` |
 | `deepsql brain-context "<question>" --connection <c>` | Same retrieval as the MCP tool | `get_brain_context` |
 | `deepsql brain recommendations\|notes\|remember` | Review what DeepSQL has learned (AI-proposed notes), list saved notes, and `remember "<note>" --table <t> [--column <c>]` to teach it (admin) | none — CLI/web surface for the brain-notes loop |

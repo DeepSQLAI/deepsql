@@ -49,7 +49,7 @@ class ConnectionScopedAuthorizationSafetyTest {
 
     /**
      * Handlers whose authorization correctly lives one layer down, named as
-     * {@code Controller:line}. Two distinct reasons, and both matter:
+     * {@code Controller:line}. Three distinct reasons, and all matter:
      *
      * <ul>
      *   <li>{@code DashboardWorkspaceController} delegates to
@@ -61,6 +61,11 @@ class ConnectionScopedAuthorizationSafetyTest {
      *       so the {@code connectionId} there is a label on the caller's own conversation
      *       rather than a reference to someone else's data. There is no connection
      *       authorization to perform.
+     *   <li>{@code MigrationRiskController} delegates to {@code MigrationRiskService.analyze},
+     *       which asserts {@code assertCanReadConnectionContent} before parsing, credential
+     *       decryption or session opening. Same reasoning as {@code DashboardWorkspaceController}:
+     *       a second identical assert in the controller is not defence-in-depth (same
+     *       mechanism, same failure mode), only a second copy to keep in sync.
      * </ul>
      *
      * {@link #everyDelegatedCheckStillExists()} re-derives the first group, so removing the
@@ -71,12 +76,14 @@ class ConnectionScopedAuthorizationSafetyTest {
         "DashboardWorkspaceController.java:60",
         "AgentChatController.java:25",
         "AgentConversationController.java:29",
-        "AgentConversationController.java:45"
+        "AgentConversationController.java:45",
+        "MigrationRiskController.java:19"
     );
 
     /** Service methods that own a delegated connection check. */
     private static final List<String> DELEGATED_CHECKS = List.of(
-        "src/main/java/com/dbaagent/service/DashboardWorkspaceService.java"
+        "src/main/java/com/dbaagent/service/DashboardWorkspaceService.java",
+        "src/main/java/com/dbaagent/service/migration/MigrationRiskService.java"
     );
 
     /**

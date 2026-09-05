@@ -96,7 +96,7 @@ Restart the editor for the entry to load.
 
 ## What the MCP server exposes
 
-**44 tools** as of 0.26.0. Read-only at the schema/retrieval/diagnostics
+**45 tools** as of 0.29.0. Read-only at the schema/retrieval/diagnostics
 layer; policy-gated at the SQL layer (only `execute_sql`,
 `analyze_query_plan` with `useAnalyze=true`, and
 `apply_index_recommendation` can write — the rest are reads or low-stakes
@@ -198,6 +198,12 @@ per-user admin ops (`users`/`access`/`permissions`).
 EXPLAIN and EXPLAIN ANALYZE are just SQL — pass them as the query to
 `execute_sql`. For the AI-enriched plan analysis with the LLM-written
 summary, use `analyze_query_plan`.
+
+### Migration risk (1 — read-only)
+
+| Tool | Purpose |
+|---|---|
+| `analyze_migration` | Check whether a DDL statement is safe to run before running it — deterministic verdict (SAFE/CAUTION/DANGER/FAILS/UNKNOWN) verified against a real PostgreSQL, exact locks taken per table, whether the table is rewritten, a duration estimate, and a safer alternative where one exists. PostgreSQL only; MySQL returns `UNKNOWN`. Never executes the statement. |
 
 ## Runtime guidance for agents
 
