@@ -2,7 +2,6 @@ package com.dbaagent.controller;
 
 import com.dbaagent.dto.MigrationRiskReport;
 import com.dbaagent.service.migration.MigrationRiskService;
-import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -16,7 +15,6 @@ import java.util.Map;
 public class MigrationRiskController {
 
     private final MigrationRiskService migrationRiskService;
-    private final AccessControlService accessControlService;
 
     @PostMapping("/analyze")
     public ResponseEntity<?> analyze(@RequestBody Map<String, String> body) {
@@ -26,7 +24,9 @@ public class MigrationRiskController {
             return ResponseEntity.badRequest().body(Map.of("message", "connectionId and sql are required"));
         }
         try {
-            accessControlService.assertCanReadConnectionContent(connectionId);
+            // MigrationRiskService.analyze asserts assertCanReadConnectionContent before
+            // parsing, credential decryption or session opening — see AUTHORIZED_ELSEWHERE
+            // in ConnectionScopedAuthorizationSafetyTest.
             MigrationRiskReport report = migrationRiskService.analyze(connectionId, sql);
             return ResponseEntity.ok(report);
         } catch (ResponseStatusException e) {
