@@ -439,13 +439,20 @@ report in chat, but it never computes it.
   (`varchar(50)` → `varchar(100)`, which Postgres does NOT rewrite) from a genuine
   type change (which does). It reports the conservative rewrite verdict for both
   rather than risk a false SAFE.
-- **Lock strength is ranked by an explicit ordering list, not `max(mode)`.**
-  Postgres lock mode names sort alphabetically in a way that has nothing to do with
-  strength — `"ShareLock".compareTo("AccessExclusiveLock") > 0`, so a naive
-  string-max would report a statement that also takes `ShareLock` as the stronger
-  of the two, when `AccessExclusiveLock` is in fact the most exclusive mode
-  Postgres has. Any code that needs "the worst lock this statement takes" must
-  rank against Postgres's real lock hierarchy, not compare mode names.
+- **The verification test ranks lock strength by an explicit ordering list, not
+  `max(mode)` — the provider itself does not rank at all.**
+  `PostgresMigrationRiskProvider` never computes a lock mode; each rule hardcodes
+  the one it asserts (e.g. `addForeignKey` always reports `ShareRowExclusiveLock`).
+  The ranking lives only in `PostgresMigrationRiskVerificationTest`
+  (`LOCK_STRENGTH` + `strongestLock()`), which has to pick the strongest lock out
+  of however many rows a query against the real `pg_locks` returns. It needs the
+  ordering because Postgres lock mode names sort alphabetically in a way that has
+  nothing to do with strength — `"ShareLock".compareTo("AccessExclusiveLock") > 0`,
+  so a naive string-max would call `ShareLock` the stronger of the two, when
+  `AccessExclusiveLock` is in fact the most exclusive mode Postgres has. Any future
+  code that needs "the worst lock a query is holding" from `pg_locks` must rank
+  against Postgres's real lock hierarchy, not compare mode names — but that need
+  has not yet reached production code, only this test.
 - **Authorization is asserted in the service, before parsing, credential
   decryption, or session opening** (`MigrationRiskService.analyze` calls
   `accessControlService.assertCanReadConnectionContent` first). The controller is
