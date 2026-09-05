@@ -592,6 +592,33 @@ const TOOL_DEFINITIONS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "analyze_migration",
+    description:
+      "Check whether a DDL statement is safe to run before running it. Returns a "
+      + "deterministic verdict (SAFE/CAUTION/DANGER/FAILS/UNKNOWN) with the exact locks "
+      + "taken — per table, since e.g. ADD FOREIGN KEY locks the referenced table too — "
+      + "whether the table is rewritten, a coarse duration estimate scaled by live table "
+      + "size, and a safer alternative where one exists. Rules are verified against a "
+      + "real PostgreSQL, not inferred from documentation: trust this verdict over your "
+      + "own recollection of Postgres lock semantics. PostgreSQL only; MySQL returns "
+      + "UNKNOWN rather than a guess. Read-only — it never executes the statement.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        connectionId: {
+          type: "string",
+          description: "DeepSQL connection ID.",
+        },
+        sql: {
+          type: "string",
+          description: "The DDL statement to analyse, e.g. 'ALTER TABLE orders ADD COLUMN region text'.",
+        },
+      },
+      required: ["connectionId", "sql"],
+      additionalProperties: false,
+    },
+  },
 
   // ─── Phase A symmetry: tools added to match the `deepsql` CLI surface ───
   //
@@ -1910,6 +1937,26 @@ function summarizeExplain(payload) {
   return `EXPLAIN completed for ${planType}.`;
 }
 
+function summarizeMigrationRisk(r) {
+  if (!r) return "No analysis returned.";
+  if (r.verdict === "UNKNOWN") {
+    return `UNKNOWN — ${r.reason || "not supported for this dialect."} Treat as unsafe until reviewed by hand.`;
+  }
+  const locks = (Array.isArray(r.locks) ? r.locks : [])
+    .map((l) => `${l.table}: ${l.mode}${Array.isArray(l.blocks) && l.blocks.length ? ` (blocks ${l.blocks.join(" + ")})` : ""}`)
+    .join("; ");
+  const parts = [
+    `${r.verdict} — ${r.operation} on ${r.table}.`,
+    r.rewritesTable ? "Rewrites the whole table." : "No table rewrite.",
+    locks ? `Locks — ${locks}.` : "",
+    r.tableRows != null ? `Table has ~${Number(r.tableRows).toLocaleString()} rows.` : "",
+    r.estimatedDuration ? `Estimated duration: ${r.estimatedDuration}.` : "",
+    r.reason || "",
+    r.saferAlternative ? `Safer: ${r.saferAlternative}` : "",
+  ];
+  return parts.filter(Boolean).join(" ");
+}
+
 function buildToolResult(name, payload, extra = {}) {
   let summary;
 
@@ -1982,6 +2029,9 @@ function buildToolResult(name, payload, extra = {}) {
       break;
     case "analyze_query_plan":
       summary = summarizeExplain(payload);
+      break;
+    case "analyze_migration":
+      summary = summarizeMigrationRisk(payload);
       break;
     default:
       summary = JSON.stringify(payload, null, 2);
@@ -2445,6 +2495,20 @@ async function handleToolCall(config, name, args = {}) {
           useAnalyze: args.useAnalyze === true,
           mutationConfirmed: args.confirmMutation === true,
         },
+      });
+
+      return buildToolResult(name, payload);
+    }
+
+    case "analyze_migration": {
+      const connectionId = String(args.connectionId || "").trim();
+      const sql = String(args.sql || "").trim();
+      if (!connectionId) return buildToolError("connectionId is required.");
+      if (!sql) return buildToolError("sql is required.");
+
+      const payload = await callDeepSqlApi(config, "/migrations/analyze", {
+        method: "POST",
+        json: { connectionId, sql },
       });
 
       return buildToolResult(name, payload);
