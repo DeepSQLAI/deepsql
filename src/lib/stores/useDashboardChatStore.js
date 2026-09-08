@@ -3,6 +3,16 @@ import { useShallow } from 'zustand/react/shallow'
 import { generateDashboardStream } from '@/lib/dashboardGenerator'
 import { savedDashboardsAPI } from '@/lib/api/client'
 
+// Mirrors SavedDashboardService.buildReplyText — this tab renders the reply
+// live, the backend persists its own copy, and the two must read the same.
+const DEFAULT_BUILD_REPLY =
+  'Done — built and verified against your data. Saved as a draft — tell me what to change.'
+
+const buildReplyText = (config) => {
+  const summary = config?.summary
+  return typeof summary === 'string' && summary.trim() ? summary.trim() : DEFAULT_BUILD_REPLY
+}
+
 // Keeps each dashboard workspace's in-flight generation (chat messages,
 // streaming steps, the built config, the abort fn) alive in memory across
 // component mount/unmount. DashboardWorkspace used to hold all of this in
@@ -282,7 +292,7 @@ export const useDashboardChatStore = create((set, get) => ({
             liveShell: null,
             liveWidget: null,
             liveWidgets: null,
-            messages: [...cur.messages, { role: 'agent', text: 'Done — built and verified against your data. Saved as a draft — tell me what to change.' }],
+            messages: [...cur.messages, { role: 'agent', text: buildReplyText(next) }],
           }
         })
         // completeBuildTurn (the backend's own persistence for this turn) just
