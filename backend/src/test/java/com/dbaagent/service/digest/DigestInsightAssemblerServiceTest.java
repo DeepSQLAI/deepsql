@@ -59,6 +59,8 @@ class DigestInsightAssemblerServiceTest {
     private SlackDigestLogRepository digestLogRepository;
     @Mock
     private SlowQueryHistoryRepository slowQueryHistoryRepository;
+    @Mock
+    private LockContentionRepository lockContentionRepository;
 
     private DigestInsightAssemblerService service;
 
@@ -77,7 +79,8 @@ class DigestInsightAssemblerServiceTest {
             growthAnomalyRepository,
             playbookAlertRepository,
             digestLogRepository,
-            slowQueryHistoryRepository
+            slowQueryHistoryRepository,
+            lockContentionRepository
         );
     }
 
@@ -149,6 +152,7 @@ class DigestInsightAssemblerServiceTest {
             when(playbookAlertRepository.findRecentAlerts(anyString(), any())).thenReturn(List.of());
             when(slowQueryHistoryRepository.findByConnectionIdSince(anyString(), any(), any()))
                 .thenReturn(List.of());
+            when(lockContentionRepository.findRecentForDigest(anyString(), any())).thenReturn(List.of());
 
             BrainV2Alert queryAlert = BrainV2Alert.builder()
                 .id("alert-1")
@@ -567,6 +571,77 @@ class DigestInsightAssemblerServiceTest {
                 i.getCategory() == InsightCategory.BRAIN_INTELLIGENCE
             );
         }
+
+        @Test
+        void minesLockContentionCorrectly() {
+            setupEmptyMocks();
+
+            LockContention contention = LockContention.builder()
+                .id("lock-1")
+                .connectionId(CONNECTION_ID)
+                .blockingPid("12345")
+                .blockedPid("67890")
+                .blockingUser("admin")
+                .blockedUser("app_user")
+                .lockType("relation")
+                .lockMode("AccessExclusiveLock")
+                .tableName("orders")
+                .waitDurationSeconds(75L)
+                .severity(LockContention.Severity.CRITICAL)
+                .resolved(false)
+                .detectedAt(LocalDateTime.now().minusHours(1))
+                .build();
+
+            when(lockContentionRepository.findRecentForDigest(eq(CONNECTION_ID), any()))
+                .thenReturn(List.of(contention));
+
+            DigestAssemblyResult result = service.assembleDigest(
+                USERNAME, CONNECTION_ID, Role.ADMIN, PersonaTag.DBA, null);
+
+            assertThat(result.getInsights()).anyMatch(i ->
+                i.getSourceType().equals("LockContention") &&
+                i.getCategory() == InsightCategory.LOCK_CONCURRENCY &&
+                i.getSeverity() >= 90
+            );
+        }
+
+        @Test
+        void lockContentionRanksHigherForDbaThanDataEng() {
+            setupEmptyMocks();
+
+            LockContention contention = LockContention.builder()
+                .id("lock-2")
+                .connectionId(CONNECTION_ID)
+                .blockingPid("111")
+                .blockedPid("222")
+                .lockType("relation")
+                .lockMode("AccessExclusiveLock")
+                .waitDurationSeconds(45L)
+                .severity(LockContention.Severity.HIGH)
+                .resolved(false)
+                .detectedAt(LocalDateTime.now().minusHours(2))
+                .build();
+
+            when(lockContentionRepository.findRecentForDigest(eq(CONNECTION_ID), any()))
+                .thenReturn(List.of(contention));
+
+            DigestAssemblyResult dbaResult = service.assembleDigest(
+                USERNAME, CONNECTION_ID, Role.ADMIN, PersonaTag.DBA, null);
+            DigestAssemblyResult dataEngResult = service.assembleDigest(
+                USERNAME, CONNECTION_ID, Role.ADMIN, PersonaTag.DATA_ENG, null);
+
+            Optional<DigestInsight> dbaLock = dbaResult.getInsights().stream()
+                .filter(i -> i.getCategory() == InsightCategory.LOCK_CONCURRENCY)
+                .findFirst();
+            Optional<DigestInsight> dataEngLock = dataEngResult.getInsights().stream()
+                .filter(i -> i.getCategory() == InsightCategory.LOCK_CONCURRENCY)
+                .findFirst();
+
+            if (dbaLock.isPresent() && dataEngLock.isPresent()) {
+                assertThat(dbaLock.get().getRankScore())
+                    .isGreaterThan(dataEngLock.get().getRankScore());
+            }
+        }
     }
 
     @Nested
@@ -590,30 +665,58 @@ class DigestInsightAssemblerServiceTest {
 
         @Test
         void personaMultiplierIsCorrect() {
+            // DBA priorities: locks, query perf, config tuning
+            assertThat(InsightCategory.LOCK_CONCURRENCY.getPersonaMultiplier(PersonaTag.DBA))
+                .isEqualTo(2.0);
             assertThat(InsightCategory.QUERY_PERFORMANCE.getPersonaMultiplier(PersonaTag.DBA))
                 .isEqualTo(2.0);
+            
+            // DATA_ENG priorities: docs, schema changes
             assertThat(InsightCategory.DOCUMENTATION_GAPS.getPersonaMultiplier(PersonaTag.DATA_ENG))
                 .isEqualTo(2.0);
+            
+            // EXEC priorities: cost/capacity
             assertThat(InsightCategory.COST_CAPACITY.getPersonaMultiplier(PersonaTag.EXEC))
                 .isEqualTo(2.0);
+            
+            // APP_ENG priorities: schema changes (migrations), query perf
             assertThat(InsightCategory.SCHEMA_CHANGES.getPersonaMultiplier(PersonaTag.APP_ENG))
                 .isEqualTo(2.0);
+            
+            // APP_ENG cares about DDL blocking risk
+            assertThat(InsightCategory.LOCK_CONCURRENCY.getPersonaMultiplier(PersonaTag.APP_ENG))
+                .isEqualTo(1.6);
         }
 
         @Test
         void primaryCategoriesAreCorrect() {
             Set<InsightCategory> dbaPrimary = InsightCategory.getPrimaryCategories(PersonaTag.DBA);
             assertThat(dbaPrimary).contains(
+                InsightCategory.LOCK_CONCURRENCY,  // idle-in-txn, locks
                 InsightCategory.QUERY_PERFORMANCE,
                 InsightCategory.INDEX_RECOMMENDATIONS,
-                InsightCategory.CONFIG_TUNING
+                InsightCategory.CONFIG_TUNING,
+                InsightCategory.GROWTH_ANOMALIES   // bloat, vacuum
             );
 
             Set<InsightCategory> dataEngPrimary = InsightCategory.getPrimaryCategories(PersonaTag.DATA_ENG);
             assertThat(dataEngPrimary).contains(
-                InsightCategory.DOCUMENTATION_GAPS,
-                InsightCategory.SCHEMA_CHANGES,
-                InsightCategory.GROWTH_ANOMALIES
+                InsightCategory.DOCUMENTATION_GAPS,  // semantic drift
+                InsightCategory.SCHEMA_CHANGES,      // ETL breaks
+                InsightCategory.GROWTH_ANOMALIES     // load patterns
+            );
+
+            Set<InsightCategory> appEngPrimary = InsightCategory.getPrimaryCategories(PersonaTag.APP_ENG);
+            assertThat(appEngPrimary).contains(
+                InsightCategory.SCHEMA_CHANGES,      // migrations, DDL risk
+                InsightCategory.QUERY_PERFORMANCE,   // ORM patterns
+                InsightCategory.LOCK_CONCURRENCY     // ACCESS EXCLUSIVE during deploys
+            );
+
+            Set<InsightCategory> execPrimary = InsightCategory.getPrimaryCategories(PersonaTag.EXEC);
+            assertThat(execPrimary).contains(
+                InsightCategory.COST_CAPACITY,       // budget
+                InsightCategory.SYSTEM_ALERTS        // risk
             );
         }
     }
@@ -705,5 +808,6 @@ class DigestInsightAssemblerServiceTest {
             .thenReturn(List.of());
         when(learningProgressRepository.findByConnectionId(anyString())).thenReturn(Optional.empty());
         when(brainScoreRepository.findLatestByConnectionId(anyString())).thenReturn(Optional.empty());
+        when(lockContentionRepository.findRecentForDigest(anyString(), any())).thenReturn(List.of());
     }
 }

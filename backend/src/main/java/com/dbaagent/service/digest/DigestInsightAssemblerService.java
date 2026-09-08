@@ -8,6 +8,7 @@ import com.dbaagent.repository.brain.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -55,6 +56,7 @@ public class DigestInsightAssemblerService {
     private final PlaybookAlertRepository playbookAlertRepository;
     private final SlackDigestLogRepository digestLogRepository;
     private final SlowQueryHistoryRepository slowQueryHistoryRepository;
+    private final LockContentionRepository lockContentionRepository;
 
     private static final int DEFAULT_MAX_INSIGHTS = 15;
     private static final int EXEC_MAX_INSIGHTS = 5;
@@ -80,6 +82,8 @@ public class DigestInsightAssemblerService {
 
         List<DigestInsight> candidates = new ArrayList<>();
 
+        // Mine from all Brain stores — each method surfaces signals differently
+        // based on what's available in the store (persona filtering happens at ranking)
         candidates.addAll(mineBrainAlerts(connectionId, windowStart));
         candidates.addAll(mineIndexRecommendations(connectionId));
         candidates.addAll(mineSchemaChanges(connectionId, windowStart));
@@ -87,6 +91,7 @@ public class DigestInsightAssemblerService {
         candidates.addAll(minePlaybookAlerts(connectionId, windowStart));
         candidates.addAll(mineSlowQueryInsights(connectionId, windowStart));
         candidates.addAll(mineBrainProgress(connectionId));
+        candidates.addAll(mineLockContention(connectionId, windowStart));
 
         int totalCandidates = candidates.size();
         log.debug("Mined {} candidate insights from all sources", totalCandidates);
@@ -174,6 +179,7 @@ public class DigestInsightAssemblerService {
         return switch (role) {
             case ADMIN -> 1.0;
             case DBA -> switch (category) {
+                case LOCK_CONCURRENCY -> 1.4;  // idle-in-txn, locks are DBA operational priority
                 case QUERY_PERFORMANCE, INDEX_RECOMMENDATIONS, CONFIG_TUNING -> 1.3;
                 case BRAIN_INTELLIGENCE, GROWTH_ANOMALIES -> 1.2;
                 default -> 1.0;
@@ -185,6 +191,7 @@ public class DigestInsightAssemblerService {
             };
             case DEVELOPER -> switch (category) {
                 case QUERY_PERFORMANCE, SCHEMA_CHANGES -> 1.2;
+                case LOCK_CONCURRENCY -> 1.1;  // ACCESS EXCLUSIVE during deploys
                 default -> 1.0;
             };
         };
@@ -648,6 +655,197 @@ public class DigestInsightAssemblerService {
         if (score.getIndexAccessScore() != null) {
             if (sb.length() > 0) sb.append(", ");
             sb.append(String.format("Index: %.0f", score.getIndexAccessScore()));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Mine lock contention insights: idle-in-txn, lock waits, ACCESS EXCLUSIVE blocks.
+     *
+     * <h4>DBA signals:</h4>
+     * <ul>
+     *   <li>Idle-in-transaction sessions (holding locks, blocking others)</li>
+     *   <li>Long lock waits (critical if > 60s)</li>
+     *   <li>Blocking chains (one session blocks many)</li>
+     * </ul>
+     *
+     * <h4>APP_ENG signals:</h4>
+     * <ul>
+     *   <li>ACCESS EXCLUSIVE locks (DDL blocking queries during deploys)</li>
+     *   <li>Lock waits on tables they own</li>
+     * </ul>
+     */
+    private List<DigestInsight> mineLockContention(String connectionId, LocalDateTime since) {
+        List<DigestInsight> insights = new ArrayList<>();
+
+        List<LockContention> recent = lockContentionRepository.findRecentForDigest(connectionId, since);
+        if (recent.isEmpty()) return insights;
+
+        // Group by severity
+        long criticalCount = recent.stream()
+            .filter(lc -> lc.getSeverity() == LockContention.Severity.CRITICAL)
+            .count();
+        long highCount = recent.stream()
+            .filter(lc -> lc.getSeverity() == LockContention.Severity.HIGH)
+            .count();
+
+        // Find longest wait
+        Optional<LockContention> longestWait = recent.stream()
+            .filter(lc -> lc.getWaitDurationSeconds() != null)
+            .max(Comparator.comparing(LockContention::getWaitDurationSeconds));
+
+        // Check for ACCESS EXCLUSIVE (DDL blocking) — APP_ENG signal
+        List<LockContention> accessExclusive = recent.stream()
+            .filter(lc -> lc.getLockMode() != null &&
+                         lc.getLockMode().toUpperCase().contains("EXCLUSIVE"))
+            .toList();
+
+        // Identify blocking chains (one PID blocking multiple sessions) — DBA signal
+        Map<String, Long> blockingPidCounts = recent.stream()
+            .filter(lc -> !Boolean.TRUE.equals(lc.getResolved()))
+            .collect(Collectors.groupingBy(LockContention::getBlockingPid, Collectors.counting()));
+        Optional<Map.Entry<String, Long>> topBlocker = blockingPidCounts.entrySet().stream()
+            .filter(e -> e.getValue() > 1)
+            .max(Map.Entry.comparingByValue());
+
+        // Critical lock contention — DBA priority
+        if (criticalCount > 0 && longestWait.isPresent()) {
+            LockContention top = longestWait.get();
+            String headline = criticalCount == 1
+                ? String.format("Critical lock wait: %ds on %s",
+                    top.getWaitDurationSeconds(),
+                    top.getTableName() != null ? top.getTableName() : top.getLockTarget())
+                : String.format("%d critical lock contentions (max wait: %ds)",
+                    criticalCount, top.getWaitDurationSeconds());
+
+            insights.add(DigestInsight.builder()
+                .category(InsightCategory.LOCK_CONCURRENCY)
+                .headline(headline)
+                .description(buildLockDescription(top))
+                .severity(92)
+                .timestamp(top.getDetectedAt())
+                .actionable(true)
+                .suggestedAction("Investigate blocking session " + top.getBlockingPid() +
+                    " — consider terminating if safe")
+                .sourceId(top.getId())
+                .sourceType("LockContention")
+                .signatureKey(buildSignatureKey(InsightCategory.LOCK_CONCURRENCY,
+                    "LockContention", "critical:" + criticalCount))
+                .connectionId(connectionId)
+                .contextData(Map.of(
+                    "criticalCount", criticalCount,
+                    "maxWaitSeconds", top.getWaitDurationSeconds(),
+                    "blockingPid", top.getBlockingPid(),
+                    "lockType", top.getLockType() != null ? top.getLockType() : "unknown"
+                ))
+                .involvedTables(top.getTableName() != null ? new String[]{top.getTableName()} : null)
+                .build());
+        }
+
+        // ACCESS EXCLUSIVE / DDL blocking — APP_ENG priority
+        if (!accessExclusive.isEmpty() && criticalCount == 0) {
+            LockContention top = accessExclusive.get(0);
+            insights.add(DigestInsight.builder()
+                .category(InsightCategory.LOCK_CONCURRENCY)
+                .headline(String.format("DDL blocking risk: %d ACCESS EXCLUSIVE lock%s",
+                    accessExclusive.size(), accessExclusive.size() != 1 ? "s" : ""))
+                .description(String.format("Table %s locked with %s — queries blocked until DDL completes",
+                    top.getTableName() != null ? top.getTableName() : "unknown",
+                    top.getLockMode()))
+                .severity(75)
+                .timestamp(top.getDetectedAt())
+                .actionable(true)
+                .suggestedAction("Schedule DDL operations during low-traffic windows")
+                .sourceId(top.getId())
+                .sourceType("LockContention")
+                .signatureKey(buildSignatureKey(InsightCategory.LOCK_CONCURRENCY,
+                    "LockContention", "ddl:" + accessExclusive.size()))
+                .connectionId(connectionId)
+                .contextData(Map.of(
+                    "accessExclusiveCount", accessExclusive.size(),
+                    "lockMode", top.getLockMode()
+                ))
+                .build());
+        }
+
+        // Blocking chain — DBA signal
+        if (topBlocker.isPresent() && topBlocker.get().getValue() >= 3) {
+            String blockerPid = topBlocker.get().getKey();
+            long blockedCount = topBlocker.get().getValue();
+            Optional<LockContention> blockerInfo = recent.stream()
+                .filter(lc -> blockerPid.equals(lc.getBlockingPid()))
+                .findFirst();
+
+            String query = blockerInfo.map(LockContention::getBlockingQuery)
+                .map(q -> q.length() > 100 ? q.substring(0, 100) + "..." : q)
+                .orElse("unknown query");
+
+            insights.add(DigestInsight.builder()
+                .category(InsightCategory.LOCK_CONCURRENCY)
+                .headline(String.format("Blocking chain: PID %s blocking %d sessions", blockerPid, blockedCount))
+                .description("Blocker query: " + query)
+                .severity(80)
+                .timestamp(blockerInfo.map(LockContention::getDetectedAt).orElse(LocalDateTime.now()))
+                .actionable(true)
+                .suggestedAction("Review and potentially terminate session " + blockerPid)
+                .sourceId(blockerInfo.map(LockContention::getId).orElse(null))
+                .sourceType("LockContention")
+                .signatureKey(buildSignatureKey(InsightCategory.LOCK_CONCURRENCY,
+                    "LockContention", "chain:" + blockerPid))
+                .connectionId(connectionId)
+                .contextData(Map.of(
+                    "blockerPid", blockerPid,
+                    "blockedSessionCount", blockedCount
+                ))
+                .build());
+        }
+
+        // High-severity summary if no criticals
+        if (criticalCount == 0 && highCount > 0) {
+            LockContention top = recent.stream()
+                .filter(lc -> lc.getSeverity() == LockContention.Severity.HIGH)
+                .findFirst()
+                .orElse(recent.get(0));
+
+            insights.add(DigestInsight.builder()
+                .category(InsightCategory.LOCK_CONCURRENCY)
+                .headline(String.format("%d lock wait%s in digest window",
+                    highCount, highCount != 1 ? "s" : ""))
+                .description(buildLockDescription(top))
+                .severity(65)
+                .timestamp(top.getDetectedAt())
+                .actionable(true)
+                .suggestedAction("Review lock patterns in Performance tab")
+                .sourceId(top.getId())
+                .sourceType("LockContention")
+                .signatureKey(buildSignatureKey(InsightCategory.LOCK_CONCURRENCY,
+                    "LockContention", "high:" + highCount))
+                .connectionId(connectionId)
+                .build());
+        }
+
+        return insights;
+    }
+
+    private String buildLockDescription(LockContention lc) {
+        StringBuilder sb = new StringBuilder();
+        if (lc.getBlockingUser() != null) {
+            sb.append("Blocker: ").append(lc.getBlockingUser());
+        }
+        if (lc.getBlockedUser() != null) {
+            if (sb.length() > 0) sb.append(" → ");
+            sb.append("Blocked: ").append(lc.getBlockedUser());
+        }
+        if (lc.getLockType() != null) {
+            if (sb.length() > 0) sb.append(". ");
+            sb.append("Lock: ").append(lc.getLockType());
+            if (lc.getLockMode() != null) {
+                sb.append(" (").append(lc.getLockMode()).append(")");
+            }
+        }
+        if (lc.getTableName() != null) {
+            if (sb.length() > 0) sb.append(" on ");
+            sb.append(lc.getTableName());
         }
         return sb.toString();
     }
