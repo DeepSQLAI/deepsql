@@ -11,18 +11,20 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 
 /**
- * Scheduled task configuration for daily digest delivery.
+ * Scheduled task configuration for digest delivery.
  *
- * <p>Uses the hybrid mode: per-user personalized delivery when UserDigestPreference
- * rows exist; legacy channel-broadcast when none exist.
- *
- * <h3>PR3 Changes</h3>
+ * <p>Ticks frequently (default: every minute) and delegates to
+ * {@link SlackDailyDigestService#processDigestTick()} which:
  * <ul>
- *   <li>Now calls {@code sendDailyDigestHybrid()} which routes to per-user or legacy
- *       based on whether any preferences are configured</li>
- *   <li>Two users with different personas on the same connection get different digests</li>
- *   <li>Fallback to legacy broadcast if no per-user preferences exist for a connection</li>
+ *   <li>Honors each enabled {@code UserDigestPreference.cronExpression} in that
+ *       user's timezone when preferences exist</li>
+ *   <li>Falls back to the legacy singleton broadcast gated by
+ *       {@code slack.daily-digest.cron} when no enabled preferences exist</li>
  * </ul>
+ *
+ * <p>The global property {@code slack.daily-digest.cron} remains the default
+ * schedule for preferences that leave {@code cronExpression} blank, and the
+ * legacy broadcast schedule when the system is still in singleton mode.
  */
 @Configuration
 @Profile("!test")
@@ -32,12 +34,11 @@ public class SlackDailyDigestTaskConfig {
     @Bean
     Task<Void> slackDailyDigestTask(
             SlackDailyDigestService service,
-            @Value("${slack.daily-digest.cron:0 0 9 * * *}") String cron) {
-        return Tasks.recurring("slack-daily-digest", Schedules.cron(cron))
+            @Value("${slack.daily-digest.tick-cron:0 * * * * *}") String tickCron) {
+        return Tasks.recurring("slack-daily-digest", Schedules.cron(tickCron))
             .execute((inst, ctx) -> {
-                log.info("Starting scheduled daily digest delivery");
-                service.sendDailyDigestHybrid();
-                log.info("Completed scheduled daily digest delivery");
+                log.debug("Digest scheduler tick");
+                service.processDigestTick();
             });
     }
 }

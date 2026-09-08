@@ -16,35 +16,31 @@ The digest system now supports **per-recipient personalization**: two users with
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        Scheduled Task (cron)                        │
+│              Minute tick (slack.daily-digest.tick-cron)             │
 │                     SlackDailyDigestTaskConfig                      │
+│                        processDigestTick()                          │
 └─────────────────────────────────────────────────────────────────────┘
                                    │
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                  sendDailyDigestHybrid()                            │
-│                                                                     │
-│   ┌──────────────────────┐   ┌──────────────────────┐               │
-│   │ Per-user preferences │   │ Legacy broadcast     │               │
-│   │ exist?               │──▶│ (channel bindings)   │               │
-│   └──────────────────────┘   └──────────────────────┘               │
-│          │ yes                        │                              │
-│          ▼                            ▼                              │
-│   ┌──────────────────────┐   ┌──────────────────────┐               │
-│   │ sendPersonalizedDigests │ │ sendLegacyDigest     │              │
-│   └──────────────────────┘   └──────────────────────┘               │
-│          │                                                           │
-│          ▼                                                           │
-│   ┌──────────────────────────────────────────────────────────────┐  │
-│   │ For each recipient:                                          │  │
-│   │  1. Resolve user role                                        │  │
-│   │  2. assembleDigest(username, connectionId, role, persona)    │  │
-│   │  3. formatPersonalizedDigest() [EXEC: 3 bullets]             │  │
-│   │  4. openDmChannel() via Slack API                            │  │
-│   │  5. postMessage() to DM channel                              │  │
-│   │  6. Log to SlackDigestLog with recipient details             │  │
-│   └──────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────┘
+                 ┌─────────────────┴─────────────────┐
+                 ▼                                   ▼
+┌────────────────────────────┐     ┌────────────────────────────────┐
+│ No enabled preferences     │     │ Enabled preferences exist      │
+│ Global cron due (UTC)?     │     │ For each SLACK_DM preference:  │
+│  yes → legacy broadcast    │     │  • effective cron (pref or     │
+│  no  → skip                │     │    global default)             │
+└────────────────────────────┘     │  • evaluate in pref timezone   │
+                                   │  • skip if already logged this │
+                                   │    fire window (SlackDigestLog)│
+                                   │  • else per-recipient delivery │
+                                   └────────────────────────────────┘
+                                                   │
+                                                   ▼
+                                   ┌────────────────────────────────┐
+                                   │ assembleDigest → format → DM   │
+                                   │ → SlackDigestLog (personalized)│
+                                   └────────────────────────────────┘
+
+Manual/admin trigger still uses sendDailyDigestHybrid() (force all recipients).
 ```
 
 ## Persona Tags
@@ -146,7 +142,7 @@ The digest preferences are accessible from:
 - View all your digest subscriptions
 - Toggle digests on/off per connection
 - Change persona without recreating
-- Quick schedule presets (8 AM, 9 AM, Noon, etc.)
+- Quick schedule presets (8 AM, 9 AM, Noon, etc.) — stored on the preference and honored by the minute-tick scheduler
 - Seed for all your connections at once
 
 ## Database Schema
@@ -187,8 +183,17 @@ ALTER TABLE slack_digest_log ADD COLUMN personalized BOOLEAN NOT NULL DEFAULT fa
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `slack.daily-digest.cron` | `0 0 9 * * *` | Global digest schedule (9 AM daily) |
+| `slack.daily-digest.tick-cron` | `0 * * * * *` | Minute tick that evaluates due preferences |
+| `slack.daily-digest.cron` | `0 0 9 * * *` | Global/legacy schedule (UTC); also default when a preference leaves `cronExpression` blank |
 | `slack.digest.admins-only` | `true` | Restrict legacy broadcast to admin channels |
+
+### Per-user schedules
+
+Each `UserDigestPreference` may set `cronExpression` (Spring 6-field) and an IANA `timezone`.
+The minute tick uses Spring's `CronExpression` API to decide who is due. Delivery is
+idempotent per preference + connection for that fire window via `SlackDigestLog`.
+UI schedule presets (8 AM / 9 AM / Noon / …) write these fields — they are honored by
+the scheduler, not display-only.
 
 ## Out of Scope (Future PRs)
 
@@ -204,15 +209,18 @@ Run the tests:
 
 ```bash
 cd backend
-./mvnw test -Dtest=PerRecipientDigestDeliveryTest,DigestPreferenceSeedServiceTest,SlackDailyDigestServiceTest
+./mvnw test -Dtest=PerRecipientDigestDeliveryTest,PerRecipientDigestCronSchedulingTest,DigestCronMatcherTest,DigestPreferenceSeedServiceTest,SlackDailyDigestServiceTest
 ```
 
 Key test scenarios:
 - Two users with different personas get different digests
+- Different crons → only the due user is delivered on a tick
+- Timezone: `0 0 9 * * *` in `America/New_York` fires at 13:00 UTC (EDT)
+- Idempotent: already-logged fire window is skipped
 - EXEC gets tight 3-bullet summary
 - Seed skips existing preferences (idempotent)
 - Dry run mode for preview
-- Legacy fallback when no preferences exist
+- Legacy fallback when no preferences exist (gated by global cron)
 
 ## GTM Line
 

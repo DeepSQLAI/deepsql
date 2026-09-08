@@ -103,7 +103,7 @@ public class UserDigestPreference {
 
     /**
      * Optional timezone for schedule interpretation.
-     * When null, uses system default (typically UTC).
+     * When null or invalid, the digest tick evaluates the cron in UTC.
      * Format: IANA timezone ID (e.g., "America/New_York", "Europe/London").
      */
     @Column(name = "timezone", length = 64)

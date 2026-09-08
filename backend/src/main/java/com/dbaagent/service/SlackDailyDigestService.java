@@ -46,6 +46,7 @@ import com.dbaagent.repository.SchemaChangeRepository;
 import com.dbaagent.repository.SlackChannelBindingRepository;
 import com.dbaagent.repository.SlackDigestLogRepository;
 import com.dbaagent.repository.TableStatsHistoryRepository;
+import com.dbaagent.service.digest.DigestCronMatcher;
 import com.dbaagent.service.digest.DigestInsightAssemblerService;
 import com.slack.api.Slack;
 import com.slack.api.methods.MethodsClient;
@@ -60,6 +61,9 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.Instant;
+import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -88,6 +92,14 @@ public class SlackDailyDigestService {
      */
     @Value("${slack.digest.admins-only:true}")
     private boolean digestAdminsOnly;
+
+    /**
+     * Global / legacy digest schedule. Also the default when a preference leaves
+     * {@code cronExpression} blank. Interpreted in UTC for legacy; per-user prefs
+     * use their own timezone.
+     */
+    @Value("${slack.daily-digest.cron:0 0 9 * * *}")
+    private String globalDigestCron;
 
     private final SlackRuntimeSettingsService slackRuntimeSettingsService;
     private final SlackChannelBindingRepository channelBindingRepository;
@@ -828,9 +840,149 @@ public class SlackDailyDigestService {
             .orElse(LocalDateTime.now().minusHours(24));
     }
 
+    private static final Duration DIGEST_TICK_LOOKBACK = Duration.ofMinutes(1);
+
+    /**
+     * Minute-tick entry point used by {@code SlackDailyDigestTaskConfig}.
+     *
+     * <p>When no enabled preferences exist, runs the legacy channel broadcast
+     * only if the global {@code slack.daily-digest.cron} is due (UTC).
+     * When preferences exist, delivers only to preferences whose cron matches
+     * in that user's timezone and that have not already been logged for this
+     * fire window.
+     */
+    public void processDigestTick() {
+        processDigestTick(Instant.now());
+    }
+
+    /**
+     * Testable overload of {@link #processDigestTick()}.
+     */
+    public void processDigestTick(Instant now) {
+        if (now == null) {
+            now = Instant.now();
+        }
+
+        long enabledCount = userDigestPreferenceRepository.countByEnabledTrue();
+        if (enabledCount == 0) {
+            if (DigestCronMatcher.isDue(globalDigestCron, ZoneId.of("UTC"), now, DIGEST_TICK_LOOKBACK)) {
+                log.info("Digest tick: no enabled preferences; running legacy broadcast (global cron due)");
+                runLegacyBroadcastForAllConnections();
+            } else {
+                log.debug("Digest tick: no enabled preferences; global cron not due");
+            }
+            return;
+        }
+
+        String globalCron = (globalDigestCron == null || globalDigestCron.isBlank())
+            ? "0 0 9 * * *"
+            : globalDigestCron;
+
+        List<UserDigestPreference> enabledPrefs = userDigestPreferenceRepository
+            .findByEnabledTrueAndDeliveryMethod(DigestDeliveryMethod.SLACK_DM);
+
+        int dueCount = 0;
+        int delivered = 0;
+        for (UserDigestPreference pref : enabledPrefs) {
+            String cron = pref.getEffectiveCronExpression(globalCron);
+            ZoneId zone = DigestCronMatcher.resolveZone(pref.getTimezone());
+            var window = DigestCronMatcher.dueWindowStart(cron, zone, now, DIGEST_TICK_LOOKBACK);
+            if (window.isEmpty()) {
+                continue;
+            }
+            dueCount++;
+            Instant fireInstant = window.get();
+            List<String> connectionIds = resolvePreferenceConnections(pref);
+            for (String connectionId : connectionIds) {
+                if (alreadyDeliveredForWindow(pref, connectionId, fireInstant)) {
+                    log.debug("Skipping digest for {} / {} — already delivered this window",
+                        pref.getUsername(), connectionId);
+                    continue;
+                }
+                try {
+                    boolean slackEnabled = isSlackDeliveryEnabled();
+                    String connName = connectionName(connectionId);
+                    LocalDateTime since = getLastDigestTime(connectionId);
+                    PersonalizedDigestResult result = sendPersonalizedDigestToUser(
+                        connectionId, connName, pref, since, slackEnabled);
+                    if (result.generated() || result.sent()) {
+                        delivered++;
+                    }
+                } catch (Exception e) {
+                    log.error("Failed due-preference digest for user {} connection {}: {}",
+                        pref.getUsername(), connectionId, e.getMessage(), e);
+                }
+            }
+        }
+
+        log.info("Digest tick (per-user): {} due preference(s), {} delivery attempt(s)",
+            dueCount, delivered);
+
+        // Connections with no recipients still get legacy broadcast when the global cron fires.
+        if (DigestCronMatcher.isDue(globalCron, ZoneId.of("UTC"), now, DIGEST_TICK_LOOKBACK)) {
+            for (String connectionId : digestConnectionIds()) {
+                if (userDigestPreferenceRepository.findEnabledForConnection(connectionId).isEmpty()) {
+                    try {
+                        sendLegacyDigest(connectionId);
+                    } catch (Exception e) {
+                        log.error("Legacy fallback digest failed for {}: {}", connectionId, e.getMessage(), e);
+                    }
+                }
+            }
+        }
+    }
+
+    private void runLegacyBroadcastForAllConnections() {
+        List<String> connectionIds = digestConnectionIds();
+        if (connectionIds.isEmpty()) {
+            log.info("No connections available — skipping legacy digest");
+            return;
+        }
+        for (String connectionId : connectionIds) {
+            try {
+                sendLegacyDigest(connectionId);
+            } catch (Exception e) {
+                log.error("Failed legacy digest for connection {}: {}", connectionId, e.getMessage(), e);
+            }
+        }
+    }
+
+    private List<String> resolvePreferenceConnections(UserDigestPreference pref) {
+        if (pref.getConnectionId() != null && !pref.getConnectionId().isBlank()) {
+            return List.of(pref.getConnectionId());
+        }
+        return digestConnectionIds();
+    }
+
+    /**
+     * True when SlackDigestLog already has a row for this preference/connection
+     * at or after the cron fire time (idempotent minute-tick).
+     */
+    private boolean alreadyDeliveredForWindow(
+            UserDigestPreference pref,
+            String connectionId,
+            Instant fireInstant) {
+        // sentAt is LocalDateTime.now() (JVM default zone) — compare in that zone.
+        LocalDateTime since = LocalDateTime.ofInstant(fireInstant, ZoneId.systemDefault());
+        if (pref.getId() != null) {
+            if (digestLogRepository.existsByPreferenceIdAndConnectionIdAndSentAtGreaterThanEqual(
+                    pref.getId(), connectionId, since)) {
+                return true;
+            }
+        }
+        if (pref.getUsername() != null && !pref.getUsername().isBlank()) {
+            return digestLogRepository.existsByConnectionIdAndRecipientUsernameAndSentAtGreaterThanEqual(
+                connectionId, pref.getUsername(), since);
+        }
+        return false;
+    }
+
     /**
      * Entry point for the hybrid digest run: per-user when preferences exist,
      * legacy broadcast otherwise.
+     *
+     * <p>Used by manual/admin triggers. The scheduled tick uses
+     * {@link #processDigestTick()} so per-user crons are honored.
      */
     public void sendDailyDigestHybrid() {
         List<String> connectionIds = digestConnectionIds();
