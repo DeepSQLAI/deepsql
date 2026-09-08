@@ -281,4 +281,9 @@ public class DigestPreferenceController {
     public record SeedResultResponse(int usersProcessed, int preferencesCreated, List<String> skipped) {}
 
     public record DigestStatusResponse(boolean perUserMode, long enabledPreferences, int distinctUsers) {}
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, String>> handleBadRequest(IllegalArgumentException e) {
+        return ResponseEntity.badRequest().body(Map.of("message", e.getMessage() != null ? e.getMessage() : "Bad request"));
+    }
 }
