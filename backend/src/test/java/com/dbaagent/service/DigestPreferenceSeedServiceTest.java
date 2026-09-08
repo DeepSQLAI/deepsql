@@ -67,7 +67,7 @@ class DigestPreferenceSeedServiceTest {
         User alice = new User();
         alice.setUsername("alice");
         alice.setRole("DBA");
-        alice.setStatus("ACTIVE");
+        alice.setAccountStatus("ACTIVE");
         when(userRepository.findByUsernameIgnoreCase("alice")).thenReturn(Optional.of(alice));
 
         DatabaseConnection conn = new DatabaseConnection();
@@ -159,7 +159,7 @@ class DigestPreferenceSeedServiceTest {
         User alice = new User();
         alice.setUsername("alice");
         alice.setRole("DBA");
-        alice.setStatus("ACTIVE");
+        alice.setAccountStatus("ACTIVE");
         when(userRepository.findByUsernameIgnoreCase("alice")).thenReturn(Optional.of(alice));
 
         DatabaseConnection conn = new DatabaseConnection();
@@ -193,7 +193,7 @@ class DigestPreferenceSeedServiceTest {
         User alice = new User();
         alice.setUsername("alice");
         alice.setRole("DBA");
-        alice.setStatus("ACTIVE");
+        alice.setAccountStatus("ACTIVE");
         when(userRepository.findByUsernameIgnoreCase("alice")).thenReturn(Optional.of(alice));
 
         DatabaseConnection conn = new DatabaseConnection();
@@ -221,7 +221,7 @@ class DigestPreferenceSeedServiceTest {
 
         User inactive = new User();
         inactive.setUsername("inactive");
-        inactive.setStatus("SUSPENDED");
+        inactive.setAccountStatus("DISABLED");
         when(userRepository.findByUsernameIgnoreCase("inactive")).thenReturn(Optional.of(inactive));
 
         // When: seeding
@@ -239,7 +239,7 @@ class DigestPreferenceSeedServiceTest {
 
         User noconn = new User();
         noconn.setUsername("noconn");
-        noconn.setStatus("ACTIVE");
+        noconn.setAccountStatus("ACTIVE");
         when(userRepository.findByUsernameIgnoreCase("noconn")).thenReturn(Optional.of(noconn));
 
         when(connectionAccessService.getVisibleConnections("noconn", false))
@@ -259,7 +259,7 @@ class DigestPreferenceSeedServiceTest {
         User alice = new User();
         alice.setUsername("alice");
         alice.setRole("DBA");
-        alice.setStatus("ACTIVE");
+        alice.setAccountStatus("ACTIVE");
         when(userRepository.findByUsernameIgnoreCase("alice")).thenReturn(Optional.of(alice));
 
         SlackUserLink link = new SlackUserLink();
@@ -288,7 +288,7 @@ class DigestPreferenceSeedServiceTest {
         User user = new User();
         user.setUsername(username);
         user.setRole(role);
-        user.setStatus("ACTIVE");
+        user.setAccountStatus("ACTIVE");
         when(userRepository.findByUsernameIgnoreCase(username)).thenReturn(Optional.of(user));
     }
 }

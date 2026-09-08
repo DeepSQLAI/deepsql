@@ -28,7 +28,6 @@ export default function DigestPreferencesPanel({ onClose }) {
   const { connectionId, selectedConnection } = useConnectionManager()
   const [preferences, setPreferences] = useState([])
   const [personaTags, setPersonaTags] = useState([])
-  const [deliveryMethods, setDeliveryMethods] = useState([])
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -45,15 +44,13 @@ export default function DigestPreferencesPanel({ onClose }) {
     setLoading(true)
     setError(null)
     try {
-      const [prefs, tags, methods, statusRes] = await Promise.all([
+      const [prefs, tags, statusRes] = await Promise.all([
         digestPreferencesAPI.getMyPreferences(),
         digestPreferencesAPI.getPersonaTags(),
-        digestPreferencesAPI.getDeliveryMethods(),
         digestPreferencesAPI.getStatus(),
       ])
       setPreferences(prefs || [])
       setPersonaTags(tags || [])
-      setDeliveryMethods(methods || [])
       setStatus(statusRes)
     } catch (err) {
       setError(err?.response?.data?.message || 'Failed to load preferences')

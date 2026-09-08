@@ -204,8 +204,7 @@ Run the tests:
 
 ```bash
 cd backend
-mvn test -Dtest=PerRecipientDigestDeliveryTest
-mvn test -Dtest=DigestPreferenceSeedServiceTest
+./mvnw test -Dtest=PerRecipientDigestDeliveryTest,DigestPreferenceSeedServiceTest,SlackDailyDigestServiceTest
 ```
 
 Key test scenarios:

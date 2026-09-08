@@ -4,15 +4,24 @@ import com.dbaagent.model.DigestDeliveryMethod;
 import com.dbaagent.model.PersonaTag;
 import com.dbaagent.model.Role;
 import com.dbaagent.model.SlackDigestLog;
-import com.dbaagent.model.SlackUserLink;
 import com.dbaagent.model.User;
 import com.dbaagent.model.UserDigestPreference;
 import com.dbaagent.model.digest.DigestAssemblyResult;
 import com.dbaagent.model.digest.DigestInsight;
 import com.dbaagent.model.digest.InsightCategory;
+import com.dbaagent.repository.AuthLoginChallengeRepository;
+import com.dbaagent.repository.CapacityForecastRepository;
+import com.dbaagent.repository.ConnectionAccessGrantRepository;
+import com.dbaagent.repository.DatabaseEventRepository;
+import com.dbaagent.repository.GrowthAnomalyRepository;
+import com.dbaagent.repository.LockContentionRepository;
+import com.dbaagent.repository.QueryFingerprintRepository;
+import com.dbaagent.repository.SchemaChangeRepository;
+import com.dbaagent.repository.SlackChannelBindingRepository;
+import com.dbaagent.repository.SlackDigestLogRepository;
+import com.dbaagent.repository.TableStatsHistoryRepository;
 import com.dbaagent.repository.UserDigestPreferenceRepository;
 import com.dbaagent.repository.UserRepository;
-import com.dbaagent.repository.SlackDigestLogRepository;
 import com.dbaagent.service.digest.DigestInsightAssemblerService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,14 +29,20 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Tests for per-recipient personalized digest delivery (PR3).
@@ -36,27 +51,93 @@ import static org.mockito.Mockito.*;
  * <ul>
  *   <li>Two users with different personas get different digests for same connection</li>
  *   <li>EXEC persona gets tight 3-bullet executive summary</li>
- *   <li>Legacy fallback when no preferences exist</li>
+ *   <li>EMAIL prefs are skipped (not a fake delivery path)</li>
  *   <li>Proper logging with recipient details</li>
  * </ul>
  */
 @ExtendWith(MockitoExtension.class)
 class PerRecipientDigestDeliveryTest {
 
+    @Mock private SlackRuntimeSettingsService slackRuntimeSettingsService;
+    @Mock private SlackChannelBindingRepository channelBindingRepository;
+    @Mock private CredentialService credentialService;
+    @Mock private ConnectionService connectionService;
+    @Mock private PerformanceInsightsService performanceInsightsService;
+    @Mock private SlowQueryService slowQueryService;
+    @Mock private SlowQueryHistoryService slowQueryHistoryService;
+    @Mock private SlowQueryInsightsService slowQueryInsightsService;
+    @Mock private SlowQueryAnalyticsService slowQueryAnalyticsService;
+    @Mock private PerformanceActionAggregatorService actionAggregatorService;
+    @Mock private EnhancedSqlParserService sqlParserService;
+    @Mock private QueryExecutorService queryExecutorService;
+    @Mock private TableGrowthMonitoringService tableGrowthMonitoringService;
+    @Mock private SchemaChangeTrackingService schemaChangeTrackingService;
+    @Mock private TableStatsHistoryRepository tableStatsHistoryRepository;
+    @Mock private GrowthAnomalyRepository growthAnomalyRepository;
+    @Mock private CapacityForecastRepository capacityForecastRepository;
+    @Mock private SchemaChangeRepository schemaChangeRepository;
+    @Mock private SlackDigestLogRepository digestLogRepository;
+    @Mock private SlackUserLinkService slackUserLinkService;
+    @Mock private LockContentionRepository lockContentionRepository;
+    @Mock private QueryFingerprintRepository queryFingerprintRepository;
+    @Mock private DatabaseEventRepository databaseEventRepository;
+    @Mock private ConnectionAccessGrantRepository connectionAccessGrantRepository;
+    @Mock private AuthLoginChallengeRepository authLoginChallengeRepository;
+    @Mock private IndexAdvisorService indexAdvisorService;
+    @Mock private IndexRecommendationService indexRecommendationService;
     @Mock private UserDigestPreferenceRepository preferenceRepository;
     @Mock private DigestInsightAssemblerService assemblerService;
-    @Mock private SlackUserLinkService slackUserLinkService;
     @Mock private UserRepository userRepository;
-    @Mock private SlackDigestLogRepository digestLogRepository;
+
+    private SlackDailyDigestService service;
 
     @BeforeEach
     void setUp() {
-        lenient().when(preferenceRepository.hasAnyPreferences()).thenReturn(false);
+        service = new SlackDailyDigestService(
+            slackRuntimeSettingsService,
+            channelBindingRepository,
+            credentialService,
+            connectionService,
+            performanceInsightsService,
+            slowQueryService,
+            slowQueryHistoryService,
+            slowQueryInsightsService,
+            slowQueryAnalyticsService,
+            actionAggregatorService,
+            sqlParserService,
+            queryExecutorService,
+            tableGrowthMonitoringService,
+            schemaChangeTrackingService,
+            tableStatsHistoryRepository,
+            growthAnomalyRepository,
+            capacityForecastRepository,
+            schemaChangeRepository,
+            digestLogRepository,
+            slackUserLinkService,
+            lockContentionRepository,
+            queryFingerprintRepository,
+            databaseEventRepository,
+            connectionAccessGrantRepository,
+            authLoginChallengeRepository,
+            indexAdvisorService,
+            indexRecommendationService,
+            preferenceRepository,
+            assemblerService,
+            userRepository
+        );
+
+        // Slack disabled: generate + log without opening DMs (keeps this unit-level).
+        lenient().when(slackRuntimeSettingsService.current()).thenReturn(
+            new SlackRuntimeSettingsService.SlackRuntimeConfig(false, false, null, null, null, null));
+        lenient().when(digestLogRepository.findTopByConnectionIdOrderBySentAtDesc(anyString()))
+            .thenReturn(Optional.empty());
+        lenient().when(digestLogRepository.save(any(SlackDigestLog.class)))
+            .thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(credentialService.getAllConnections()).thenReturn(List.of());
     }
 
     @Test
     void twoUsersWithDifferentPersonas_getDifferentDigests() {
-        // Given: two users with different personas on the same connection
         String connectionId = "conn-123";
 
         UserDigestPreference dbaPreference = UserDigestPreference.builder()
@@ -77,7 +158,9 @@ class PerRecipientDigestDeliveryTest {
             .personaTag(PersonaTag.EXEC)
             .build();
 
-        // Mock user lookups
+        when(preferenceRepository.findEnabledForConnection(connectionId))
+            .thenReturn(List.of(dbaPreference, execPreference));
+
         User dbaUser = new User();
         dbaUser.setUsername("alice_dba");
         dbaUser.setRole("DBA");
@@ -89,7 +172,6 @@ class PerRecipientDigestDeliveryTest {
         when(userRepository.findByUsernameIgnoreCase("alice_dba")).thenReturn(Optional.of(dbaUser));
         when(userRepository.findByUsernameIgnoreCase("bob_exec")).thenReturn(Optional.of(execUser));
 
-        // Mock assembler to return different results based on persona
         DigestAssemblyResult dbaResult = createDbaDigest();
         DigestAssemblyResult execResult = createExecDigest();
 
@@ -101,41 +183,115 @@ class PerRecipientDigestDeliveryTest {
             eq("bob_exec"), eq(connectionId), eq(Role.ADMIN), eq(PersonaTag.EXEC), any()
         )).thenReturn(execResult);
 
-        // When: assembling digests for both users
-        DigestAssemblyResult aliceDigest = assemblerService.assembleDigest(
-            "alice_dba", connectionId, Role.DBA, PersonaTag.DBA, null);
-        DigestAssemblyResult bobDigest = assemblerService.assembleDigest(
-            "bob_exec", connectionId, Role.ADMIN, PersonaTag.EXEC, null);
+        SlackDailyDigestService.PersonalizedDeliveryResult result =
+            service.sendPersonalizedDigests(connectionId);
 
-        // Then: they get different insights based on persona
-        assertThat(aliceDigest.getPersonaTag()).isEqualTo(PersonaTag.DBA);
-        assertThat(bobDigest.getPersonaTag()).isEqualTo(PersonaTag.EXEC);
+        assertThat(result.recipients()).isEqualTo(2);
+        assertThat(result.generated()).isEqualTo(2);
+        // Slack is disabled in this test, so nothing is posted — only generated + logged.
+        assertThat(result.sent()).isEqualTo(0);
 
-        // DBA gets more insights (full digest)
-        assertThat(aliceDigest.getInsights()).hasSize(5);
+        verify(assemblerService).assembleDigest(
+            eq("alice_dba"), eq(connectionId), eq(Role.DBA), eq(PersonaTag.DBA), any());
+        verify(assemblerService).assembleDigest(
+            eq("bob_exec"), eq(connectionId), eq(Role.ADMIN), eq(PersonaTag.EXEC), any());
 
-        // EXEC gets fewer, with executive summary
-        assertThat(bobDigest.getInsights()).hasSize(3);
-        assertThat(bobDigest.getExecutiveSummary()).isNotNull();
-        assertThat(bobDigest.getExecutiveSummary()).hasSizeLessThanOrEqualTo(3);
+        ArgumentCaptor<SlackDigestLog> captor = ArgumentCaptor.forClass(SlackDigestLog.class);
+        verify(digestLogRepository, org.mockito.Mockito.times(2)).save(captor.capture());
+
+        List<SlackDigestLog> logs = captor.getAllValues();
+        SlackDigestLog aliceLog = logs.stream()
+            .filter(l -> "alice_dba".equals(l.getRecipientUsername())).findFirst().orElseThrow();
+        SlackDigestLog bobLog = logs.stream()
+            .filter(l -> "bob_exec".equals(l.getRecipientUsername())).findFirst().orElseThrow();
+
+        assertThat(aliceLog.isPersonalized()).isTrue();
+        assertThat(aliceLog.getPersonaTag()).isEqualTo(PersonaTag.DBA);
+        assertThat(aliceLog.getRecipientRole()).isEqualTo("DBA");
+        assertThat(aliceLog.getDeliveryMethod()).isEqualTo(DigestDeliveryMethod.SLACK_DM);
+        assertThat(aliceLog.getContent()).contains("CRITICAL");
+
+        assertThat(bobLog.isPersonalized()).isTrue();
+        assertThat(bobLog.getPersonaTag()).isEqualTo(PersonaTag.EXEC);
+        assertThat(bobLog.getRecipientRole()).isEqualTo("ADMIN");
+        assertThat(bobLog.getContent()).contains("EXECUTIVE SUMMARY");
+        assertThat(bobLog.getContent()).contains("ACTION NEEDED");
+        assertThat(bobLog.getContent().lines().filter(line -> line.startsWith("• ")).count())
+            .isLessThanOrEqualTo(3);
     }
 
     @Test
     void execPersona_getsTightThreeBulletSummary() {
-        // Given: EXEC persona digest
         DigestAssemblyResult execResult = createExecDigest();
 
-        // Then: executive summary has at most 3 bullets
-        assertThat(execResult.getExecutiveSummary()).isNotNull();
-        assertThat(execResult.getExecutiveSummary()).hasSizeLessThanOrEqualTo(3);
+        String message = ReflectionTestUtils.invokeMethod(
+            service, "formatPersonalizedDigest", execResult, "prod-db", PersonaTag.EXEC);
 
-        // And has a decision ask
-        assertThat(execResult.getDecisionAsk()).isNotNull();
+        assertThat(message).contains("EXECUTIVE SUMMARY");
+        assertThat(message).contains("ACTION NEEDED");
+        assertThat(message).contains("Review and approve index recommendation");
+        assertThat(message.lines().filter(line -> line.startsWith("• ")).count())
+            .isLessThanOrEqualTo(3);
+        // EXEC payload stays short — no full insight dump.
+        assertThat(message).doesNotContain("[sig:");
+    }
+
+    @Test
+    void emailPreference_isSkippedNotDelivered() {
+        UserDigestPreference emailPref = UserDigestPreference.builder()
+            .id(9L)
+            .username("carol")
+            .connectionId("conn-123")
+            .enabled(true)
+            .deliveryMethod(DigestDeliveryMethod.EMAIL)
+            .personaTag(PersonaTag.EXEC)
+            .build();
+
+        when(preferenceRepository.findEnabledForConnection("conn-123"))
+            .thenReturn(List.of(emailPref));
+
+        SlackDailyDigestService.PersonalizedDeliveryResult result =
+            service.sendPersonalizedDigests("conn-123");
+
+        assertThat(result.recipients()).isEqualTo(1);
+        assertThat(result.generated()).isEqualTo(0);
+        verify(assemblerService, never()).assembleDigest(anyString(), anyString(), any(), any(), any());
+        verify(digestLogRepository, never()).save(any());
+    }
+
+    @Test
+    void customRole_doesNotNpe_andLogsStoredRoleCode() {
+        UserDigestPreference pref = UserDigestPreference.builder()
+            .id(3L)
+            .username("analyst")
+            .connectionId("conn-123")
+            .enabled(true)
+            .deliveryMethod(DigestDeliveryMethod.SLACK_DM)
+            .personaTag(PersonaTag.DATA_ENG)
+            .build();
+
+        when(preferenceRepository.findEnabledForConnection("conn-123"))
+            .thenReturn(List.of(pref));
+
+        User custom = new User();
+        custom.setUsername("analyst");
+        custom.setRole("ANALYST"); // not a built-in Role
+        when(userRepository.findByUsernameIgnoreCase("analyst")).thenReturn(Optional.of(custom));
+
+        when(assemblerService.assembleDigest(
+            eq("analyst"), eq("conn-123"), eq(Role.DEVELOPER), eq(PersonaTag.DATA_ENG), any()
+        )).thenReturn(DigestAssemblyResult.empty("analyst", "conn-123", Role.DEVELOPER, PersonaTag.DATA_ENG));
+
+        service.sendPersonalizedDigests("conn-123");
+
+        ArgumentCaptor<SlackDigestLog> captor = ArgumentCaptor.forClass(SlackDigestLog.class);
+        verify(digestLogRepository).save(captor.capture());
+        assertThat(captor.getValue().getRecipientRole()).isEqualTo("ANALYST");
+        assertThat(captor.getValue().isPersonalized()).isTrue();
     }
 
     @Test
     void digestLog_containsRecipientDetails() {
-        // Given: a digest log entry for personalized delivery
         SlackDigestLog logEntry = new SlackDigestLog();
         logEntry.setConnectionId("conn-123");
         logEntry.setRecipientUsername("alice_dba");
@@ -145,7 +301,6 @@ class PerRecipientDigestDeliveryTest {
         logEntry.setPersonalized(true);
         logEntry.setStatus("SENT");
 
-        // Then: it has all the per-recipient details
         assertThat(logEntry.getRecipientUsername()).isEqualTo("alice_dba");
         assertThat(logEntry.getRecipientRole()).isEqualTo("DBA");
         assertThat(logEntry.getPersonaTag()).isEqualTo(PersonaTag.DBA);
@@ -155,14 +310,12 @@ class PerRecipientDigestDeliveryTest {
 
     @Test
     void legacyDigest_hasNoRecipientDetails() {
-        // Given: a legacy channel-broadcast digest log entry
         SlackDigestLog logEntry = new SlackDigestLog();
         logEntry.setConnectionId("conn-123");
         logEntry.setChannelId("C123456");
         logEntry.setPersonalized(false);
         logEntry.setStatus("SENT");
 
-        // Then: it has no recipient-specific details
         assertThat(logEntry.getRecipientUsername()).isNull();
         assertThat(logEntry.getRecipientRole()).isNull();
         assertThat(logEntry.getPersonaTag()).isNull();
@@ -172,39 +325,33 @@ class PerRecipientDigestDeliveryTest {
 
     @Test
     void preferenceForConnection_appliesCorrectly() {
-        // Given: a preference with a specific connection
         UserDigestPreference pref = UserDigestPreference.builder()
             .username("alice")
             .connectionId("conn-123")
             .enabled(true)
             .build();
 
-        // Then: it applies to that connection
         assertThat(pref.appliesTo("conn-123")).isTrue();
         assertThat(pref.appliesTo("conn-456")).isFalse();
     }
 
     @Test
     void preferenceWithNullConnection_appliesToAll() {
-        // Given: a preference without a specific connection
         UserDigestPreference pref = UserDigestPreference.builder()
             .username("alice")
             .connectionId(null)
             .enabled(true)
             .build();
 
-        // Then: it applies to all connections
         assertThat(pref.appliesTo("conn-123")).isTrue();
         assertThat(pref.appliesTo("conn-456")).isTrue();
     }
 
     @Test
     void assemblyResult_emptyDigest_indicatesEmpty() {
-        // Given: an empty digest result
         DigestAssemblyResult empty = DigestAssemblyResult.empty(
             "alice", "conn-123", Role.DBA, PersonaTag.DBA);
 
-        // Then: it's marked as empty
         assertThat(empty.isEmpty()).isTrue();
         assertThat(empty.getInsights()).isEmpty();
         assertThat(empty.getHeadline()).isEqualTo("No new insights since your last digest");

@@ -542,10 +542,14 @@ public class SlackDailyDigestService {
         String username = pref.getUsername();
         PersonaTag personaTag = pref.getPersonaTag();
 
-        // Resolve user's role
-        Role role = userRepository.findByUsernameIgnoreCase(username)
-            .map(User::getRoleEnum)
-            .orElse(Role.DEVELOPER);
+        // Resolve user's built-in role. Custom roles have no Role enum — rank as
+        // DEVELOPER rather than NPE on role.name(). Persist the stored role code
+        // on the log so the audit trail still names ANALYST, not a silent fallback.
+        User recipient = userRepository.findByUsernameIgnoreCase(username).orElse(null);
+        Role role = recipient != null && recipient.getRoleEnum() != null
+            ? recipient.getRoleEnum()
+            : Role.DEVELOPER;
+        String roleCode = recipient != null ? recipient.getRoleCode() : Role.DEVELOPER.name();
 
         // Assemble personalized digest
         DigestAssemblyResult assembly = digestInsightAssemblerService.assembleDigest(
@@ -562,7 +566,7 @@ public class SlackDailyDigestService {
         logEntry.setContent(message);
         logEntry.setHeadline(assembly.getHeadline());
         logEntry.setRecipientUsername(username);
-        logEntry.setRecipientRole(role.name());
+        logEntry.setRecipientRole(roleCode);
         logEntry.setPersonaTag(personaTag);
         logEntry.setDeliveryMethod(DigestDeliveryMethod.SLACK_DM);
         logEntry.setPreferenceId(pref.getId());

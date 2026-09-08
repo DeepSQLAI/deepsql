@@ -73,7 +73,7 @@ public class DigestPreferenceSeedService {
             }
 
             User user = userOpt.get();
-            if (!user.isActive()) {
+            if (!user.isActiveAccount()) {
                 skipped.add(username + ": user inactive");
                 continue;
             }
@@ -136,7 +136,7 @@ public class DigestPreferenceSeedService {
         }
 
         User user = userOpt.get();
-        if (!user.isActive()) {
+        if (!user.isActiveAccount()) {
             return new SeedResult(0, 0, List.of(username + ": user inactive"), List.of());
         }
 

@@ -49,9 +49,23 @@ public class DigestPreferenceController {
     public ResponseEntity<UserDigestPreference> createPreference(@RequestBody CreatePreferenceRequest request) {
         String username = accessControlService.requireCurrentUsername();
 
-        DigestDeliveryMethod method = request.deliveryMethod != null
-            ? DigestDeliveryMethod.fromString(request.deliveryMethod)
-            : DigestDeliveryMethod.SLACK_DM;
+        DigestDeliveryMethod method;
+        if (request.deliveryMethod == null || request.deliveryMethod.isBlank()) {
+            method = DigestDeliveryMethod.SLACK_DM;
+        } else {
+            method = DigestDeliveryMethod.fromString(request.deliveryMethod);
+            if (method == null) {
+                throw new IllegalArgumentException("Unknown delivery method: " + request.deliveryMethod);
+            }
+        }
+
+        if (method == DigestDeliveryMethod.EMAIL) {
+            throw new IllegalArgumentException("Email digest delivery is not available yet");
+        }
+
+        if (request.connectionId != null && !request.connectionId.isBlank()) {
+            accessControlService.assertCanReadConnectionContent(request.connectionId);
+        }
 
         PersonaTag persona = request.personaTag != null
             ? PersonaTag.fromString(request.personaTag)
@@ -164,10 +178,10 @@ public class DigestPreferenceController {
      */
     @GetMapping("/delivery-methods")
     public ResponseEntity<List<Map<String, String>>> getDeliveryMethods() {
+        // Only advertise methods this PR actually delivers. EMAIL/WhatsApp are PR4.
         List<Map<String, String>> methods = List.of(
             Map.of("value", "SLACK_DM", "label", DigestDeliveryMethod.SLACK_DM.getDisplayName(), "description", DigestDeliveryMethod.SLACK_DM.getDescription()),
-            Map.of("value", "SLACK_CHANNEL", "label", DigestDeliveryMethod.SLACK_CHANNEL.getDisplayName(), "description", DigestDeliveryMethod.SLACK_CHANNEL.getDescription()),
-            Map.of("value", "EMAIL", "label", DigestDeliveryMethod.EMAIL.getDisplayName(), "description", DigestDeliveryMethod.EMAIL.getDescription())
+            Map.of("value", "SLACK_CHANNEL", "label", DigestDeliveryMethod.SLACK_CHANNEL.getDisplayName(), "description", DigestDeliveryMethod.SLACK_CHANNEL.getDescription())
         );
         return ResponseEntity.ok(methods);
     }
