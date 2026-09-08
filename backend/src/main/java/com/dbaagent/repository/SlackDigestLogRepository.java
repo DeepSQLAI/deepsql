@@ -91,4 +91,10 @@ public interface SlackDigestLogRepository extends JpaRepository<SlackDigestLog, 
      * Count personalized vs non-personalized digests since a date.
      */
     long countByPersonalizedAndSentAtAfter(boolean personalized, LocalDateTime since);
+
+    /**
+     * Find the most recent digest for a connection (any type).
+     * Used for determining the window start for new digests.
+     */
+    Optional<SlackDigestLog> findTopByConnectionIdOrderBySentAtDesc(String connectionId);
 }
