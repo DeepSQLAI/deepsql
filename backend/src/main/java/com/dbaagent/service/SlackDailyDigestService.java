@@ -25,7 +25,9 @@ import com.dbaagent.model.SlackDigestLog;
 import com.dbaagent.model.SlowQuery;
 import com.dbaagent.model.SlowQueryAnalysis;
 import com.dbaagent.model.TableStatsHistory;
+import com.dbaagent.model.UserDigestPreference;
 import com.dbaagent.repository.AuthLoginChallengeRepository;
+import com.dbaagent.repository.UserDigestPreferenceRepository;
 import com.dbaagent.repository.CapacityForecastRepository;
 import com.dbaagent.repository.ConnectionAccessGrantRepository;
 import com.dbaagent.repository.DatabaseEventRepository;
@@ -103,6 +105,7 @@ public class SlackDailyDigestService {
     private final AuthLoginChallengeRepository authLoginChallengeRepository;
     private final IndexAdvisorService indexAdvisorService;
     private final IndexRecommendationService indexRecommendationService;
+    private final UserDigestPreferenceRepository userDigestPreferenceRepository;
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("MMM d, yyyy");
     private static final int TOP_TABLES = 5;
@@ -352,6 +355,49 @@ public class SlackDailyDigestService {
         SlackRuntimeSettingsService.SlackRuntimeConfig config = slackRuntimeSettingsService.current();
         return config.enabled() && config.botToken() != null && !config.botToken().isBlank();
     }
+
+    /**
+     * Check if the system has per-user digest preferences configured.
+     * When true, digest delivery uses UserDigestPreference; when false, uses legacy
+     * channel-broadcast mode.
+     *
+     * <p>This is the foundation for role-aware digests (PR2). In PR1, this method
+     * allows the service to detect whether per-user mode is active, though the
+     * actual per-user delivery logic comes later.
+     */
+    public boolean isPerUserModeEnabled() {
+        return userDigestPreferenceRepository.hasAnyPreferences();
+    }
+
+    /**
+     * Get all enabled digest preferences for a connection.
+     * Returns users who should receive a digest for this connection based on their
+     * UserDigestPreference settings.
+     *
+     * <p>For PR1, this returns the preferences but the actual personalized delivery
+     * is implemented in PR2. The current digest flow continues using the legacy
+     * channel-broadcast approach.
+     *
+     * @param connectionId the connection to get recipients for
+     * @return list of enabled preferences, or empty if no per-user preferences exist
+     */
+    public List<UserDigestPreference> getDigestRecipients(String connectionId) {
+        return userDigestPreferenceRepository.findEnabledForConnection(connectionId);
+    }
+
+    /**
+     * Get digest mode summary for logging and debugging.
+     */
+    public DigestModeInfo getDigestModeInfo() {
+        boolean perUserMode = isPerUserModeEnabled();
+        long preferenceCount = perUserMode ? userDigestPreferenceRepository.countByEnabledTrue() : 0;
+        List<String> users = perUserMode
+            ? userDigestPreferenceRepository.findDistinctUsernamesWithEnabledPreferences()
+            : List.of();
+        return new DigestModeInfo(perUserMode, preferenceCount, users.size());
+    }
+
+    public record DigestModeInfo(boolean perUserMode, long enabledPreferences, int distinctUsers) {}
 
     private List<String> digestConnectionIds() {
         Set<String> ids = new HashSet<>();
