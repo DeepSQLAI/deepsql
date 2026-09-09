@@ -11,6 +11,7 @@ export {
   useSaveConnection,
   useUpdateConnection,
   useDeleteConnection,
+  useSetConnectionPin,
 } from "./useConnections";
 
 export {

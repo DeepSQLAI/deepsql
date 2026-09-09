@@ -6,6 +6,7 @@ import com.dbaagent.repository.ConnectionInitHistoryRepository;
 import com.dbaagent.repository.ConnectionInitStatusRepository;
 import com.dbaagent.repository.ConnectionAccessGrantRepository;
 import com.dbaagent.repository.SchemaDocumentationRepository;
+import com.dbaagent.service.ConnectionPinService;
 import com.dbaagent.service.ConnectionService;
 import com.dbaagent.service.CredentialService;
 import com.dbaagent.service.SchemaScannerService;
@@ -26,6 +27,8 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -43,6 +46,7 @@ class ConnectionControllerTest {
     @Mock private AccessControlService accessControlService;
     @Mock private ConnectionAccessService connectionAccessService;
     @Mock private ConnectionAccessGrantRepository connectionAccessGrantRepository;
+    @Mock private ConnectionPinService connectionPinService;
 
     private ConnectionController controller;
 
@@ -60,7 +64,8 @@ class ConnectionControllerTest {
             brainJobsService,
             accessControlService,
             connectionAccessService,
-            connectionAccessGrantRepository
+            connectionAccessGrantRepository,
+            connectionPinService
         );
     }
 
@@ -107,5 +112,71 @@ class ConnectionControllerTest {
         assertThat(effective.getSshAuthType()).isEqualTo("PRIVATE_KEY");
         assertThat(effective.getSshPrivateKey()).isEqualTo("pem-secret");
         assertThat(response.getBody()).containsEntry("connectionSuccessful", true);
+    }
+
+    @Test
+    void pinningAConnectionAuthorizesUseAccessAndRecordsItForTheCallingUser() {
+        when(accessControlService.requireCurrentUsername()).thenReturn("analyst");
+
+        ResponseEntity<Map<String, Object>> response = controller.pinConnection("conn-1");
+
+        verify(accessControlService).assertCanUseConnection("conn-1");
+        verify(connectionPinService).pin("analyst", "conn-1");
+        assertThat(response.getBody()).containsEntry("pinned", true);
+    }
+
+    /**
+     * A shared connection is config-read-only for its recipients, so requiring manage
+     * rights here would lock exactly those users out of setting a default. Pinning must
+     * check <em>use</em> access and nothing stronger.
+     */
+    @Test
+    void pinningDoesNotRequireConfigManagementRights() {
+        when(accessControlService.requireCurrentUsername()).thenReturn("analyst");
+
+        controller.pinConnection("conn-1");
+
+        verify(accessControlService, never()).assertCanManageConnectionConfig("conn-1");
+    }
+
+    @Test
+    void unpinningIsScopedToTheConnectionTheCallerNamed() {
+        when(accessControlService.requireCurrentUsername()).thenReturn("analyst");
+
+        ResponseEntity<Map<String, Object>> response = controller.unpinConnection("conn-1");
+
+        verify(accessControlService).assertCanUseConnection("conn-1");
+        verify(connectionPinService).unpin("analyst", "conn-1");
+        assertThat(response.getBody()).containsEntry("pinned", false);
+    }
+
+    /**
+     * A denial must surface as the 403 it is. Every handler here ends in a catch-all that
+     * would otherwise report "Failed to pin connection" with a 500 — the caller could not
+     * then tell "not yours" from "broken".
+     */
+    @Test
+    void aDeniedPinPropagatesTheStatusRatherThanBecomingA500() {
+        org.mockito.Mockito.doThrow(
+                new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "Access denied for this connection"))
+            .when(accessControlService).assertCanUseConnection("conn-2");
+
+        assertThatThrownBy(() -> controller.pinConnection("conn-2"))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+
+        verify(connectionPinService, never()).pin(org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString());
+    }
+
+    /**
+     * A deleted connection must not leave a pin behind that silently becomes someone
+     * else's default if the id is ever reused.
+     */
+    @Test
+    void deletingAConnectionClearsEveryPinOnIt() {
+        controller.deleteConnection("conn-1");
+
+        verify(connectionPinService).clearPinsForConnection("conn-1");
     }
 }

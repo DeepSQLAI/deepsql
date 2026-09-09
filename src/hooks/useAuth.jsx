@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { getActionPermission, getActionConfig } from '@/lib/actions'
 import { authAPI, setupAPI, adminAPI, AUTH_CHANGE_EVENT } from '@/lib/api/client'
 import { clearAgentRemoteUser } from '@/lib/api/agentClient'
+import { resetConnectionPinApplied } from '@/lib/hooks/useConnectionManager'
 import { queryClient } from '@/lib/queryClient'
 import { useChatStore } from '@/lib/stores/useChatStore'
 import { useConnectionStore } from '@/lib/stores/useConnectionStore'
@@ -21,6 +22,10 @@ const isPublicAuthPath = (pathname) => AUTH_PUBLIC_PATHS.some((prefix) => pathna
 
 const resetClientSessionState = () => {
   localStorage.removeItem('selectedConnectionId')
+
+  // The pinned connection is applied once per page load; sign-out has to re-arm it or
+  // the next user to sign in on this tab would land on whatever was selected last.
+  resetConnectionPinApplied()
 
   useChatStore.getState().resetStore()
 

@@ -12,6 +12,7 @@ public class QueryExecutionPolicyException extends RuntimeException {
     public static final String UNSAFE_MUTATION_BLOCKED = "UNSAFE_MUTATION_BLOCKED";
     public static final String DB_WRITE_PRIVILEGE_DENIED = "DB_WRITE_PRIVILEGE_DENIED";
     public static final String MULTI_STATEMENT_MISSING_SEMICOLONS = "MULTI_STATEMENT_MISSING_SEMICOLONS";
+    public static final String STATEMENT_NOT_PARSEABLE = "STATEMENT_NOT_PARSEABLE";
 
     private final String errorCode;
     private final HttpStatus httpStatus;
@@ -51,6 +52,33 @@ public class QueryExecutionPolicyException extends RuntimeException {
             EDITOR_MUTATION_FORBIDDEN,
             HttpStatus.FORBIDDEN,
             "Only admins can execute DDL or DML from the SQL Editor. This Editor run was blocked before any database changes were attempted.",
+            false,
+            queryType,
+            List.of()
+        );
+    }
+
+    /**
+     * The statement reads as a SELECT by keyword but is not valid SQL, so DeepSQL cannot
+     * verify it is read-only.
+     *
+     * <p>It stays blocked — an unclassifiable statement is exactly what the guard exists
+     * to stop — but it is <em>not</em> DDL or DML, and saying so sent a user hunting for a
+     * permissions problem that did not exist. The trigger was a query pasted with the
+     * surrounding double quotes it had in source code: {@code QueryNormalizer.detectQueryType}
+     * sanitizes the prefix away and answers SELECT, while {@code isReadOnlyQuery} strips only
+     * comments, still sees a leading {@code "}, and answers "not read-only". Those two
+     * answers together mean "malformed", not "mutation".
+     */
+    public static QueryExecutionPolicyException statementNotParseable(String queryType) {
+        return new QueryExecutionPolicyException(
+            STATEMENT_NOT_PARSEABLE,
+            HttpStatus.BAD_REQUEST,
+            "DeepSQL could not parse this statement, so it was blocked before running. "
+                + "It starts like a SELECT but is not valid SQL — check for a stray quote, "
+                + "bracket or backtick. SQL copied out of code or JSON often keeps the "
+                + "surrounding \" characters, which makes the whole statement one quoted "
+                + "identifier.",
             false,
             queryType,
             List.of()

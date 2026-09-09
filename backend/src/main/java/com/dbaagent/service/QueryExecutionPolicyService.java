@@ -121,6 +121,19 @@ public class QueryExecutionPolicyService {
             throw QueryExecutionPolicyException.multiStatementMissingSemicolons();
         }
 
+        // Same idea, one step earlier: a statement DeepSQL could not parse is blocked for
+        // everyone, but it is a syntax error, not DDL/DML. Reported ahead of both the
+        // read-only branch and the mutation-confirmation branch, so an admin gets the same
+        // accurate diagnosis instead of being offered a confirmation prompt for a
+        // statement nothing has actually classified.
+        StatementClassification unparseable = classifications.stream()
+            .filter(StatementClassification::notParseable)
+            .findFirst()
+            .orElse(null);
+        if (unparseable != null) {
+            throw QueryExecutionPolicyException.statementNotParseable(unparseable.queryType());
+        }
+
         if (effectiveContext.mutationMode() == QueryExecutionContext.MutationMode.READ_ONLY_ONLY) {
             if (!allReadOnlyOrPreamble || anyMutation) {
                 if (origin == QueryExecutionOrigin.CHAT) {
@@ -210,6 +223,7 @@ public class QueryExecutionPolicyService {
         // classified as a read.
         String hiddenWrite = detectHiddenWrite(trimmed);
 
+        boolean parseFailed = false;
         try {
             Statement parsed = CCJSqlParserUtil.parse(trimmed);
             if (parsed instanceof Select select) {
@@ -272,6 +286,7 @@ public class QueryExecutionPolicyService {
                 return new StatementClassification("TRUNCATE", false, true, false, true, false);
             }
         } catch (Exception parseError) {
+            parseFailed = true;
             log.debug("Falling back to keyword SQL classification: {}", parseError.getMessage());
         }
 
@@ -294,7 +309,39 @@ public class QueryExecutionPolicyService {
         boolean mutating = !readOnly && !"UNKNOWN".equalsIgnoreCase(queryType);
         boolean requiresWhere = "UPDATE".equalsIgnoreCase(queryType) || "DELETE".equalsIgnoreCase(queryType);
         boolean hasWhere = !requiresWhere || containsWhereClause(trimmed);
+
+        // The two keyword heuristics can contradict each other, and their disagreement
+        // means "malformed", not "mutation". `QueryNormalizer.detectQueryType` sanitizes a
+        // prefix away before matching, so it answers SELECT for `"select ...`; the
+        // provider's `isReadOnlyQuery` strips only comments, still sees the leading quote,
+        // and answers false. That combination used to fall through as mutating=true, and a
+        // user pasting a SELECT with the double quotes it carried in source code was told
+        // "Only admins can execute DDL or DML" — a permissions error for a syntax problem.
+        //
+        // It stays blocked: the parser rejected it, so nothing here can vouch for it being
+        // read-only, and this is deliberately reported the same way to admins rather than
+        // routed into the mutation-confirmation flow. Only the diagnosis changes.
+        if (parseFailed && mutating && hiddenWrite == null && isReadOnlyVerb(queryType)) {
+            return new StatementClassification(queryType, false, false, false, false, false, true);
+        }
+
         return new StatementClassification(queryType, readOnly, mutating, requiresWhere, hasWhere, false);
+    }
+
+    /**
+     * True for the statement verbs that never write. Narrow on purpose: it gates the
+     * "malformed, not a mutation" reclassification above, and a write verb the parser
+     * happens to reject (a Postgres DDL form JSqlParser does not model, say) must keep its
+     * existing mutation handling rather than be re-labelled a syntax error.
+     */
+    private boolean isReadOnlyVerb(String queryType) {
+        if (queryType == null) {
+            return false;
+        }
+        return switch (queryType.toUpperCase(Locale.ROOT)) {
+            case "SELECT", "SHOW", "DESCRIBE", "DESC", "EXPLAIN" -> true;
+            default -> false;
+        };
     }
 
     /**
@@ -548,7 +595,18 @@ public class QueryExecutionPolicyService {
         boolean mutating,
         boolean requiresWhereClause,
         boolean hasWhereClause,
-        boolean sessionPreamble
+        boolean sessionPreamble,
+        boolean notParseable
     ) {
+        public StatementClassification(
+            String queryType,
+            boolean readOnly,
+            boolean mutating,
+            boolean requiresWhereClause,
+            boolean hasWhereClause,
+            boolean sessionPreamble
+        ) {
+            this(queryType, readOnly, mutating, requiresWhereClause, hasWhereClause, sessionPreamble, false);
+        }
     }
 }

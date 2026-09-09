@@ -10,12 +10,16 @@ import {
   Plus,
   Shield,
   RefreshCw,
+  Pin,
+  PinOff,
 } from "lucide-react";
 import styles from "./ManageConnectionsModal.module.css";
 import ConnectionWizard from "./ConnectionWizard";
 import ConnectionSlowQueryConfig from "./ConnectionSlowQueryConfig";
 import SlowQuerySourceModal from "./SlowQuerySourceModal";
 import { connectionAPI, brainAPI } from "@/lib/api/client";
+import { queryClient } from "@/lib/queryClient";
+import { queryKeys } from "@/lib/queryKeys";
 import { useAuth } from "@/hooks/useAuth";
 import { PERMISSIONS } from "@/lib/permissions";
 import { getConnectionAccessBadge, getConnectionAccessLabel } from "@/lib/features";
@@ -34,6 +38,7 @@ export default function ManageConnectionsModal({
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingConnection, setEditingConnection] = useState(null);
   const [slowQuerySourceConn, setSlowQuerySourceConn] = useState(null);
+  const [pinningId, setPinningId] = useState(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -109,6 +114,38 @@ export default function ManageConnectionsModal({
     }
   };
 
+  /**
+   * Pin (or unpin) a connection as this user's default.
+   *
+   * The pin is per user, so this changes nothing for anyone else the connection is
+   * shared with — and it is gated on *use* access rather than config rights, which is
+   * why the button stays enabled on a connection this user cannot edit.
+   *
+   * The list here is fetched directly rather than through TanStack Query, so the cache
+   * has to be invalidated explicitly or the sidebar switcher keeps the old pin until
+   * something else refetches it.
+   */
+  const handleTogglePin = async (conn) => {
+    try {
+      setPinningId(conn.id);
+      if (conn.pinned) {
+        await connectionAPI.unpinConnection(conn.id);
+      } else {
+        await connectionAPI.pinConnection(conn.id);
+      }
+      await fetchConnections();
+      queryClient.invalidateQueries({ queryKey: queryKeys.connections.all });
+    } catch (err) {
+      console.error("Failed to update default connection:", err);
+      alert(
+        "Failed to update default connection: " +
+          (err.response?.data?.message || err.message),
+      );
+    } finally {
+      setPinningId(null);
+    }
+  };
+
   const handleNewConnectionSaved = async (newConnectionId) => {
     setShowAddModal(false);
     await fetchConnections();
@@ -165,6 +202,9 @@ export default function ManageConnectionsModal({
               <table className={styles.table}>
                 <thead>
                   <tr>
+                    <th className={styles.pinHeader} title="Default connection">
+                      <Pin size={14} />
+                    </th>
                     <th>Name</th>
                     <th>Access</th>
                     <th>Type</th>
@@ -181,8 +221,32 @@ export default function ManageConnectionsModal({
                   {connections.map((conn) => (
                     <tr key={conn.id}>
                       <td>
+                        <button
+                          className={`${styles.pinButton} ${conn.pinned ? styles.pinButtonActive : ""}`}
+                          onClick={() => handleTogglePin(conn)}
+                          disabled={pinningId === conn.id}
+                          aria-pressed={Boolean(conn.pinned)}
+                          title={
+                            conn.pinned
+                              ? "Pinned as your default — DeepSQL opens on this connection. Click to unpin."
+                              : "Pin as your default — DeepSQL will open on this connection every time you load it."
+                          }
+                        >
+                          {pinningId === conn.id ? (
+                            <Loader size={16} className={styles.spinner} />
+                          ) : conn.pinned ? (
+                            <Pin size={16} />
+                          ) : (
+                            <PinOff size={16} />
+                          )}
+                        </button>
+                      </td>
+                      <td>
                         <div className="flex flex-col gap-1">
                           <strong>{conn.connectionName}</strong>
+                          {conn.pinned && (
+                            <span className={styles.pinnedLabel}>Your default</span>
+                          )}
                           {getConnectionAccessLabel(conn) && (
                             <span className="text-xs text-gray-500">{getConnectionAccessLabel(conn)}</span>
                           )}
