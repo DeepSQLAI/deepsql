@@ -615,4 +615,122 @@ class QueryExecutionPolicyServiceTest {
             .isEqualTo(QueryExecutionPolicyException.UNSAFE_MUTATION_BLOCKED);
         assertThat(exception.getMessage()).contains("DROP and TRUNCATE");
     }
+
+    // ── A malformed statement is a syntax error, not a permissions problem ──────────
+    //
+    // Reported from the field: a user pasted a SELECT that still carried the double
+    // quotes it had in source code and was told "Only admins can execute DDL or DML from
+    // the SQL Editor", which reads as a permissions problem and sent them looking for a
+    // role fix. The statement is neither DDL nor DML — it is not valid SQL at all.
+    //
+    // The cause is two keyword heuristics disagreeing: QueryNormalizer.detectQueryType
+    // sanitizes the prefix away and answers SELECT, while the provider's isReadOnlyQuery
+    // strips only comments, still sees the leading quote, and answers false. mutating was
+    // computed as (!readOnly && type != UNKNOWN), so "SELECT" became a mutation.
+
+    private static final String QUOTED_SELECT =
+        "\"select h.id, h.name, h.city, case when h.country = 'India' then 'IN' "
+            + "when h.country = 'United States' then 'US' else 'XX' end country_code from hotel h";
+
+    @Test
+    void selectPastedWithItsSurroundingQuotes_isReportedAsASyntaxErrorNotAPermissionError() {
+        QueryExecutionPolicyException exception = assertThrows(
+            QueryExecutionPolicyException.class,
+            () -> service.enforce(
+                new QueryRequest(QUOTED_SELECT, 10, 30),
+                QueryExecutionContext.editor("analyst", false, false),
+                "mysql"
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo(QueryExecutionPolicyException.STATEMENT_NOT_PARSEABLE);
+        assertThat(exception.getMessage()).doesNotContain("Only admins");
+        assertThat(exception.getMessage()).contains("could not parse");
+    }
+
+    /**
+     * An admin gets the same diagnosis rather than a confirmation prompt. Offering to
+     * "confirm this DDL/DML" for a statement nothing managed to classify would invite
+     * confirming past the guard, and the statement cannot run anyway.
+     */
+    @Test
+    void aMalformedSelectIsNotOfferedToAdminsAsAConfirmableMutation() {
+        QueryExecutionPolicyException exception = assertThrows(
+            QueryExecutionPolicyException.class,
+            () -> service.enforce(
+                new QueryRequest(QUOTED_SELECT, 10, 30),
+                QueryExecutionContext.editor("admin", true, false),
+                "mysql"
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo(QueryExecutionPolicyException.STATEMENT_NOT_PARSEABLE);
+        assertThat(exception.isRequiresConfirmation()).isFalse();
+    }
+
+    /** Confirmation cannot get a malformed statement through either. */
+    @Test
+    void aConfirmedAdminStillCannotRunAMalformedStatement() {
+        QueryExecutionPolicyException exception = assertThrows(
+            QueryExecutionPolicyException.class,
+            () -> service.enforce(
+                new QueryRequest(QUOTED_SELECT, 10, 30),
+                QueryExecutionContext.editor("admin", true, true),
+                "mysql"
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo(QueryExecutionPolicyException.STATEMENT_NOT_PARSEABLE);
+    }
+
+    /**
+     * The reclassification is gated on the detected verb being read-only, so a write the
+     * parser rejects keeps its mutation handling instead of being excused as a typo. This
+     * is the half that stops the fix from becoming a bypass.
+     */
+    @Test
+    void anUnparseableWriteIsStillTreatedAsAMutation() {
+        QueryExecutionPolicyException exception = assertThrows(
+            QueryExecutionPolicyException.class,
+            () -> service.enforce(
+                new QueryRequest("DELETE FROM hotel WHERE (((", 10, 30),
+                QueryExecutionContext.editor("analyst", false, false),
+                "mysql"
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo(QueryExecutionPolicyException.EDITOR_MUTATION_FORBIDDEN);
+    }
+
+    /**
+     * The data-modifying CTE this whole guard exists for must not slip through the new
+     * branch: `detectHiddenWrite` vetoes it before the parse result is consulted, so a
+     * malformed variant is still a blocked write rather than a reported typo.
+     */
+    @Test
+    void aMalformedDataModifyingCteIsStillBlockedAsAWrite() {
+        QueryExecutionPolicyException exception = assertThrows(
+            QueryExecutionPolicyException.class,
+            () -> service.enforce(
+                new QueryRequest("WITH x AS (DELETE FROM hotel RETURNING *) SELECT * FROM x WHERE (((", 10, 30),
+                QueryExecutionContext.editor("analyst", false, false),
+                "mysql"
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo(QueryExecutionPolicyException.EDITOR_MUTATION_FORBIDDEN);
+    }
+
+    /** The same query without the stray quote is an ordinary read. */
+    @Test
+    void theSameSelectWithoutTheStrayQuoteIsAllowed() {
+        QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
+            new QueryRequest(QUOTED_SELECT.substring(1), 10, 30),
+            QueryExecutionContext.editor("analyst", false, false),
+            "mysql"
+        );
+
+        assertThat(decision.mutating()).isFalse();
+        assertThat(decision.primaryQueryType()).isEqualTo("SELECT");
+    }
 }

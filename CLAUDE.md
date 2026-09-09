@@ -724,6 +724,25 @@ it against a real database — not a theoretical hardening pass.
   it killed **every** active query on the connection, including other users' work.
   The cancel endpoint is scoped to the connection *and* the user who started the
   run, so an execution id is not a kill primitive for someone else's query.
+- **A statement DeepSQL cannot parse is a syntax error, not DDL/DML — say so.** A user
+  pasted a SELECT still carrying the double quotes it had in source code
+  (`"select h.id, ...`) and got **"Only admins can execute DDL or DML from the SQL
+  Editor"**, which reads as a permissions problem and sends people hunting for a role fix.
+  Two keyword heuristics disagreed and the code resolved the disagreement as "mutation":
+  `QueryNormalizer.detectQueryType` sanitizes a prefix away and answered `SELECT`, while
+  the provider's `isReadOnlyQuery` strips only *comments*, still saw the leading `"`, and
+  answered false — so `mutating = !readOnly && type != UNKNOWN` labelled a SELECT a
+  mutation. `classifyStatement` now records that the parser rejected the statement and,
+  when the detected verb is read-only and no hidden write was found, returns
+  `notParseable`; `enforce` throws `STATEMENT_NOT_PARSEABLE` ahead of both the read-only
+  and confirmation branches. **The statement is still blocked, for admins too** — only the
+  diagnosis changed, and an admin is deliberately *not* offered a confirmation prompt for
+  something nothing managed to classify. The reclassification is gated on
+  `isReadOnlyVerb(queryType)` and `hiddenWrite == null`, which is what keeps it from
+  becoming a bypass: an unparseable `DELETE`, and a malformed data-modifying CTE, both keep
+  their mutation handling (covered by `anUnparseableWriteIsStillTreatedAsAMutation` and
+  `aMalformedDataModifyingCteIsStillBlockedAsAWrite`). The MCP guard already reported this
+  case honestly ("Only read-only SQL is allowed …") and was left alone.
 - **Keep the client timeout under the proxy's.** `docker/nginx/default.conf` gives
   up at `proxy_read_timeout 300s`; the Editor used to ask for 600s, so a 6-minute
   query returned an opaque 504 while still running. `QUERY_TIMEOUT_SECONDS = 240`
