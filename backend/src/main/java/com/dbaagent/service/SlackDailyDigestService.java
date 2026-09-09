@@ -8,24 +8,34 @@ import com.dbaagent.model.ConnectionAccessGrant;
 import com.dbaagent.model.ConnectionRequest;
 import com.dbaagent.model.DatabaseEvent;
 import com.dbaagent.model.DatabaseObject;
+import com.dbaagent.model.DigestDeliveryMethod;
 import com.dbaagent.model.GrowthAnomaly;
 import com.dbaagent.model.IndexRecommendationEntity;
 import com.dbaagent.model.IndexRecommendationEvidence;
 import com.dbaagent.model.LockContention;
 import com.dbaagent.model.PerformanceAction;
 import com.dbaagent.model.PerformanceSnapshot;
+import com.dbaagent.model.PersonaTag;
 import com.dbaagent.model.QueryFingerprint;
 import com.dbaagent.util.QueryLabeler;
 import com.dbaagent.model.QueryRequest;
 import com.dbaagent.model.QueryResult;
+import com.dbaagent.model.Role;
 import com.dbaagent.model.SchemaChange;
 import com.dbaagent.model.SchemaSnapshot;
 import com.dbaagent.model.SlackChannelBinding;
 import com.dbaagent.model.SlackDigestLog;
+import com.dbaagent.model.SlackUserLink;
 import com.dbaagent.model.SlowQuery;
 import com.dbaagent.model.SlowQueryAnalysis;
 import com.dbaagent.model.TableStatsHistory;
+import com.dbaagent.model.User;
+import com.dbaagent.model.UserDigestPreference;
+import com.dbaagent.model.digest.DigestAssemblyResult;
+import com.dbaagent.model.digest.DigestInsight;
 import com.dbaagent.repository.AuthLoginChallengeRepository;
+import com.dbaagent.repository.UserDigestPreferenceRepository;
+import com.dbaagent.repository.UserRepository;
 import com.dbaagent.repository.CapacityForecastRepository;
 import com.dbaagent.repository.ConnectionAccessGrantRepository;
 import com.dbaagent.repository.DatabaseEventRepository;
@@ -36,10 +46,14 @@ import com.dbaagent.repository.SchemaChangeRepository;
 import com.dbaagent.repository.SlackChannelBindingRepository;
 import com.dbaagent.repository.SlackDigestLogRepository;
 import com.dbaagent.repository.TableStatsHistoryRepository;
+import com.dbaagent.service.digest.DigestCronMatcher;
+import com.dbaagent.service.digest.DigestInsightAssemblerService;
 import com.slack.api.Slack;
 import com.slack.api.methods.MethodsClient;
 import com.slack.api.methods.SlackApiException;
 import com.slack.api.methods.request.chat.ChatPostMessageRequest;
+import com.slack.api.methods.request.conversations.ConversationsOpenRequest;
+import com.slack.api.methods.response.conversations.ConversationsOpenResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.lang.Nullable;
@@ -47,6 +61,9 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.Instant;
+import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -76,6 +93,14 @@ public class SlackDailyDigestService {
     @Value("${slack.digest.admins-only:true}")
     private boolean digestAdminsOnly;
 
+    /**
+     * Global / legacy digest schedule. Also the default when a preference leaves
+     * {@code cronExpression} blank. Interpreted in UTC for legacy; per-user prefs
+     * use their own timezone.
+     */
+    @Value("${slack.daily-digest.cron:0 0 9 * * *}")
+    private String globalDigestCron;
+
     private final SlackRuntimeSettingsService slackRuntimeSettingsService;
     private final SlackChannelBindingRepository channelBindingRepository;
     private final CredentialService credentialService;
@@ -103,6 +128,9 @@ public class SlackDailyDigestService {
     private final AuthLoginChallengeRepository authLoginChallengeRepository;
     private final IndexAdvisorService indexAdvisorService;
     private final IndexRecommendationService indexRecommendationService;
+    private final UserDigestPreferenceRepository userDigestPreferenceRepository;
+    private final DigestInsightAssemblerService digestInsightAssemblerService;
+    private final UserRepository userRepository;
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("MMM d, yyyy");
     private static final int TOP_TABLES = 5;
@@ -353,6 +381,49 @@ public class SlackDailyDigestService {
         return config.enabled() && config.botToken() != null && !config.botToken().isBlank();
     }
 
+    /**
+     * Check if the system has per-user digest preferences configured.
+     * When true, digest delivery uses UserDigestPreference; when false, uses legacy
+     * channel-broadcast mode.
+     *
+     * <p>This is the foundation for role-aware digests (PR2). In PR1, this method
+     * allows the service to detect whether per-user mode is active, though the
+     * actual per-user delivery logic comes later.
+     */
+    public boolean isPerUserModeEnabled() {
+        return userDigestPreferenceRepository.hasAnyPreferences();
+    }
+
+    /**
+     * Get all enabled digest preferences for a connection.
+     * Returns users who should receive a digest for this connection based on their
+     * UserDigestPreference settings.
+     *
+     * <p>For PR1, this returns the preferences but the actual personalized delivery
+     * is implemented in PR2. The current digest flow continues using the legacy
+     * channel-broadcast approach.
+     *
+     * @param connectionId the connection to get recipients for
+     * @return list of enabled preferences, or empty if no per-user preferences exist
+     */
+    public List<UserDigestPreference> getDigestRecipients(String connectionId) {
+        return userDigestPreferenceRepository.findEnabledForConnection(connectionId);
+    }
+
+    /**
+     * Get digest mode summary for logging and debugging.
+     */
+    public DigestModeInfo getDigestModeInfo() {
+        boolean perUserMode = isPerUserModeEnabled();
+        long preferenceCount = perUserMode ? userDigestPreferenceRepository.countByEnabledTrue() : 0;
+        List<String> users = perUserMode
+            ? userDigestPreferenceRepository.findDistinctUsernamesWithEnabledPreferences()
+            : List.of();
+        return new DigestModeInfo(perUserMode, preferenceCount, users.size());
+    }
+
+    public record DigestModeInfo(boolean perUserMode, long enabledPreferences, int distinctUsers) {}
+
     private List<String> digestConnectionIds() {
         Set<String> ids = new HashSet<>();
         credentialService.getAllConnections().stream()
@@ -406,6 +477,600 @@ public class SlackDailyDigestService {
             .filter(error -> error != null && !error.isBlank())
             .toList();
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Per-recipient personalized digest delivery (PR3)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Send personalized digests to all users with enabled preferences for a connection.
+     * Uses DigestAssemblyResult to generate role-aware, persona-tailored content.
+     *
+     * <p>Two users with different personas on the same connection get different
+     * Slack digests for the same time window.
+     *
+     * @param connectionId the connection to generate digests for
+     * @return summary of delivery results
+     */
+    public PersonalizedDeliveryResult sendPersonalizedDigests(String connectionId) {
+        List<UserDigestPreference> recipients = userDigestPreferenceRepository
+            .findEnabledForConnection(connectionId);
+
+        if (recipients.isEmpty()) {
+            log.debug("No per-user preferences for connection {}; skipping personalized delivery", connectionId);
+            return new PersonalizedDeliveryResult(0, 0, 0, List.of());
+        }
+
+        boolean slackEnabled = isSlackDeliveryEnabled();
+        if (!slackEnabled) {
+            log.info("Slack delivery disabled; generating {} personalized digest(s) without sending", recipients.size());
+        }
+
+        String connName = connectionName(connectionId);
+        LocalDateTime since = getLastDigestTime(connectionId);
+        List<String> errors = new ArrayList<>();
+        int sent = 0;
+        int generated = 0;
+
+        for (UserDigestPreference pref : recipients) {
+            if (pref.getDeliveryMethod() != DigestDeliveryMethod.SLACK_DM) {
+                continue;  // Only Slack DM for now; EMAIL/WhatsApp in PR4
+            }
+
+            try {
+                PersonalizedDigestResult result = sendPersonalizedDigestToUser(
+                    connectionId, connName, pref, since, slackEnabled);
+
+                if (result.generated()) {
+                    generated++;
+                    if (result.sent()) {
+                        sent++;
+                    }
+                }
+                if (result.error() != null) {
+                    errors.add(pref.getUsername() + ": " + result.error());
+                }
+            } catch (Exception e) {
+                log.error("Failed to deliver personalized digest to user {} for connection {}: {}",
+                    pref.getUsername(), connectionId, e.getMessage(), e);
+                errors.add(pref.getUsername() + ": " + e.getMessage());
+            }
+        }
+
+        log.info("Personalized digest delivery for connection {}: {} generated, {} sent, {} errors",
+            connectionId, generated, sent, errors.size());
+
+        return new PersonalizedDeliveryResult(recipients.size(), generated, sent, errors);
+    }
+
+    /**
+     * Send a personalized digest to a single user based on their preference.
+     */
+    private PersonalizedDigestResult sendPersonalizedDigestToUser(
+            String connectionId, String connName,
+            UserDigestPreference pref, LocalDateTime since,
+            boolean slackEnabled) {
+
+        String username = pref.getUsername();
+        PersonaTag personaTag = pref.getPersonaTag();
+
+        // Resolve user's built-in role. Custom roles have no Role enum — rank as
+        // DEVELOPER rather than NPE on role.name(). Persist the stored role code
+        // on the log so the audit trail still names ANALYST, not a silent fallback.
+        User recipient = userRepository.findByUsernameIgnoreCase(username).orElse(null);
+        Role role = recipient != null && recipient.getRoleEnum() != null
+            ? recipient.getRoleEnum()
+            : Role.DEVELOPER;
+        String roleCode = recipient != null ? recipient.getRoleCode() : Role.DEVELOPER.name();
+
+        // Assemble personalized digest
+        DigestAssemblyResult assembly = digestInsightAssemblerService.assembleDigest(
+            username, connectionId, role, personaTag, since);
+
+        // Format digest message
+        String message = formatPersonalizedDigest(assembly, connName, personaTag);
+
+        // Create log entry
+        SlackDigestLog logEntry = new SlackDigestLog();
+        logEntry.setConnectionId(connectionId);
+        logEntry.setConnectionName(connName);
+        logEntry.setSentAt(LocalDateTime.now());
+        logEntry.setContent(message);
+        logEntry.setHeadline(assembly.getHeadline());
+        logEntry.setRecipientUsername(username);
+        logEntry.setRecipientRole(roleCode);
+        logEntry.setPersonaTag(personaTag);
+        logEntry.setDeliveryMethod(DigestDeliveryMethod.SLACK_DM);
+        logEntry.setPreferenceId(pref.getId());
+        logEntry.setPersonalized(true);
+
+        boolean sent = false;
+        String error = null;
+
+        if (slackEnabled && !assembly.isEmpty()) {
+            try {
+                String dmChannelId = openDmChannel(username);
+                if (dmChannelId != null) {
+                    postMessage(dmChannelId, message);
+                    logEntry.setChannelId(dmChannelId);
+                    logEntry.setStatus("SENT");
+                    sent = true;
+                    log.debug("Sent personalized digest to {} (persona={}, {} insights)",
+                        username, personaTag, assembly.getInsights().size());
+                } else {
+                    logEntry.setStatus("FAILED");
+                    error = "Could not open DM channel - user not linked to Slack";
+                    logEntry.setErrorMessage(error);
+                }
+            } catch (Exception e) {
+                logEntry.setStatus("FAILED");
+                error = e.getMessage();
+                logEntry.setErrorMessage(error);
+                log.error("Failed to send personalized digest DM to {}: {}", username, e.getMessage());
+            }
+        } else {
+            logEntry.setStatus("GENERATED");
+            if (!slackEnabled) {
+                logEntry.setErrorMessage("Slack delivery disabled");
+            } else if (assembly.isEmpty()) {
+                logEntry.setErrorMessage("No insights to deliver");
+            }
+        }
+
+        // Persist log
+        try {
+            digestLogRepository.save(logEntry);
+        } catch (Exception e) {
+            log.warn("Could not persist personalized digest log for {}: {}", username, e.getMessage());
+        }
+
+        return new PersonalizedDigestResult(true, sent, error);
+    }
+
+    /**
+     * Open a DM channel with a user via their linked Slack account.
+     * Returns the channel ID for sending messages, or null if user not linked.
+     */
+    private String openDmChannel(String deepsqlUsername) {
+        List<SlackUserLink> links = slackUserLinkService.getLinkedSlackAccounts(deepsqlUsername);
+        if (links.isEmpty()) {
+            log.debug("User {} has no linked Slack accounts for DM delivery", deepsqlUsername);
+            return null;
+        }
+
+        // Use the first linked account (most users have one)
+        SlackUserLink link = links.get(0);
+        String botToken = slackRuntimeSettingsService.current().botToken();
+        if (botToken == null || botToken.isBlank()) {
+            log.warn("No Slack bot token configured; cannot open DM channel");
+            return null;
+        }
+
+        MethodsClient client = Slack.getInstance().methods(botToken);
+        try {
+            ConversationsOpenResponse response = client.conversationsOpen(
+                ConversationsOpenRequest.builder()
+                    .users(List.of(link.getSlackUserId()))
+                    .build());
+
+            if (response.isOk() && response.getChannel() != null) {
+                return response.getChannel().getId();
+            } else {
+                log.error("Failed to open DM channel with Slack user {}: {}",
+                    link.getSlackUserId(), response.getError());
+                return null;
+            }
+        } catch (IOException | SlackApiException e) {
+            log.error("Failed to open DM channel with Slack user {}: {}",
+                link.getSlackUserId(), e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Format a personalized digest message from DigestAssemblyResult.
+     * EXEC personas get tight 3-bullet executive summaries.
+     */
+    private String formatPersonalizedDigest(DigestAssemblyResult assembly, String connName, PersonaTag personaTag) {
+        StringBuilder sb = new StringBuilder();
+        DigestStyle style = chooseStyle(assembly.getConnectionId());
+
+        // Header
+        sb.append("*").append(style.digestTitle()).append(" — ").append(connName).append("*\n");
+        sb.append("_").append(LocalDateTime.now().format(DATE_FMT))
+          .append(" · ").append(assembly.getHeadline()).append("_\n");
+
+        if (personaTag != null) {
+            sb.append("_Personalized for: ").append(personaTag.getDisplayName()).append("_\n");
+        }
+        sb.append("────────────────────────\n\n");
+
+        if (assembly.isEmpty()) {
+            sb.append("✓ No new insights since your last digest — your database is running smoothly.\n\n");
+            sb.append("_").append(style.footer()).append("_");
+            return sb.toString();
+        }
+
+        // EXEC persona: tight executive summary (3 bullets max)
+        if (personaTag == PersonaTag.EXEC) {
+            formatExecDigest(sb, assembly, style);
+        } else {
+            formatStandardDigest(sb, assembly, style);
+        }
+
+        sb.append("\n_").append(style.footer()).append("_");
+        return sb.toString();
+    }
+
+    /**
+     * Format EXEC digest: 3 bullets + decision ask. Keep it tight.
+     */
+    private void formatExecDigest(StringBuilder sb, DigestAssemblyResult assembly, DigestStyle style) {
+        sb.append("*🧭 EXECUTIVE SUMMARY*\n");
+
+        List<String> execSummary = assembly.getExecutiveSummary();
+        if (execSummary != null && !execSummary.isEmpty()) {
+            for (String bullet : execSummary.stream().limit(3).toList()) {
+                sb.append("• ").append(bullet).append("\n");
+            }
+        } else {
+            // Generate summary from top insights
+            List<DigestInsight> top = assembly.getTopInsights(3);
+            for (DigestInsight insight : top) {
+                String emoji = getInsightEmoji(insight);
+                sb.append("• ").append(emoji).append(" ").append(insight.getHeadline()).append("\n");
+            }
+        }
+        sb.append("\n");
+
+        // Decision ask
+        String decisionAsk = assembly.getDecisionAsk();
+        if (decisionAsk != null && !decisionAsk.isBlank()) {
+            sb.append("*📋 ACTION NEEDED*\n");
+            sb.append(decisionAsk).append("\n\n");
+        }
+
+        // Stats line
+        sb.append("_").append(assembly.getInsights().size()).append(" insight");
+        if (assembly.getInsights().size() != 1) sb.append("s");
+        sb.append(" available for detailed review_\n");
+    }
+
+    /**
+     * Format standard digest for non-EXEC personas.
+     */
+    private void formatStandardDigest(StringBuilder sb, DigestAssemblyResult assembly, DigestStyle style) {
+        List<DigestInsight> insights = assembly.getInsights();
+
+        // Critical insights first
+        List<DigestInsight> critical = insights.stream()
+            .filter(i -> i.getSeverity() >= 90)
+            .toList();
+        if (!critical.isEmpty()) {
+            sb.append("*⚠️ CRITICAL*\n");
+            for (DigestInsight insight : critical.stream().limit(3).toList()) {
+                formatInsight(sb, insight);
+            }
+            sb.append("\n");
+        }
+
+        // High-priority insights
+        List<DigestInsight> high = insights.stream()
+            .filter(i -> i.getSeverity() >= 70 && i.getSeverity() < 90)
+            .toList();
+        if (!high.isEmpty()) {
+            sb.append("*🔶 HIGH PRIORITY*\n");
+            for (DigestInsight insight : high.stream().limit(3).toList()) {
+                formatInsight(sb, insight);
+            }
+            sb.append("\n");
+        }
+
+        // Other insights summary
+        List<DigestInsight> other = insights.stream()
+            .filter(i -> i.getSeverity() < 70)
+            .toList();
+        if (!other.isEmpty()) {
+            sb.append("*📋 OTHER INSIGHTS*\n");
+            for (DigestInsight insight : other.stream().limit(5).toList()) {
+                formatInsight(sb, insight);
+            }
+            if (other.size() > 5) {
+                sb.append("_... and ").append(other.size() - 5).append(" more_\n");
+            }
+            sb.append("\n");
+        }
+
+        // Suppressed/filtered counts
+        if (assembly.getSuppressedDuplicates() > 0 || assembly.getFilteredAcknowledged() > 0) {
+            sb.append("_");
+            if (assembly.getSuppressedDuplicates() > 0) {
+                sb.append(assembly.getSuppressedDuplicates()).append(" duplicate");
+                if (assembly.getSuppressedDuplicates() != 1) sb.append("s");
+                sb.append(" suppressed");
+            }
+            if (assembly.getFilteredAcknowledged() > 0) {
+                if (assembly.getSuppressedDuplicates() > 0) sb.append(", ");
+                sb.append(assembly.getFilteredAcknowledged()).append(" acknowledged item");
+                if (assembly.getFilteredAcknowledged() != 1) sb.append("s");
+                sb.append(" filtered");
+            }
+            sb.append("_\n");
+        }
+    }
+
+    private void formatInsight(StringBuilder sb, DigestInsight insight) {
+        String emoji = getInsightEmoji(insight);
+        sb.append(emoji).append(" *").append(insight.getHeadline()).append("*\n");
+        if (insight.getDescription() != null && !insight.getDescription().isBlank()) {
+            sb.append("   ").append(insight.getDescription()).append("\n");
+        }
+        if (insight.isActionable() && insight.getSuggestedAction() != null) {
+            sb.append("   → _").append(insight.getSuggestedAction()).append("_\n");
+        }
+        // Add signature for dedup tracking
+        if (insight.getSignatureKey() != null) {
+            sb.append("   [sig:").append(insight.getSignatureKey()).append("]\n");
+        }
+    }
+
+    private String getInsightEmoji(DigestInsight insight) {
+        return switch (insight.getCategory()) {
+            case QUERY_PERFORMANCE -> "🐢";
+            case INDEX_RECOMMENDATIONS -> "📈";
+            case SCHEMA_CHANGES -> "🔧";
+            case GROWTH_ANOMALIES -> "📊";
+            case LOCK_CONCURRENCY -> "🔒";
+            case CONFIG_TUNING -> "⚙️";
+            case BRAIN_INTELLIGENCE -> "🧠";
+            case SYSTEM_ALERTS -> "🔔";
+            case COST_CAPACITY -> "💰";
+            case DOCUMENTATION_GAPS -> "📝";
+        };
+    }
+
+    /**
+     * Get the timestamp of the last digest sent for a connection.
+     * Used as the window start for personalized digest assembly.
+     */
+    private LocalDateTime getLastDigestTime(String connectionId) {
+        return digestLogRepository
+            .findTopByConnectionIdOrderBySentAtDesc(connectionId)
+            .map(SlackDigestLog::getSentAt)
+            .orElse(LocalDateTime.now().minusHours(24));
+    }
+
+    private static final Duration DIGEST_TICK_LOOKBACK = Duration.ofMinutes(1);
+
+    /**
+     * Minute-tick entry point used by {@code SlackDailyDigestTaskConfig}.
+     *
+     * <p>When no enabled preferences exist, runs the legacy channel broadcast
+     * only if the global {@code slack.daily-digest.cron} is due (UTC).
+     * When preferences exist, delivers only to preferences whose cron matches
+     * in that user's timezone and that have not already been logged for this
+     * fire window.
+     */
+    public void processDigestTick() {
+        processDigestTick(Instant.now());
+    }
+
+    /**
+     * Testable overload of {@link #processDigestTick()}.
+     */
+    public void processDigestTick(Instant now) {
+        if (now == null) {
+            now = Instant.now();
+        }
+
+        long enabledCount = userDigestPreferenceRepository.countByEnabledTrue();
+        if (enabledCount == 0) {
+            if (DigestCronMatcher.isDue(globalDigestCron, ZoneId.of("UTC"), now, DIGEST_TICK_LOOKBACK)) {
+                log.info("Digest tick: no enabled preferences; running legacy broadcast (global cron due)");
+                runLegacyBroadcastForAllConnections();
+            } else {
+                log.debug("Digest tick: no enabled preferences; global cron not due");
+            }
+            return;
+        }
+
+        String globalCron = (globalDigestCron == null || globalDigestCron.isBlank())
+            ? "0 0 9 * * *"
+            : globalDigestCron;
+
+        List<UserDigestPreference> enabledPrefs = userDigestPreferenceRepository
+            .findByEnabledTrueAndDeliveryMethod(DigestDeliveryMethod.SLACK_DM);
+
+        int dueCount = 0;
+        int delivered = 0;
+        for (UserDigestPreference pref : enabledPrefs) {
+            String cron = pref.getEffectiveCronExpression(globalCron);
+            ZoneId zone = DigestCronMatcher.resolveZone(pref.getTimezone());
+            var window = DigestCronMatcher.dueWindowStart(cron, zone, now, DIGEST_TICK_LOOKBACK);
+            if (window.isEmpty()) {
+                continue;
+            }
+            dueCount++;
+            Instant fireInstant = window.get();
+            List<String> connectionIds = resolvePreferenceConnections(pref);
+            for (String connectionId : connectionIds) {
+                if (alreadyDeliveredForWindow(pref, connectionId, fireInstant)) {
+                    log.debug("Skipping digest for {} / {} — already delivered this window",
+                        pref.getUsername(), connectionId);
+                    continue;
+                }
+                try {
+                    boolean slackEnabled = isSlackDeliveryEnabled();
+                    String connName = connectionName(connectionId);
+                    LocalDateTime since = getLastDigestTime(connectionId);
+                    PersonalizedDigestResult result = sendPersonalizedDigestToUser(
+                        connectionId, connName, pref, since, slackEnabled);
+                    if (result.generated() || result.sent()) {
+                        delivered++;
+                    }
+                } catch (Exception e) {
+                    log.error("Failed due-preference digest for user {} connection {}: {}",
+                        pref.getUsername(), connectionId, e.getMessage(), e);
+                }
+            }
+        }
+
+        log.info("Digest tick (per-user): {} due preference(s), {} delivery attempt(s)",
+            dueCount, delivered);
+
+        // Connections with no recipients still get legacy broadcast when the global cron fires.
+        if (DigestCronMatcher.isDue(globalCron, ZoneId.of("UTC"), now, DIGEST_TICK_LOOKBACK)) {
+            for (String connectionId : digestConnectionIds()) {
+                if (userDigestPreferenceRepository.findEnabledForConnection(connectionId).isEmpty()) {
+                    try {
+                        sendLegacyDigest(connectionId);
+                    } catch (Exception e) {
+                        log.error("Legacy fallback digest failed for {}: {}", connectionId, e.getMessage(), e);
+                    }
+                }
+            }
+        }
+    }
+
+    private void runLegacyBroadcastForAllConnections() {
+        List<String> connectionIds = digestConnectionIds();
+        if (connectionIds.isEmpty()) {
+            log.info("No connections available — skipping legacy digest");
+            return;
+        }
+        for (String connectionId : connectionIds) {
+            try {
+                sendLegacyDigest(connectionId);
+            } catch (Exception e) {
+                log.error("Failed legacy digest for connection {}: {}", connectionId, e.getMessage(), e);
+            }
+        }
+    }
+
+    private List<String> resolvePreferenceConnections(UserDigestPreference pref) {
+        if (pref.getConnectionId() != null && !pref.getConnectionId().isBlank()) {
+            return List.of(pref.getConnectionId());
+        }
+        return digestConnectionIds();
+    }
+
+    /**
+     * True when SlackDigestLog already has a row for this preference/connection
+     * at or after the cron fire time (idempotent minute-tick).
+     */
+    private boolean alreadyDeliveredForWindow(
+            UserDigestPreference pref,
+            String connectionId,
+            Instant fireInstant) {
+        // sentAt is LocalDateTime.now() (JVM default zone) — compare in that zone.
+        LocalDateTime since = LocalDateTime.ofInstant(fireInstant, ZoneId.systemDefault());
+        if (pref.getId() != null) {
+            if (digestLogRepository.existsByPreferenceIdAndConnectionIdAndSentAtGreaterThanEqual(
+                    pref.getId(), connectionId, since)) {
+                return true;
+            }
+        }
+        if (pref.getUsername() != null && !pref.getUsername().isBlank()) {
+            return digestLogRepository.existsByConnectionIdAndRecipientUsernameAndSentAtGreaterThanEqual(
+                connectionId, pref.getUsername(), since);
+        }
+        return false;
+    }
+
+    /**
+     * Entry point for the hybrid digest run: per-user when preferences exist,
+     * legacy broadcast otherwise.
+     *
+     * <p>Used by manual/admin triggers. The scheduled tick uses
+     * {@link #processDigestTick()} so per-user crons are honored.
+     */
+    public void sendDailyDigestHybrid() {
+        List<String> connectionIds = digestConnectionIds();
+        if (connectionIds.isEmpty()) {
+            log.info("No connections available — skipping daily digest generation");
+            return;
+        }
+
+        boolean hasPreferences = isPerUserModeEnabled();
+        log.info("Digest mode: {} (connections={})",
+            hasPreferences ? "per-user personalized" : "legacy broadcast",
+            connectionIds.size());
+
+        for (String connectionId : connectionIds) {
+            try {
+                if (hasPreferences) {
+                    // Per-user personalized delivery
+                    PersonalizedDeliveryResult result = sendPersonalizedDigests(connectionId);
+                    log.info("Connection {}: {} recipients, {} sent, {} errors",
+                        connectionId, result.recipients(), result.sent(), result.errors().size());
+
+                    // Also send legacy broadcast if channel bindings exist (dual mode)
+                    if (result.recipients() == 0) {
+                        // No per-user prefs for this connection; use legacy
+                        sendLegacyDigest(connectionId);
+                    }
+                } else {
+                    // Legacy broadcast mode
+                    sendLegacyDigest(connectionId);
+                }
+            } catch (Exception e) {
+                log.error("Failed to generate digest for connection {}: {}", connectionId, e.getMessage(), e);
+            }
+        }
+    }
+
+    /**
+     * Legacy broadcast digest to channel bindings (pre-PR3 behavior).
+     */
+    private void sendLegacyDigest(String connectionId) {
+        SlackDigestLog logEntry = new SlackDigestLog();
+        logEntry.setConnectionId(connectionId);
+        logEntry.setConnectionName(connectionName(connectionId));
+        logEntry.setChannelId(null);
+        logEntry.setSentAt(LocalDateTime.now());
+        logEntry.setPersonalized(false);
+
+        try {
+            String message = buildRichDigest(connectionId);
+            logEntry.setContent(message);
+            logEntry.setHeadline(extractHeadline(message));
+
+            List<SlackChannelBinding> bindings = channelBindingRepository.findAll().stream()
+                .filter(b -> connectionId.equals(b.getDefaultConnectionId()))
+                .collect(Collectors.toList());
+            bindings = filterAdminRecipients(bindings);
+
+            boolean slackEnabled = isSlackDeliveryEnabled();
+            if (!slackEnabled || bindings.isEmpty()) {
+                logEntry.setStatus("GENERATED");
+                logEntry.setErrorMessage(slackEnabled ? "No Slack channel bindings" : "Slack delivery disabled");
+            } else {
+                List<String> failures = sendToBoundChannels(bindings, message);
+                if (failures.isEmpty()) {
+                    logEntry.setStatus("SENT");
+                } else if (failures.size() < bindings.size()) {
+                    logEntry.setStatus("PARTIAL");
+                    logEntry.setErrorMessage(String.join(" | ", failures));
+                } else {
+                    logEntry.setStatus("FAILED");
+                    logEntry.setErrorMessage(String.join(" | ", failures));
+                }
+            }
+        } catch (Exception e) {
+            logEntry.setStatus("FAILED");
+            logEntry.setErrorMessage(e.getMessage());
+            log.error("Failed to generate legacy digest for connection {}: {}", connectionId, e.getMessage(), e);
+        } finally {
+            try {
+                digestLogRepository.save(logEntry);
+            } catch (Exception e) {
+                log.warn("Could not persist legacy digest log: {}", e.getMessage());
+            }
+        }
+    }
+
+    public record PersonalizedDeliveryResult(int recipients, int generated, int sent, List<String> errors) {}
+    public record PersonalizedDigestResult(boolean generated, boolean sent, String error) {}
 
     // ─────────────────────────────────────────────────────────────────────────
     // Main builder

@@ -3928,6 +3928,54 @@ export const slackDigestAPI = {
 };
 
 /**
+ * Digest preferences API — per-user digest configuration.
+ * Users manage their own preferences; admins can seed/view all.
+ */
+export const digestPreferencesAPI = {
+  // Current user's preferences
+  getMyPreferences: () =>
+    apiClient.get("/api/digest/preferences").then((r) => r.data),
+
+  createPreference: (data) =>
+    apiClient.post("/api/digest/preferences", data).then((r) => r.data),
+
+  updatePreference: (id, data) =>
+    apiClient.put(`/api/digest/preferences/${id}`, data).then((r) => r.data),
+
+  setEnabled: (id, enabled) =>
+    apiClient
+      .patch(`/api/digest/preferences/${id}/enabled`, { enabled })
+      .then((r) => r.data),
+
+  deletePreference: (id) =>
+    apiClient.delete(`/api/digest/preferences/${id}`).then((r) => r.data),
+
+  // Metadata
+  getPersonaTags: () =>
+    apiClient.get("/api/digest/preferences/persona-tags").then((r) => r.data),
+
+  getDeliveryMethods: () =>
+    apiClient
+      .get("/api/digest/preferences/delivery-methods")
+      .then((r) => r.data),
+
+  // Status
+  getStatus: () =>
+    apiClient.get("/api/digest/preferences/status").then((r) => r.data),
+
+  // Seed current user's preferences
+  seedForMe: () =>
+    apiClient.post("/api/digest/preferences/seed/me").then((r) => r.data),
+
+  // Admin: seed preview and execution
+  previewSeed: () =>
+    apiClient.get("/api/digest/preferences/admin/seed/preview").then((r) => r.data),
+
+  executeSeed: () =>
+    apiClient.post("/api/digest/preferences/admin/seed").then((r) => r.data),
+};
+
+/**
  * Slow-query analytics — the 30-day per-query time series, regressions,
  * and per-customer breakdown. Backed by /api/slow-query-analytics/**.
  */
