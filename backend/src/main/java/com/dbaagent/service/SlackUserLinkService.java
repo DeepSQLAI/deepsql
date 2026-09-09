@@ -222,6 +222,24 @@ public class SlackUserLinkService {
         return "dba-agent:slack-link-code:" + (username == null ? "" : username.toLowerCase(Locale.ROOT));
     }
 
+    /**
+     * Get linked Slack accounts for a DeepSQL username.
+     * Used for sending personalized digest DMs.
+     */
+    @Transactional(readOnly = true)
+    public List<SlackUserLink> getLinkedSlackAccounts(String deepsqlUsername) {
+        return slackUserLinkRepository.findLinkedByDeepsqlUsername(deepsqlUsername);
+    }
+
+    /**
+     * Get all DeepSQL usernames that have linked Slack accounts.
+     * Used for seeding digest preferences.
+     */
+    @Transactional(readOnly = true)
+    public List<String> getAllLinkedUsernames() {
+        return slackUserLinkRepository.findAllLinkedDeepsqlUsernames();
+    }
+
     public record LinkedUser(String username, boolean admin) {
     }
 }

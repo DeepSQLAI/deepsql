@@ -91,4 +91,29 @@ public interface SlackDigestLogRepository extends JpaRepository<SlackDigestLog, 
      * Count personalized vs non-personalized digests since a date.
      */
     long countByPersonalizedAndSentAtAfter(boolean personalized, LocalDateTime since);
+
+    /**
+     * Find the most recent digest for a connection (any type).
+     * Used for determining the window start for new digests.
+     */
+    Optional<SlackDigestLog> findTopByConnectionIdOrderBySentAtDesc(String connectionId);
+
+    /**
+     * Idempotency for per-preference scheduling: true if this preference already
+     * produced a digest log for the connection at or after the cron fire time.
+     */
+    boolean existsByPreferenceIdAndConnectionIdAndSentAtGreaterThanEqual(
+        Long preferenceId,
+        String connectionId,
+        LocalDateTime sentAt
+    );
+
+    /**
+     * Fallback idempotency when preferenceId is missing on older rows.
+     */
+    boolean existsByConnectionIdAndRecipientUsernameAndSentAtGreaterThanEqual(
+        String connectionId,
+        String recipientUsername,
+        LocalDateTime sentAt
+    );
 }
