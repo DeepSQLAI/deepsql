@@ -52,7 +52,7 @@ public class SecurityConfig {
      * only {@code application*.properties} — could not see it, and it ships to every reader
      * of the public repository. {@code CorsAllowlistSafetyTest} now scans this file too.
      */
-    @Value("${cors.allowed.origins:http://localhost:3000,http://localhost:3001,http://localhost:3002,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:3002}")
+    @Value("${cors.allowed.origins:http://localhost:3000,http://localhost:3001,http://localhost:3002,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:3002,http://127.0.0.1:*,http://localhost:*}")
     private String corsAllowedOrigins;
 
     @Bean

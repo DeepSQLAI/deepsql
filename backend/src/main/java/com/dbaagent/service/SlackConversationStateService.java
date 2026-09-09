@@ -261,7 +261,9 @@ public class SlackConversationStateService {
             serviceUsername,
             serviceUser.isPresent(),
             serviceUser.map(User::getUsername).orElse(null),
-            serviceUser.map(user -> user.getRoleEnum().name()).orElse(null),
+            // getRoleCode, not getRoleEnum().name(): the enum is null for a custom role
+            // and this status snapshot would NPE on it.
+            serviceUser.map(User::getRoleCode).orElse(null),
             serviceUser.map(User::isAdmin).orElse(false),
             allowedConnections.size(),
             Math.toIntExact(channelBindingRepository.count()),

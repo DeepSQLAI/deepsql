@@ -418,6 +418,30 @@ public class SlowLogIngestionService {
         return last.plusMinutes(freq).isBefore(LocalDateTime.now());
     }
 
+    /**
+     * KNOWN ISSUE — this cursor has two defects, both unfixed. Deliberately left alone
+     * rather than changed blind: every provider needs live cloud credentials to exercise,
+     * so a fix cannot be verified end to end here, and getting it wrong silently skips or
+     * duplicates slow-query events.
+     *
+     * <ol>
+     *   <li><b>Events arriving mid-run are lost.</b> The cursor is set to the time
+     *       ingestion <em>finished</em>, but {@code SINCE_LAST} then uses it as an
+     *       exclusive lower bound (see {@code resolveStartTime}). Anything whose timestamp
+     *       falls between the last parsed event and this write is never fetched — a gap
+     *       proportional to how long the run took, so worst on the slowest S3/CloudWatch
+     *       pulls. The fix is to record the maximum event timestamp actually parsed.
+     *   <li><b>Local time written, UTC read.</b> {@code LocalDateTime.now()} is
+     *       server-local; every read does {@code .atZone(ZoneOffset.UTC)}. The Compose
+     *       image runs {@code Etc/UTC} so the two agree there by luck, but on a bare-metal
+     *       install in, say, UTC+5:30, the cursor lands 5.5 h in the future and that much
+     *       slow-query history is skipped on every run (west of UTC it goes backwards and
+     *       re-ingests duplicates). The fix is to store an {@code Instant}/
+     *       {@code timestamptz} end to end.
+     * </ol>
+     *
+     * <p>{@code SlowLogSourceConfigService.updateAfterAutoIngestion} has the same bug.
+     */
     private void updateLastProcessed(SlowLogSourceConfig config) {
         config.setLastProcessedAt(LocalDateTime.now());
         config.setUpdatedAt(LocalDateTime.now());

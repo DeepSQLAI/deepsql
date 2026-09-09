@@ -94,7 +94,7 @@ class SchemaDriftListenerColumnsTest {
         tableDoc.setObjectType(SchemaDocumentation.DocumentationType.TABLE);
         when(repo.findByConnectionIdAndObjectTypeAndObjectName(
                 "c1", SchemaDocumentation.DocumentationType.TABLE, "OLD_TABLE"))
-            .thenReturn(java.util.Optional.of(tableDoc));
+            .thenReturn(List.of(tableDoc));
         when(repo.findByConnectionIdAndParentObject("c1", "OLD_TABLE"))
             .thenReturn(List.of());
 

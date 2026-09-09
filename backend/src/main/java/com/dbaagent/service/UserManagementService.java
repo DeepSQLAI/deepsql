@@ -47,6 +47,9 @@ public class UserManagementService {
     @Autowired
     private UserSessionRepository userSessionRepository;
 
+    @Autowired
+    private PermissionService permissionService;
+
     /**
      * Create a new user (admin only).
      */
@@ -61,10 +64,7 @@ public class UserManagementService {
         if (password.length() < 8) {
             throw new IllegalArgumentException("Password must be at least 8 characters");
         }
-        Role role = Role.DEVELOPER;
-        if (roleName != null && !roleName.isBlank()) {
-            role = Role.fromString(roleName);
-        }
+        String roleCode = resolveRoleCode(roleName);
         String normalizedEmail = email.trim().toLowerCase();
         if (userRepository.existsByEmailIgnoreCase(normalizedEmail)) {
             throw new IllegalArgumentException("A user with this email already exists");
@@ -79,7 +79,7 @@ public class UserManagementService {
         user.setUsername(resolvedUsername);
         user.setEmail(normalizedEmail);
         user.setPassword(passwordEncoder.encode(password));
-        user.setRoleEnum(role);
+        user.setRole(roleCode);
         user.setEmailVerifiedAt(LocalDateTime.now());
         user.setAccountStatusEnum(UserAccountStatus.ACTIVE);
         user.setInvitedAt(LocalDateTime.now());
@@ -91,10 +91,10 @@ public class UserManagementService {
             .userId(user.getId())
             .email(user.getEmail())
             .targetResource("user:" + user.getId())
-            .metadata(Map.of("role", role.name(), "action", "user_created"))
+            .metadata(Map.of("role", roleCode, "action", "user_created"))
             .build());
 
-        log.info("Admin created user: {} with role {}", normalizedEmail, role.name());
+        log.info("Admin created user: {} with role {}", normalizedEmail, roleCode);
         return toUserDTO(user);
     }
 
@@ -136,8 +136,8 @@ public class UserManagementService {
             throw new IllegalArgumentException("Cannot change the admin user's role");
         }
 
-        Role role = Role.fromString(roleName);
-        user.setRole(role.name());
+        String roleCode = resolveRoleCode(roleName);
+        user.setRole(roleCode);
         userRepository.save(user);
         securityEventService.log(SecurityEventService.EventRequest.builder()
             .eventType(SecurityEventType.ROLE_CHANGED)
@@ -145,10 +145,10 @@ public class UserManagementService {
             .userId(user.getId())
             .email(user.getEmail())
             .targetResource("user:" + user.getId())
-            .metadata(Map.of("role", role.name()))
+            .metadata(Map.of("role", roleCode))
             .build());
 
-        log.info("Updated user {} role to {}", user.getUsername(), role.name());
+        log.info("Updated user {} role to {}", user.getUsername(), roleCode);
 
         return toUserDTO(user);
     }
@@ -207,7 +207,9 @@ public class UserManagementService {
         if (user.getAccountStatusEnum() == UserAccountStatus.ACTIVE) {
             throw new IllegalArgumentException("Direct account creation is enabled. Active users do not need invite emails.");
         }
-        Role role = user.getRoleEnum();
+        // UserInviteService is typed to the built-in enum; a custom-role invite carries
+        // the closest built-in and the real role is already stored on the user row.
+        Role role = Role.fromStringOrDefault(user.getRole());
         var invite = userInviteService.createInvite(user.getEmail(), user.getUsername(), role, "admin", InviteType.STANDARD, null, null);
         return toUserDTO(invite.user());
     }
@@ -231,17 +233,24 @@ public class UserManagementService {
      * Get all roles with their permissions.
      */
     public List<Map<String, Object>> getRolesWithPermissions() {
-        return Arrays.stream(Role.values())
-                .map(role -> {
+        // Every assignable role, built-in and custom, with the permissions actually in
+        // effect (overrides applied) rather than the enum's raw defaults — this list is
+        // what the admin UI offers when changing someone's role.
+        return permissionService.getRoleRegistry().stream()
+                .map(info -> {
                     Map<String, Object> roleDTO = new HashMap<>();
-                    roleDTO.put("name", role.name());
-                    roleDTO.put("description", role.getDescription());
+                    roleDTO.put("name", info.code);
+                    roleDTO.put("code", info.code);
+                    roleDTO.put("displayName", info.name);
+                    roleDTO.put("description", info.description);
+                    roleDTO.put("builtIn", info.builtIn);
 
-                    List<Map<String, String>> permissions = role.getPermissions().stream()
-                            .map(p -> {
+                    List<Map<String, String>> permissions = info.effectivePermissions.stream()
+                            .map(code -> {
+                                Permission p = Permission.fromCode(code);
                                 Map<String, String> permDTO = new HashMap<>();
-                                permDTO.put("name", p.name());
-                                permDTO.put("description", p.getDescription());
+                                permDTO.put("name", code);
+                                permDTO.put("description", p != null ? p.getDescription() : code);
                                 return permDTO;
                             })
                             .collect(Collectors.toList());
@@ -250,6 +259,28 @@ public class UserManagementService {
                     return roleDTO;
                 })
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Normalise a requested role name to a role code that actually exists.
+     *
+     * <p>Blank means DEVELOPER. Anything else must name a built-in role or an existing
+     * custom role: an unknown code is rejected rather than silently downgraded, because a
+     * user whose role does not resolve gets no permissions at all at their next login.
+     */
+    private String resolveRoleCode(String roleName) {
+        if (roleName == null || roleName.isBlank()) {
+            return Role.DEVELOPER.name();
+        }
+        String code = roleName.trim().toUpperCase();
+        Role builtIn = Role.fromString(code);
+        if (builtIn != null) {
+            return builtIn.name();
+        }
+        if (!permissionService.roleExists(code)) {
+            throw new IllegalArgumentException("Unknown role: " + roleName);
+        }
+        return code;
     }
 
     /**
@@ -283,11 +314,11 @@ public class UserManagementService {
         dto.put("mfaEnrolledAt", user.getMfaEnrolledAt());
         dto.put("mfaEnrolled", user.getMfaEnrolledAt() != null);
 
-        // Include permissions for convenience
-        Set<Permission> permissions = user.getPermissions();
-        dto.put("permissions", permissions.stream()
-                .map(Permission::name)
-                .collect(Collectors.toList()));
+        // Effective permissions, resolved by role code so a custom role reports what it
+        // actually grants; user.getPermissions() only knows the built-in enum.
+        dto.put("roleName", permissionService.describeRole(user.getRoleCode()));
+        dto.put("permissions", new java.util.ArrayList<>(
+                permissionService.getEffectivePermissionCodes(user.getRoleCode())));
 
         return dto;
     }

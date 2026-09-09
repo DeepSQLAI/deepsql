@@ -270,6 +270,16 @@ class AccessControlServiceTest {
         assertDoesNotThrow(() -> accessControlService.assertCanAccessFeedback("fb-1"));
     }
 
+    /**
+     * Guards the CHAT_EDITOR branch of {@link EffectiveConnectionAccess} itself.
+     *
+     * <p>Note this state is no longer reachable from a real grant: connection access
+     * levels collapsed to a single tier, so {@code ConnectionAccessService.resolveAccess}
+     * returns FULL_CONTENT for every grant (see
+     * {@code ConnectionAccessLevelCollapseTest}). This test stubs the resolver directly,
+     * so it exercises the enum's semantics, not the resolution path — keep it for the
+     * former, do not read it as evidence about the latter.
+     */
     @Test
     void assignedChatEditorUserCanUseChatEditor() {
         SecurityContextHolder.getContext().setAuthentication(

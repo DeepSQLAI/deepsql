@@ -23,6 +23,35 @@ class QueryExecutionContextTest {
         assertThat(ctx.origin()).isEqualTo(QueryExecutionOrigin.MCP);
         assertThat(ctx.actorUsername()).isEqualTo("admin");
         assertThat(ctx.actorIsAdmin()).isTrue();
+        assertThat(ctx.mutationMode()).isEqualTo(QueryExecutionContext.MutationMode.MAY_MUTATE);
+        assertThat(ctx.mutationConfirmed()).isFalse();
+    }
+
+    @Test
+    void mcpAdminConfirmedFactoryPassesConfirmationFlag() {
+        QueryExecutionContext ctx = QueryExecutionContext.mcp("admin", true, true);
+        assertThat(ctx.origin()).isEqualTo(QueryExecutionOrigin.MCP);
+        assertThat(ctx.mutationMode()).isEqualTo(QueryExecutionContext.MutationMode.MAY_MUTATE);
+        assertThat(ctx.mutationConfirmed()).isTrue();
+    }
+
+    @Test
+    void mcpNonAdminRemainsReadOnlyEvenWhenConfirmed() {
+        QueryExecutionContext ctx = QueryExecutionContext.mcp("dev", false, true);
+        assertThat(ctx.origin()).isEqualTo(QueryExecutionOrigin.MCP);
+        assertThat(ctx.mutationMode()).isEqualTo(QueryExecutionContext.MutationMode.READ_ONLY_ONLY);
+        assertThat(ctx.actorIsAdmin()).isFalse();
+    }
+
+    @Test
+    void forSqlSurfaceSelectsMcpOrEditorOrigin() {
+        QueryExecutionContext mcp = QueryExecutionContext.forSqlSurface(true, "admin", true, true);
+        assertThat(mcp.origin()).isEqualTo(QueryExecutionOrigin.MCP);
+        assertThat(mcp.mutationConfirmed()).isTrue();
+
+        QueryExecutionContext editor = QueryExecutionContext.forSqlSurface(false, "admin", true, true);
+        assertThat(editor.origin()).isEqualTo(QueryExecutionOrigin.EDITOR);
+        assertThat(editor.mutationConfirmed()).isTrue();
     }
 
     @Test

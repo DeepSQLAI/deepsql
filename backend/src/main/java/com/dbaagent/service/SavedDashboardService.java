@@ -36,6 +36,9 @@ public class SavedDashboardService {
     // unbounded snapshot table. Oldest beyond this count are pruned on each write.
     private static final int MAX_VERSIONS_PER_DASHBOARD = 50;
 
+    static final String DEFAULT_BUILD_REPLY =
+        "Done — built and verified against your data. Saved as a draft — tell me what to change.";
+
     @Autowired
     private SavedDashboardRepository savedDashboardRepository;
 
@@ -409,9 +412,19 @@ public class SavedDashboardService {
             dashboard.setName(String.valueOf(title));
         }
         List<Map<String, Object>> messages = parseMessages(dashboard.getChatMessages());
-        messages.add(chatMessage("agent", "Done — built and verified against your data. Saved as a draft — tell me what to change."));
+        messages.add(chatMessage("agent", buildReplyText(config)));
         dashboard.setChatMessages(writeMessages(messages));
         return finishRunning(dashboard);
+    }
+
+    // The agent's own dashboard-note. Falls back to the old constant only when a
+    // turn produced no note, so an agent still on the previous contract works.
+    private String buildReplyText(Map<String, Object> config) {
+        Object summary = config == null ? null : config.get("summary");
+        if (summary != null && !String.valueOf(summary).isBlank()) {
+            return String.valueOf(summary).trim();
+        }
+        return DEFAULT_BUILD_REPLY;
     }
 
     /** Turn finished as a real generation failure (not a client disconnect — see controller). */

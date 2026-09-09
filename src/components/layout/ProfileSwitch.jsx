@@ -63,7 +63,7 @@ export default function ProfileSwitch() {
     try {
       const payload = await startImpersonation(userId)
       setOpen(false)
-      setActiveSection(getDefaultHomeSection(payload?.role))
+      setActiveSection(getDefaultHomeSection(payload?.role, null, payload?.permissions))
     } catch (err) {
       setError(err?.response?.data?.message || err.message || 'Could not switch profile')
     } finally {
@@ -78,7 +78,7 @@ export default function ProfileSwitch() {
     try {
       const payload = await stopImpersonation()
       setOpen(false)
-      setActiveSection(getDefaultHomeSection(payload?.role))
+      setActiveSection(getDefaultHomeSection(payload?.role, null, payload?.permissions))
     } catch (err) {
       setError(err?.response?.data?.message || err.message || 'Could not exit profile')
     } finally {

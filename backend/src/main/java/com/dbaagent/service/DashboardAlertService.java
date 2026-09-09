@@ -4,6 +4,7 @@ import com.dbaagent.model.DashboardAlert;
 import com.dbaagent.model.SavedDashboard;
 import com.dbaagent.repository.DashboardAlertRepository;
 import com.dbaagent.repository.SavedDashboardRepository;
+import com.dbaagent.service.llm.LlmUsageContext;
 import jakarta.mail.MessagingException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -107,7 +108,16 @@ public class DashboardAlertService {
         DashboardAlert alert = requireAlert(alertId);
         alert.setLastCheckedAt(LocalDateTime.now());
         try {
-            Verdict verdict = runCheck(alert);
+            // Scheduled work has no request, so the usage filter cannot label it. Declared
+            // here instead, or every alert evaluation would bill to "unknown" — and alerts
+            // are the one feature that spends money with nobody watching.
+            //
+            // The actor is set for the same reason the check itself runs as the creator:
+            // the spend belongs to whoever owns the alert, not to nobody.
+            Verdict verdict = QueryActorContextHolder.withActor(
+                    alert.getCreatedByUsername(),
+                    () -> LlmUsageContext.with(
+                            "dashboard-alert", alert.getConnectionId(), () -> runCheck(alert)));
             alert.setLastVerdict(verdict.fired() ? "FIRED" : "OK");
             alert.setLastReason(verdict.reason());
             alert.setLastError(null);

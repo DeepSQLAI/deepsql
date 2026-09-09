@@ -1,0 +1,366 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 15, 17, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+  padding: 24px;
+}
+
+.modal {
+  width: min(880px, 100%);
+  max-height: min(86vh, 720px);
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #111;
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.5;
+  max-width: 60ch;
+}
+
+.body {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) 1fr;
+  min-height: 0;
+  flex: 1;
+}
+
+.listPane {
+  border-right: 1px solid #f0f0f0;
+  padding: 14px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detailPane {
+  padding: 16px 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.createBox {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid #eee;
+  border-radius: 9px;
+  background: #fafafa;
+}
+
+.input,
+.roleSelect {
+  width: 100%;
+  padding: 7px 9px;
+  font-size: 12.5px;
+  color: #111;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 7px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.input:focus,
+.roleSelect:focus {
+  border-color: #534ab7;
+}
+
+.roleSelect {
+  width: auto;
+  min-width: 108px;
+}
+
+.colorRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.swatch:hover { transform: scale(1.12); }
+.swatchActive { border-color: #111; }
+
+.createBtn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #fff;
+  background: #111;
+  border: 1px solid #111;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.createBtn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.listItem {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  font-size: 12.5px;
+  color: #333;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+}
+
+.listItem:hover { background: #f6f6f6; }
+
+.listItemActive {
+  background: #f2f1fb;
+  border-color: #ddd9f5;
+  color: #111;
+  font-weight: 500;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.listName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listCount {
+  font-size: 11px;
+  color: #9ca3af;
+  font-variant-numeric: tabular-nums;
+}
+
+.detailHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detailTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #111;
+}
+
+.detailSub {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.detailMeta {
+  margin: 5px 0 0;
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.addMemberRow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.memberList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.memberRow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 6px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: #333;
+}
+
+.memberRow:hover { background: #fafafa; }
+
+.memberIcon {
+  display: inline-flex;
+  color: #6b7280;
+}
+
+.memberName {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.youTag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+  background: #f0f0f0;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.memberRole {
+  font-size: 11.5px;
+  color: #6b7280;
+}
+
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: #6b7280;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.iconBtn:hover { background: #f2f2f2; color: #111; }
+.iconBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ghostBtn {
+  padding: 4px 9px;
+  font-size: 11.5px;
+  color: #444;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.dangerBtn {
+  padding: 4px 10px;
+  font-size: 11.5px;
+  color: #fff;
+  background: #b91c1c;
+  border: 1px solid #b91c1c;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.confirmRow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.confirmText {
+  font-size: 11.5px;
+  color: #6b7280;
+}
+
+.placeholder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 10px;
+  font-size: 12.5px;
+  color: #9ca3af;
+  justify-content: center;
+  text-align: center;
+}
+
+.error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 20px 0;
+  padding: 8px 11px;
+  font-size: 12px;
+  color: #991b1b;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 7px;
+}
+
+.spin { animation: wm-spin 0.9s linear infinite; }
+
+@keyframes wm-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 720px) {
+  .body { grid-template-columns: 1fr; }
+  .listPane { border-right: none; border-bottom: 1px solid #f0f0f0; }
+}

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Newspaper, RefreshCw, Settings, X, Check, Clock, AlertCircle, Zap } from 'lucide-react'
+import { Newspaper, RefreshCw, Settings, X, Check, Clock, AlertCircle, Zap, Bell } from 'lucide-react'
 import { slackDigestAPI } from '@/lib/api/client'
 import { useConnectionManager } from '@/lib/hooks/useConnectionManager'
+import DigestPreferencesPanel from './DigestPreferencesPanel'
 import styles from './DigestSection.module.css'
 
 // ─────────────────────────────────────────────
@@ -267,6 +268,7 @@ export default function DigestFeedSection() {
   const [triggering, setTriggering] = useState(false)
   const [triggerMsg, setTriggerMsg] = useState(null)
   const [showSettings, setShowSettings] = useState(false)
+  const [showPreferences, setShowPreferences] = useState(false)
   const [error, setError] = useState(null)
 
   const load = useCallback(async () => {
@@ -354,6 +356,13 @@ export default function DigestFeedSection() {
           </button>
           <button
             className={styles.actionBtn}
+            onClick={() => setShowPreferences(true)}
+            title="My digest preferences"
+          >
+            <Bell size={14} />
+          </button>
+          <button
+            className={styles.actionBtn}
             onClick={() => setShowSettings(true)}
             title="Configure schedule"
           >
@@ -407,6 +416,7 @@ export default function DigestFeedSection() {
       </div>
 
       {showSettings && <SchedulePanel onClose={() => setShowSettings(false)} />}
+      {showPreferences && <DigestPreferencesPanel onClose={() => setShowPreferences(false)} />}
     </div>
   )
 }

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Plus, Sparkles, Clock, RefreshCw, Trash2, Loader2, LayoutDashboard, AlertTriangle, Search, Star, Copy, Folder, X } from 'lucide-react'
+import { Plus, Sparkles, Clock, RefreshCw, Trash2, Loader2, LayoutDashboard, AlertTriangle, Search, Star, Copy, Folder, X, Users, Settings2 } from 'lucide-react'
 import { savedDashboardsAPI } from '@/lib/api/client'
+import { dashboardWorkspacesAPI } from '@/lib/api/client'
+import WorkspaceManager from './WorkspaceManager'
 import styles from './DashboardsHome.module.css'
 
 // A dashboard is "live" once it's published to the web (has a public link).
@@ -74,11 +76,17 @@ export default function DashboardsHome({ connectionId, onOpen }) {
   // some embedded/webview hosts suppress it outright, silently no-opping the delete).
   const [confirmId, setConfirmId] = useState(null)
   const [deleteError, setDeleteError] = useState(null)
+  const [workspaces, setWorkspaces] = useState([])
+  const [workspaceFilter, setWorkspaceFilter] = useState(null) // null = all workspaces
+  const [showWorkspaces, setShowWorkspaces] = useState(false)
+  const [workspaceMenuId, setWorkspaceMenuId] = useState(null)
+  const [movingWorkspaceId, setMovingWorkspaceId] = useState(null)
   const [folderMenuId, setFolderMenuId] = useState(null)
   const [folderInput, setFolderInput] = useState('')
   const [movingFolderId, setMovingFolderId] = useState(null)
   const confirmRef = useRef(null)
   const folderMenuRef = useRef(null)
+  const workspaceMenuRef = useRef(null)
 
   useEffect(() => {
     if (!folderMenuId) return
@@ -88,6 +96,15 @@ export default function DashboardsHome({ connectionId, onOpen }) {
     document.addEventListener('keydown', onKey)
     return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey) }
   }, [folderMenuId])
+
+  useEffect(() => {
+    if (!workspaceMenuId) return
+    const onDocClick = (e) => { if (workspaceMenuRef.current && !workspaceMenuRef.current.contains(e.target)) setWorkspaceMenuId(null) }
+    const onKey = (e) => { if (e.key === 'Escape') setWorkspaceMenuId(null) }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey) }
+  }, [workspaceMenuId])
 
   useEffect(() => {
     if (!confirmId) return
@@ -162,6 +179,36 @@ export default function DashboardsHome({ connectionId, onOpen }) {
     }
   }, [movingFolderId])
 
+  const loadWorkspaces = useCallback(async () => {
+    if (!connectionId) return
+    try {
+      const list = await dashboardWorkspacesAPI.listByConnection(connectionId)
+      setWorkspaces(Array.isArray(list) ? list : [])
+    } catch {
+      // A user with no workspace membership simply has none to show; the
+      // dashboards list itself is already filtered server-side.
+      setWorkspaces([])
+    }
+  }, [connectionId])
+
+  // Move a dashboard into a workspace, or out of one with an empty workspaceId.
+  const moveToWorkspace = useCallback(async (d, workspaceId) => {
+    if (movingWorkspaceId) return
+    setMovingWorkspaceId(d.id)
+    try {
+      await dashboardWorkspacesAPI.moveDashboard(d.id, workspaceId || '')
+      setDashboards((list) => list.map((x) => (
+        x.id === d.id ? { ...x, workspaceId: workspaceId || null } : x
+      )))
+      setWorkspaceMenuId(null)
+      loadWorkspaces()
+    } catch (err) {
+      setDeleteError(err?.response?.data?.message || err?.message || 'Couldn’t move this dashboard.')
+    } finally {
+      setMovingWorkspaceId(null)
+    }
+  }, [movingWorkspaceId, loadWorkspaces])
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -180,6 +227,9 @@ export default function DashboardsHome({ connectionId, onOpen }) {
   // the new fetch is in flight.
   useEffect(() => { setHasLoadedOnce(false); setLoading(true) }, [connectionId])
   useEffect(() => { load() }, [load])
+  useEffect(() => { loadWorkspaces() }, [loadWorkspaces])
+  // A workspace filter from a previous connection must not survive the switch.
+  useEffect(() => { setWorkspaceFilter(null) }, [connectionId])
 
   const folders = useMemo(() => {
     const set = new Set(dashboards.map((d) => d.folder).filter(Boolean))
@@ -191,10 +241,11 @@ export default function DashboardsHome({ connectionId, onOpen }) {
     return dashboards.filter((d) => {
       if (filter !== 'all' && statusOf(d) !== filter) return false
       if (folder && d.folder !== folder) return false
+      if (workspaceFilter && d.workspaceId !== workspaceFilter) return false
       if (q && !(d.name || '').toLowerCase().includes(q) && !(d.description || '').toLowerCase().includes(q)) return false
       return true
     })
-  }, [dashboards, filter, folder, search])
+  }, [dashboards, filter, folder, search, workspaceFilter])
 
   return (
     <div className={styles.root}>
@@ -206,6 +257,14 @@ export default function DashboardsHome({ connectionId, onOpen }) {
           )}
         </div>
         <div className={styles.actions}>
+          <button
+            className={styles.ghost}
+            onClick={() => setShowWorkspaces(true)}
+            title="Manage workspaces"
+            aria-label="Manage workspaces"
+          >
+            <Users size={15} />
+          </button>
           <button className={styles.ghost} onClick={load} title="Refresh" aria-label="Refresh">
             <RefreshCw size={15} className={loading ? styles.spin : undefined} />
           </button>
@@ -252,6 +311,28 @@ export default function DashboardsHome({ connectionId, onOpen }) {
             onClick={() => setFolder(folder === f ? null : f)}
           >
             <Folder size={11} style={{ marginRight: 4, verticalAlign: -1.5 }} />{f}
+          </button>
+        ))}
+        {workspaces.length > 0 && <span className={styles.filterSep} />}
+        {workspaces.map((w) => (
+          <button
+            key={w.id}
+            className={`${styles.chip} ${workspaceFilter === w.id ? styles.chipActive : ''}`}
+            onClick={() => setWorkspaceFilter(workspaceFilter === w.id ? null : w.id)}
+            title={w.description || `${w.dashboardCount ?? 0} dashboard(s)`}
+          >
+            <span
+              style={{
+                display: 'inline-block',
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: w.color || '#534AB7',
+                marginRight: 5,
+                verticalAlign: 0,
+              }}
+            />
+            {w.name}
           </button>
         ))}
       </div>
@@ -336,6 +417,50 @@ export default function DashboardsHome({ connectionId, onOpen }) {
                 </div>
               )}
               <button
+                className={d.workspaceId ? styles.cardActionBtnFav : styles.cardActionBtn}
+                onClick={(e) => { e.stopPropagation(); setWorkspaceMenuId(workspaceMenuId === d.id ? null : d.id) }}
+                title="Move to workspace"
+                aria-label={`Move ${d.name || 'dashboard'} to a workspace`}
+              >
+                <Users size={13} />
+              </button>
+              {workspaceMenuId === d.id && (
+                <div className={styles.confirmPopover} ref={workspaceMenuRef} onClick={(e) => e.stopPropagation()}>
+                  <p className={styles.confirmText}>Move to workspace</p>
+                  {workspaces.length === 0 ? (
+                    <p className={styles.confirmText} style={{ color: '#9ca3af' }}>
+                      No workspaces yet — create one from the Workspaces button above.
+                    </p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 180, overflowY: 'auto' }}>
+                      <button
+                        className={styles.confirmCancel}
+                        style={{ textAlign: 'left', width: '100%' }}
+                        onClick={() => moveToWorkspace(d, '')}
+                        disabled={movingWorkspaceId === d.id}
+                      >
+                        No workspace
+                      </button>
+                      {workspaces.map((w) => (
+                        <button
+                          key={w.id}
+                          className={styles.confirmCancel}
+                          style={{
+                            textAlign: 'left',
+                            width: '100%',
+                            fontWeight: d.workspaceId === w.id ? 600 : 400,
+                          }}
+                          onClick={() => moveToWorkspace(d, w.id)}
+                          disabled={movingWorkspaceId === d.id}
+                        >
+                          {w.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              <button
                 className={styles.cardActionBtn}
                 onClick={(e) => { e.stopPropagation(); if (!deletingId) setConfirmId(d.id) }}
                 disabled={deletingId === d.id}
@@ -380,6 +505,13 @@ export default function DashboardsHome({ connectionId, onOpen }) {
           {search ? `No dashboards match “${search}”.` : `No ${folder ? `dashboards in “${folder}”` : filter} dashboards — try a different filter.`}
         </div>
       )}
+
+      <WorkspaceManager
+        connectionId={connectionId}
+        open={showWorkspaces}
+        onClose={() => setShowWorkspaces(false)}
+        onChanged={() => { loadWorkspaces(); load() }}
+      />
 
       {deleteError && (
         <div className={styles.errorToast}>

@@ -1,19 +1,26 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Users, Settings, Shield, Activity, KeyRound } from "lucide-react";
+import { X, Users, Settings, Shield, Activity, KeyRound, Coins } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { PERMISSIONS } from "@/lib/permissions";
 import AdminWorkspaceSettings from "@/components/settings/AdminWorkspaceSettings";
 import SlackAccessCodePanel from "@/components/settings/SlackAccessCodePanel";
 import McpTokensPanel from "@/components/settings/McpTokensPanel";
 import UsersTab from "./tabs/admin/UsersTab";
 import AuditLogsTab from "./tabs/admin/AuditLogsTab";
+import LlmUsageTab from "./tabs/admin/LlmUsageTab";
 import styles from "./SettingsModal.module.css";
 
 export default function SettingsModal({ isOpen, onClose }) {
-  const { isAdmin, role } = useAuth();
+  const { isAdmin, role, hasPermission } = useAuth();
+  const canManageWorkspaceSettings = hasPermission(PERMISSIONS.MANAGE_SETTINGS);
+  const canOpenSettings =
+    canManageWorkspaceSettings ||
+    hasPermission(PERMISSIONS.MANAGE_USERS) ||
+    hasPermission(PERMISSIONS.MANAGE_PERMISSIONS);
   const [activeSection, setActiveSection] = useState(() =>
-    isAdmin ? "users" : "general",
+    isAdmin ? "users" : "mcp-tokens",
   );
 
   // Handle Escape key to close
@@ -28,6 +35,12 @@ export default function SettingsModal({ isOpen, onClose }) {
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
+
+  // Settings is administrative only. Developer and Data Engineer hold none of these
+  // permissions and must not reach this panel at all. Enforced inside the modal, not
+  // just at the call site, because any future entry point would otherwise reopen it.
+  // Note this also removes MCP tokens from those roles, which is the intended trade.
+  if (!canOpenSettings) return null;
 
   const sections = [
     ...(isAdmin
@@ -44,6 +57,12 @@ export default function SettingsModal({ isOpen, onClose }) {
             label: "Audit Logs",
             description: "Review editor and security activity",
           },
+          {
+            id: "llm-usage",
+            icon: Coins,
+            label: "AI Usage & Cost",
+            description: "Track model spend by feature and user",
+          },
         ]
       : []),
     {
@@ -52,12 +71,20 @@ export default function SettingsModal({ isOpen, onClose }) {
       label: "MCP Tokens",
       description: "Create and revoke personal access tokens",
     },
-    {
-      id: "general",
-      icon: Settings,
-      label: "Workspace",
-      description: isAdmin ? "SMTP, Slack, and security" : "Application preferences",
-    },
+    // The Workspace tab is admin configuration (SMTP, Slack, workspace security).
+    // Roles without MANAGE_SETTINGS — Developer and Data Engineer — only see the
+    // personal surfaces above (MCP tokens), so Settings stays useful to them without
+    // exposing workspace configuration.
+    ...(canManageWorkspaceSettings
+      ? [
+          {
+            id: "general",
+            icon: Settings,
+            label: "Workspace",
+            description: "SMTP, Slack, and security",
+          },
+        ]
+      : []),
   ];
 
   const renderContent = () => {
@@ -66,6 +93,8 @@ export default function SettingsModal({ isOpen, onClose }) {
         return isAdmin ? <UsersTab /> : null;
       case "audit-logs":
         return isAdmin ? <AuditLogsTab /> : null;
+      case "llm-usage":
+        return isAdmin ? <LlmUsageTab /> : null;
       case "mcp-tokens":
         return <McpTokensPanel />;
       case "general":

@@ -55,7 +55,7 @@ const COMMAND_LIST = [
   ["config",         true,  "Manage saved CLI profiles"],
   ["mcp",            true,  "Run the MCP server or install it into an editor config"],
   ["connections",    true,  "Manage database connections"],
-  ["query",          false, "Execute a SQL statement (admin: DDL/DML with --write)"],
+  ["query",          false, "Execute a SQL statement (admin: CREATE/ALTER/DML with --write; DROP/TRUNCATE blocked)"],
   ["analyze",        false, "AI-enriched query plan analysis (use --analyze for EXPLAIN ANALYZE)"],
   ["schema",         false, "Dump connection schema or DB objects as JSON"],
   ["digest",         true,  "Show DeepSQL daily digests"],
@@ -192,7 +192,7 @@ const COMMAND_HELP = {
   },
 
   query: {
-    description: "Execute a SQL statement against a connection. Same policy gate as the web SQL Editor: developers can run SELECT/WITH/SHOW/EXPLAIN; admins can additionally run DML/DDL with a two-step confirm.",
+    description: "Execute a SQL statement against a connection. Same policy gate as the web SQL Editor: developers can run SELECT/WITH/SHOW/EXPLAIN; admins can additionally run DML and non-destructive DDL (CREATE/ALTER) with a two-step confirm. DROP and TRUNCATE are blocked on this surface.",
     usage: 'deepsql query "<sql>" --connection <name> [options]',
     options: [
       ["--connection <name>",    "Connection to run against"],
@@ -202,7 +202,7 @@ const COMMAND_HELP = {
       ["--write",                "Confirm a mutation upfront (skips interactive prompt; scripts/CI)"],
       ["--json",                 "Raw JSON output"],
     ],
-    notes: "EXPLAIN and EXPLAIN ANALYZE are valid SQL — type them directly. For the AI-enriched plan analysis, use `deepsql analyze`.",
+    notes: "EXPLAIN and EXPLAIN ANALYZE are valid SQL — type them directly. DROP and TRUNCATE are blocked even for admins (use database admin tooling). For the AI-enriched plan analysis, use `deepsql analyze`.",
   },
 
   analyze: {

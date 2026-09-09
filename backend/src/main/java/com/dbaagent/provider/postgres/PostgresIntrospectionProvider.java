@@ -211,6 +211,104 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
         return columns;
     }
 
+    /**
+     * One query for every requested table instead of one per table.
+     *
+     * <p>Same joins and filters as the per-table variant below; only the predicate
+     * changes, from a single relname to an array of them. Matching on bare relname
+     * across schemas is deliberate — it is exactly what the per-table path does for an
+     * unqualified name, so this stays behaviour-preserving.
+     *
+     * <p>Schema-qualified names are declined (left out of the result) so the caller
+     * falls back to the per-table query, which filters on schema. Matching them here
+     * would be wrong either way: pg_class.relname is bare, so `s.t` matches nothing,
+     * and stripping the qualifier would match that name in every schema and merge
+     * their indexes.
+     */
+    @Override
+    public Map<String, List<TableIndex>> getAllTableIndexes(
+        Connection connection, String database, Collection<String> tableNames
+    ) throws SQLException {
+        String query = """
+            SELECT
+                t.relname AS table_name,
+                i.relname AS index_name,
+                a.attname AS column_name,
+                ix.indisunique AS is_unique,
+                ix.indisprimary AS is_primary,
+                am.amname AS index_type
+            FROM pg_class t
+            JOIN pg_namespace n ON n.oid = t.relnamespace
+            JOIN pg_index ix ON t.oid = ix.indrelid
+            JOIN pg_class i ON i.oid = ix.indexrelid
+            JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
+            JOIN pg_am am ON i.relam = am.oid
+            WHERE t.relkind IN ('r', 'p', 'm', 'v')
+              AND t.relname = ANY(?)
+            ORDER BY t.relname, i.relname, a.attnum
+            """;
+
+        Map<String, Map<String, TableIndex>> byTable = new HashMap<>();
+        String[] names = tableNames.stream()
+            .filter(Objects::nonNull)
+            .toArray(String[]::new);
+
+        // Only unqualified names are answered here. relname is bare, so a `schema.table`
+        // name matches nothing as written, and stripping the qualifier would be worse:
+        // it would match that table name in *every* schema and merge their indexes. Such
+        // names are simply left out of the result, which sends the caller to the
+        // per-table path that filters on schema properly.
+        String[] bareNames = Arrays.stream(names)
+            .filter(n -> n.lastIndexOf('.') <= 0)
+            .toArray(String[]::new);
+        if (bareNames.length == 0) {
+            return new HashMap<>();
+        }
+
+        try (PreparedStatement stmt = connection.prepareStatement(query)) {
+            stmt.setArray(1, connection.createArrayOf("text", bareNames));
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    String tableName = rs.getString("table_name");
+                    if (tableName == null) {
+                        continue;
+                    }
+                    String indexName = rs.getString("index_name");
+                    String columnName = rs.getString("column_name");
+                    boolean isUnique = rs.getBoolean("is_unique");
+                    boolean isPrimary = rs.getBoolean("is_primary");
+                    String indexType = rs.getString("index_type");
+
+                    Map<String, TableIndex> indexMap =
+                        byTable.computeIfAbsent(tableName.toLowerCase(Locale.ROOT), k -> new LinkedHashMap<>());
+
+                    TableIndex index = indexMap.get(indexName);
+                    if (index == null) {
+                        index = new TableIndex();
+                        index.setName(indexName);
+                        index.setType(indexType);
+                        index.setUnique(isUnique);
+                        index.setPrimary(isPrimary);
+                        index.setColumns(new ArrayList<>());
+                        indexMap.put(indexName, index);
+                    }
+                    index.getColumns().add(columnName);
+                }
+            }
+        }
+
+        // Every requested table gets an entry, so an unindexed table is distinguishable
+        // from one this scan did not cover.
+        Map<String, List<TableIndex>> result = new HashMap<>();
+        for (String tableName : bareNames) {
+            String key = tableName.toLowerCase(Locale.ROOT);
+            Map<String, TableIndex> indexMap = byTable.get(key);
+            result.put(key, indexMap == null ? new ArrayList<>() : new ArrayList<>(indexMap.values()));
+        }
+        return result;
+    }
+
     @Override
     public List<TableIndex> getTableIndexes(Connection connection, String database, String tableName) throws SQLException {
         List<TableIndex> indexes = new ArrayList<>();

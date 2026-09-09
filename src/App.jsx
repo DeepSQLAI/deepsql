@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Signup from './pages/Signup'
 import ActivateInvite from './pages/ActivateInvite'
 import CliAuthorize from './pages/CliAuthorize'
+import Download from './pages/Download'
 import Onboarding from './pages/Onboarding'
 import PublicDashboardPage from './pages/PublicDashboardPage'
 import SharedDashboardPage from './pages/SharedDashboardPage'
@@ -146,6 +147,9 @@ function App() {
           />
           {/* Legacy /setup route — now the real onboarding wizard, not a dead end. */}
           <Route path="/setup" element={<Navigate to="/onboarding" replace />} />
+          {/* Public desktop-client download page — no login: it is reached from
+              the marketing site by people who do not have an account yet. */}
+          <Route path="/download" element={<Download />} />
           <Route path="/cli-authorize" element={<CliAuthorize />} />
           <Route path="/cli-authorize/device" element={<CliAuthorize />} />
         </Routes>

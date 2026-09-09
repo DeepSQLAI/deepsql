@@ -15,6 +15,10 @@ control except the prompts you send to the endpoint you chose.
 📄 **[Read the whitepaper](https://deepsql.ai/whitepaper)** — the architecture and the
 reasoning behind it.
 
+📦 **Latest release: [v1.3.0](https://github.com/DeepSQLAI/deepsql/releases/tag/v1.3.0)** —
+DeepSQL Desktop first ship + Agent/Brain/Editor hardening. Notes:
+[`docs/releases/RELEASE_NOTES-v1.3.0.md`](docs/releases/RELEASE_NOTES-v1.3.0.md).
+
 ---
 
 ## Quick start
@@ -241,6 +245,28 @@ your schema — all from one shared brain.
 - **Postgres and MySQL, in your infra.** One dialect registry, read-only execution, and SSH
   tunnelling to reach databases behind a bastion.
 
+### DeepSQL Desktop (optional)
+
+A thin Electron client for a self-hosted VM — direct TLS or an in-process SSH tunnel —
+without bundling a second copy of the web UI.
+
+**Download installers** (macOS, Windows, Linux) from the public page at `/download` on
+your DeepSQL instance, or browse
+[GitHub Releases](https://github.com/DeepSQLAI/deepsql/releases) for `desktop-v*` tags.
+
+To build from source (separate npm project):
+
+```bash
+cd desktop
+npm install
+npm start
+```
+
+Requires **Node 22+**. Forward the tunnel to the **frontend container (port 3000)**, not a
+host reverse proxy on `:80`. Keep loopback CORS wildcards on the VM
+(`http://127.0.0.1:*,http://localhost:*`) or tunnel login fails with a confusing 403 — see
+[`desktop/README.md`](desktop/README.md).
+
 ---
 
 ## Operating the stack
@@ -423,6 +449,7 @@ caching · nginx.
 - [`docs/README.md`](docs/README.md) — documentation index
 - [`AGENTS.md`](AGENTS.md) — codebase map
 - [`mcp/README.md`](mcp/README.md) — CLI and MCP server
+- [`docs/GOOGLE_SSO_SETUP.md`](docs/GOOGLE_SSO_SETUP.md) — Google Workspace SSO, and disabling password sign-in
 - [`SECURITY.md`](SECURITY.md) — reporting a vulnerability
 
 ## License

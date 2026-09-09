@@ -4,6 +4,7 @@ import com.dbaagent.model.AnalysisHistory;
 import com.dbaagent.model.Chat;
 import com.dbaagent.model.ChatFeedback;
 import com.dbaagent.model.EffectiveConnectionAccess;
+import com.dbaagent.model.Permission;
 import com.dbaagent.repository.AnalysisHistoryRepository;
 import com.dbaagent.repository.ChatFeedbackRepository;
 import com.dbaagent.repository.ChatRepository;
@@ -66,6 +67,51 @@ public class AccessControlService {
 
     public void assertCanManageConnectionConfig(String connectionId) {
         assertAccess(connectionId, EffectiveConnectionAccess::canManageConfig, "Configuration access denied for this connection");
+    }
+
+    /**
+     * As {@link #assertCanReadConnectionContent}, but reports 404 instead of 403 — for
+     * endpoints keyed on a row id rather than a connection id.
+     *
+     * <p>Returning 403 for a row the caller may not touch and 404 for one that does not
+     * exist tells the caller which ids are real. That is an enumeration primitive, and
+     * `query_performance_regression.id` is a sequential {@code Long}, so walking it is
+     * trivial. Collapsing both to 404 means "no such row, as far as you are concerned",
+     * which is the same answer {@code DashboardWorkspaceService.assertCanReadDashboard}
+     * already gives for a dashboard outside the caller's workspace.
+     *
+     * <p>Use this only where the caller supplied an <em>opaque row id</em>. Endpoints that
+     * take a {@code connectionId} directly should keep 403: the caller already knows the
+     * connection exists (they typed its id), so hiding it buys nothing and an actionable
+     * "access denied" is the better answer.
+     *
+     * @param entity human-readable name for the 404 message, e.g. {@code "Alert"}
+     */
+    public void assertCanReadConnectionContentOrNotFound(String connectionId, String entity) {
+        assertOrNotFound(connectionId, EffectiveConnectionAccess::canReadContent, entity);
+    }
+
+    /** Write-side counterpart to {@link #assertCanReadConnectionContentOrNotFound}. */
+    public void assertCanManageConnectionContentOrNotFound(String connectionId, String entity) {
+        assertOrNotFound(connectionId, EffectiveConnectionAccess::canManageContent, entity);
+    }
+
+    private void assertOrNotFound(
+        String connectionId,
+        java.util.function.Predicate<EffectiveConnectionAccess> predicate,
+        String entity
+    ) {
+        ConnectionAccessService.ResolvedConnectionAccess access;
+        try {
+            access = resolveCurrentUserAccess(connectionId);
+        } catch (ResponseStatusException e) {
+            // An unresolvable connection, or an unauthenticated caller, must look the same
+            // as a row that isn't there — otherwise the distinction leaks back in here.
+            throw new ResponseStatusException(NOT_FOUND, entity + " not found");
+        }
+        if (!predicate.test(access.getEffectiveAccess())) {
+            throw new ResponseStatusException(NOT_FOUND, entity + " not found");
+        }
     }
 
     public ConnectionAccessService.ResolvedConnectionAccess resolveCurrentUserAccess(String connectionId) {
@@ -179,6 +225,62 @@ public class AccessControlService {
             throw new ResponseStatusException(FORBIDDEN, "Access denied");
         }
         return username;
+    }
+
+    /**
+     * Assert the caller may create a database connection.
+     *
+     * <p>Creating a connection is not scoped to an existing connection, so none of the
+     * {@code assertCanManage*Connection*} checks apply — there is no id to resolve
+     * access against yet. Without this, {@code POST /connections} had no authorization
+     * at all: a Developer or Data Engineer could create, then edit and delete, their own
+     * connection (verified live against a running install — the row persisted with
+     * {@code owner_username = analyst}). Hiding the Connections button only hid the
+     * button.
+     *
+     * <p>Permission-based rather than {@code isCurrentUserAdmin()} so DBA — which holds
+     * MANAGE_CONNECTIONS by design — keeps working, and so an admin-defined custom role
+     * granting that permission behaves consistently.
+     */
+    public void assertCanManageConnections() {
+        if (!authEnabled) {
+            return;
+        }
+        if (!hasPermission(Permission.MANAGE_CONNECTIONS)) {
+            throw new ResponseStatusException(FORBIDDEN, "You do not have permission to manage connections");
+        }
+    }
+
+    /** Assert the caller holds a permission, with a caller-supplied message. */
+    public void assertHasPermission(Permission permission, String message) {
+        if (!authEnabled) {
+            return;
+        }
+        if (!hasPermission(permission)) {
+            throw new ResponseStatusException(FORBIDDEN, message);
+        }
+    }
+
+    /**
+     * Whether the current principal carries a permission authority.
+     *
+     * <p>{@code CustomUserDetailsService} stamps every effective permission onto the
+     * authentication as a plain authority alongside {@code ROLE_<code>}, so this reads
+     * the already-resolved set (overrides and custom roles included) without a lookup.
+     */
+    public boolean hasPermission(Permission permission) {
+        if (permission == null) {
+            return false;
+        }
+        if (isCurrentUserAdmin()) {
+            return true;
+        }
+        Authentication authentication = currentAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return false;
+        }
+        return authentication.getAuthorities().stream()
+            .anyMatch(authority -> permission.name().equals(authority.getAuthority()));
     }
 
     public boolean isCurrentUserAdmin() {

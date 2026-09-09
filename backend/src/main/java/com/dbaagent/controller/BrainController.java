@@ -28,6 +28,9 @@ import com.dbaagent.service.brain.core.BrainScoreService;
 import com.dbaagent.service.brain.core.BrainNoteService;
 import com.dbaagent.service.brain.core.BrainTaskService;
 import com.dbaagent.service.brain.core.NoteSuggestionService;
+import com.dbaagent.service.brain.core.BrainNoteProposalService;
+import com.dbaagent.dto.BrainNoteProposalRequest;
+import com.dbaagent.dto.BrainNoteProposalResponse;
 import com.dbaagent.service.QueryExecutorService;
 import com.dbaagent.service.SchemaSnapshotService;
 import com.dbaagent.service.brain.analysis.ColumnDisambiguationService;
@@ -94,6 +97,7 @@ public class BrainController {
     private final BrainNoteService brainNoteService;
     private final BrainTaskService brainTaskService;
     private final NoteSuggestionService noteSuggestionService;
+    private final BrainNoteProposalService brainNoteProposalService;
     private final ColumnProfilingService columnProfilingService;
     private final ColumnDisambiguationService columnDisambiguationService;
     private final SchemaSnapshotService schemaSnapshotService;
@@ -236,6 +240,51 @@ public class BrainController {
             throw e;
         } catch (Exception e) {
             log.error("Error fetching note suggestions for connection {}", connectionId, e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Draft a shared-brain note from an Agent turn. Overlaps with existing notes
+     * or business rules are merged into one intent. Read-only — does not persist.
+     */
+    @PostMapping("/notes/propose")
+    public ResponseEntity<BrainNoteProposalResponse> proposeNoteFromTurn(
+        @org.springframework.web.bind.annotation.RequestBody BrainNoteProposalRequest request
+    ) {
+        try {
+            if (request == null || request.getConnectionId() == null || request.getConnectionId().isBlank()) {
+                return ResponseEntity.badRequest().build();
+            }
+            accessControlService.assertCanReadConnectionContent(request.getConnectionId());
+            return brainNoteProposalService.proposeFromTurn(request)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Error proposing a brain note from an agent turn", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Accept a proposed note. If it overlaps existing documentation, update that
+     * row instead of creating a second copy of the same intent.
+     */
+    @PostMapping("/notes/accept")
+    public ResponseEntity<BrainNoteResponse> acceptNote(
+        @org.springframework.web.bind.annotation.RequestBody BrainNoteRequest request
+    ) {
+        try {
+            accessControlService.assertCanManageConnectionContent(request.getConnectionId());
+            return ResponseEntity.ok(brainNoteProposalService.accept(request));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Error accepting a brain note proposal", e);
             return ResponseEntity.internalServerError().build();
         }
     }

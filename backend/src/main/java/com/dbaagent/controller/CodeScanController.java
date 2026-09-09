@@ -15,6 +15,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -156,16 +157,18 @@ public class CodeScanController {
         if (body == null || body.ids() == null || body.ids().isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "ids required"));
         }
-        var processed = codeScanService.bulkDecide(
+        var result = codeScanService.bulkDecide(
             body.ids(),
             body.decision(),
             accessControlService.getCurrentUsername(),
             body.note()
         );
-        return ResponseEntity.ok(Map.of(
-            "requested", body.ids().size(),
-            "succeeded", processed.size()
-        ));
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("requested", body.ids().size());
+        payload.put("succeeded", result.succeeded().size());
+        payload.put("failed", result.failures().size());
+        payload.put("failures", result.failures());
+        return ResponseEntity.ok(payload);
     }
 
     private static CodeKnowledgeSuggestion.Status parseStatus(String s) {
@@ -190,6 +193,11 @@ public class CodeScanController {
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, String>> handleBadInput(IllegalArgumentException e) {
+        return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, String>> handleIllegalState(IllegalStateException e) {
         return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
     }
 }

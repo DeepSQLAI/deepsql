@@ -191,7 +191,12 @@ public class SchemaController {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
             }
             accessControlService.assertCanUseChatEditor(connectionId);
-            queryRequest.setExecutionOrigin(QueryExecutionOrigin.EDITOR);
+            boolean mcpBearer = McpTokenService.isMcpAuthorizationHeader(
+                httpRequest.getHeader(HttpHeaders.AUTHORIZATION)
+            );
+            queryRequest.setExecutionOrigin(
+                mcpBearer ? QueryExecutionOrigin.MCP : QueryExecutionOrigin.EDITOR
+            );
             connectionRequest = credentialService.getDecryptedConnection(connectionId);
 
             QueryResult result = queryExecutorService.executeQuery(
@@ -275,8 +280,10 @@ public class SchemaController {
     @PostMapping("/query/{executionId}/cancel")
     public ResponseEntity<Map<String, Object>> cancelQuery(
             @PathVariable String connectionId,
-            @PathVariable String executionId) {
+            @PathVariable String executionId,
+            HttpServletRequest httpRequest) {
         Map<String, Object> response = new HashMap<>();
+        ClientContext client = ClientContext.fromRequest(httpRequest);
         try {
             if (!credentialService.connectionExists(connectionId)) {
                 response.put("success", false);
@@ -287,7 +294,14 @@ public class SchemaController {
 
             var running = runningQueryRegistry.find(executionId);
             if (running.isEmpty()) {
-                // Already finished, or never started. Nothing to cancel.
+                // Already finished, or never started. Nothing to cancel. Still
+                // audited: without this, a cancel that misses its target left
+                // no trace at all, deliberate or not.
+                sqlExecutionAuditService.record(SqlExecutionAuditService.AuditRecord.cancelNoOp()
+                    .connectionId(connectionId)
+                    .executionId(executionId)
+                    .httpRequest(httpRequest)
+                    .client(client));
                 response.put("success", true);
                 response.put("cancelled", false);
                 response.put("message", "Query is no longer running");
@@ -301,6 +315,12 @@ public class SchemaController {
             String currentUser = accessControlService.getCurrentUsername();
             if (!connectionId.equals(target.connectionId())
                 || (target.username() != null && currentUser != null && !target.username().equals(currentUser))) {
+                sqlExecutionAuditService.record(SqlExecutionAuditService.AuditRecord.blocked(
+                        "cancel requested for an execution id not owned by this caller/connection")
+                    .connectionId(connectionId)
+                    .executionId(executionId)
+                    .httpRequest(httpRequest)
+                    .client(client));
                 response.put("success", false);
                 response.put("message", "Query not found for this connection");
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
@@ -308,6 +328,11 @@ public class SchemaController {
 
             activeQueryService.killQuery(connectionId, target.sessionPid());
             runningQueryRegistry.unregister(executionId);
+            sqlExecutionAuditService.record(SqlExecutionAuditService.AuditRecord.cancelled(target.sessionPid())
+                .connectionId(connectionId)
+                .executionId(executionId)
+                .httpRequest(httpRequest)
+                .client(client));
             response.put("success", true);
             response.put("cancelled", true);
             response.put("message", "Query cancelled");
@@ -318,6 +343,12 @@ public class SchemaController {
             return ResponseEntity.status(e.getStatusCode()).body(response);
         } catch (Exception e) {
             log.warn("Failed to cancel query {} on connection {}: {}", executionId, connectionId, e.getMessage());
+            sqlExecutionAuditService.record(SqlExecutionAuditService.AuditRecord.failed(e.getMessage())
+                .operation("cancel")
+                .connectionId(connectionId)
+                .executionId(executionId)
+                .httpRequest(httpRequest)
+                .client(client));
             response.put("success", false);
             response.put("message", "Failed to cancel query: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
@@ -412,23 +443,12 @@ public class SchemaController {
     }
 
     private QueryExecutionContext queryExecutionContext(QueryRequest queryRequest, HttpServletRequest httpRequest) {
-        String username = accessControlService.getCurrentUsername();
-        boolean admin = accessControlService.isCurrentUserAdmin();
-        if (isMcpBearer(httpRequest)) {
-            return QueryExecutionContext.mcp(username, admin);
-        }
-        return QueryExecutionContext.editor(
-            username,
-            admin,
+        return QueryExecutionContext.forSqlSurface(
+            McpTokenService.isMcpAuthorizationHeader(httpRequest.getHeader(HttpHeaders.AUTHORIZATION)),
+            accessControlService.getCurrentUsername(),
+            accessControlService.isCurrentUserAdmin(),
             Boolean.TRUE.equals(queryRequest.getMutationConfirmed())
         );
-    }
-
-    private boolean isMcpBearer(HttpServletRequest httpRequest) {
-        String authorization = httpRequest.getHeader(HttpHeaders.AUTHORIZATION);
-        return authorization != null
-            && authorization.startsWith("Bearer ")
-            && authorization.substring(7).startsWith(McpTokenService.TOKEN_PREFIX);
     }
 
     private SchemaMetadata scopedSchema(String connectionId, SchemaMetadata schema) {

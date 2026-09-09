@@ -126,11 +126,11 @@ per-user admin ops (`users`/`access`/`permissions`).
 |---|---|
 | `get_schema` | Cached schema metadata (tables, columns, FKs, types) |
 | `get_database_objects` | Tables, views, functions, procedures |
-| `get_brain_context` | Retrieval brain: tables/columns/FKs/training docs/rules for a question |
+| `get_brain_context` | Retrieval brain plus `callerCapabilities` (what this user can enforce) |
 | `list_business_rules` | Active business rules and SQL guardrails for a connection |
 | `get_relationships` | Inferred + validated foreign keys with confidence scores |
-| `list_brain_recommendations` | The brain's AI-proposed notes to review (company-context queue) |
-| `save_brain_note` | Accept/save a fact into the shared brain (admin; grounds future answers) |
+| `list_brain_recommendations` | The brain's AI-proposed notes to review (do not offer accept unless caller can write) |
+| `save_brain_note` | Save a shared brain fact only when the user asked and `canManageContent` is true |
 | `list_brain_notes` | Knowledge already saved to the brain (filterable) |
 
 ### Anti-patterns + daily digest (4)
@@ -192,7 +192,7 @@ per-user admin ops (`users`/`access`/`permissions`).
 
 | Tool | Purpose |
 |---|---|
-| `execute_sql` | Run any SQL — backend enforces role-based policy (developers read-only, admins can mutate with two-step confirm) |
+| `execute_sql` | Run any SQL — backend enforces role-based policy (developers read-only; admins can run DML and CREATE/ALTER with two-step confirm; DROP/TRUNCATE blocked) |
 | `analyze_query_plan` | AI-enriched plan analysis (parsed plan tree, performance issues, index recommendations, written summary that uses the connection's schema + business rules) |
 
 EXPLAIN and EXPLAIN ANALYZE are just SQL — pass them as the query to

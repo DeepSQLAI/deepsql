@@ -21,7 +21,15 @@ public interface SchemaDocumentationRepository extends JpaRepository<SchemaDocum
         SchemaDocumentation.DocumentationType objectType
     );
 
-    Optional<SchemaDocumentation> findByConnectionIdAndObjectTypeAndObjectName(
+    /**
+     * Returns a {@link List}, never an {@link Optional} — the logical key is not
+     * unique in data written before {@code V116__dedupe_schema_documentation.sql}
+     * added the constraint, and an {@code Optional} finder throws
+     * {@code IncorrectResultSizeDataAccessException} on a legacy duplicate rather
+     * than letting the caller repair it. Collapse matches with
+     * {@link com.dbaagent.service.SchemaDocumentationDeduplicator}.
+     */
+    List<SchemaDocumentation> findByConnectionIdAndObjectTypeAndObjectName(
         String connectionId,
         SchemaDocumentation.DocumentationType objectType,
         String objectName
@@ -51,12 +59,13 @@ public interface SchemaDocumentationRepository extends JpaRepository<SchemaDocum
         """)
     long countWithBusinessTerms(@Param("connectionId") String connectionId);
 
-    // Upsert support: find existing AI doc to update instead of creating duplicates
-    Optional<SchemaDocumentation> findByConnectionIdAndObjectTypeAndObjectNameAndSource(
+    // Upsert support: find existing doc to update instead of creating duplicates.
+    // List-returning for the same reason as findByConnectionIdAndObjectTypeAndObjectName above.
+    List<SchemaDocumentation> findByConnectionIdAndObjectTypeAndObjectNameAndSource(
         String connectionId, SchemaDocumentation.DocumentationType objectType,
         String objectName, DocumentationSource source);
 
-    Optional<SchemaDocumentation> findByConnectionIdAndObjectTypeAndObjectNameAndParentObjectAndSource(
+    List<SchemaDocumentation> findByConnectionIdAndObjectTypeAndObjectNameAndParentObjectAndSource(
         String connectionId, SchemaDocumentation.DocumentationType objectType,
         String objectName, String parentObject, DocumentationSource source);
 

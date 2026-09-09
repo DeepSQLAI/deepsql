@@ -69,6 +69,7 @@ import com.dbaagent.service.agent.VerifiedAnswer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.dbaagent.util.QueryNormalizer;
 import com.dbaagent.service.security.AccessControlService;
+import com.dbaagent.service.llm.LlmUsageContext;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
@@ -3435,7 +3436,8 @@ public class ChatService {
             String actualUserQuestion = extractActualUserQuestion(message);
             String actorUsername = resolveExecutionActorUsername(userId);
             boolean actorIsAdmin = isAdminUser(actorUsername);
-            return QueryActorContextHolder.withActor(actorUsername, () -> {
+            return QueryActorContextHolder.withActor(actorUsername, () ->
+                    LlmUsageContext.with("chat", connectionId, () -> {
                 PreparedConversationTurn prepared = prepareConversationTurn(connectionId, chatId, actualUserQuestion);
                 ChatResponse scopeGuardResponse = maybeBuildScopeGuardrailResponse(
                     connectionId,
@@ -3449,7 +3451,7 @@ public class ChatService {
                     return singleMessageStream(scopeGuardResponse);
                 }
                 return buildAgenticStreamResult(connectionId, actualUserQuestion, prepared, null, actorUsername, actorIsAdmin);
-            });
+            }));
         } catch (Exception e) {
             log.error("Error initializing streaming chat", e);
             return new StreamResult(Flux.empty(), Flux.empty(), Flux.error(e), Flux.error(e));
@@ -3486,7 +3488,13 @@ public class ChatService {
         }
 
         CompletableFuture.runAsync(() -> {
-            QueryActorContextHolder.withActor(actorUsername, () -> {
+            // Both contexts are re-established here rather than inherited. The controller
+            // returns its Flux immediately, so the servlet request — and any thread-local
+            // set during it — is long gone by the time this runs. The actor was already
+            // re-set for exactly this reason; usage attribution needs the same treatment,
+            // or every streamed turn bills to "unknown".
+            QueryActorContextHolder.withActor(actorUsername, () ->
+                    LlmUsageContext.with("chat", connectionId, () -> {
                 AgentProgressListener progressListener = event -> {
                     String progressJson = buildAgentProgressJson(event);
                     if (progressJson != null) {
@@ -3530,7 +3538,7 @@ public class ChatService {
                     resultSink.tryEmitComplete();
                     tokenSink.tryEmitComplete();
                 }
-            });
+            }));
         });
 
         return new StreamResult(

@@ -174,6 +174,17 @@ public class McpTokenService {
         return rawToken != null && rawToken.startsWith(TOKEN_PREFIX);
     }
 
+    /**
+     * True when the Authorization header is a DeepSQL MCP bearer token
+     * ({@code Bearer dsql_mcp_…}). JWT and other Bearer schemes return false.
+     */
+    public static boolean isMcpAuthorizationHeader(String authorization) {
+        if (authorization == null || !authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            return false;
+        }
+        return authorization.substring(7).startsWith(TOKEN_PREFIX);
+    }
+
     private boolean isExpired(McpToken token) {
         return token.getExpiresAt() != null && !token.getExpiresAt().isAfter(LocalDateTime.now());
     }

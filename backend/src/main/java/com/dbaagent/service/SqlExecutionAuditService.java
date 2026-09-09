@@ -80,6 +80,9 @@ public class SqlExecutionAuditService {
             metadata.put("connectionId", rec.connectionId);
             metadata.put("connectionName", rec.connectionRequest == null ? null : rec.connectionRequest.getConnectionName());
             metadata.put("dbType", rec.connectionRequest == null ? null : rec.connectionRequest.getDbType());
+            if (rec.executionId != null) {
+                metadata.put("executionId", rec.executionId);
+            }
 
             String queryText = rec.queryRequest == null ? null : rec.queryRequest.getQuery();
             metadata.put("queryHash", SecurityHashUtil.sha256Hex(queryText == null ? "" : queryText));
@@ -183,6 +186,7 @@ public class SqlExecutionAuditService {
         private String failureReason;
         private HttpServletRequest httpRequest;
         private ClientContext client;
+        private String executionId;
 
         private AuditRecord() {}
 
@@ -214,6 +218,33 @@ public class SqlExecutionAuditService {
             return r;
         }
 
+        /**
+         * A deliberate cancel request against a still-running query, distinct
+         * from {@link #cancelNoOp()}. Without a dedicated event type, the only
+         * trace of a cancel was the killed query's own thread logging
+         * {@code pg_terminate_backend}'s error as an ordinary EDITOR_QUERY_FAILED
+         * — indistinguishable from any other failure, and absent entirely when
+         * the target had already finished before the kill reached it.
+         */
+        public static AuditRecord cancelled(String sessionPid) {
+            AuditRecord r = new AuditRecord();
+            r.eventType = SecurityEventType.EDITOR_QUERY_CANCELLED;
+            r.outcome = SecurityEventOutcome.SUCCESS;
+            r.operation = "cancel";
+            r.failureReason = sessionPid == null ? null : "terminated session pid " + sessionPid;
+            return r;
+        }
+
+        /** Cancel requested for an execution id that was already finished or unknown. */
+        public static AuditRecord cancelNoOp() {
+            AuditRecord r = new AuditRecord();
+            r.eventType = SecurityEventType.EDITOR_QUERY_CANCELLED;
+            r.outcome = SecurityEventOutcome.INFO;
+            r.operation = "cancel";
+            r.failureReason = "query was no longer running";
+            return r;
+        }
+
         // ── fluent setters ────────────────────────────────────────────────
 
         public AuditRecord operation(String op) { this.operation = op; return this; }
@@ -225,6 +256,7 @@ public class SqlExecutionAuditService {
         public AuditRecord useAnalyze(Boolean v) { this.useAnalyze = v; return this; }
         public AuditRecord httpRequest(HttpServletRequest r) { this.httpRequest = r; return this; }
         public AuditRecord client(ClientContext c) { this.client = c; return this; }
+        public AuditRecord executionId(String id) { this.executionId = id; return this; }
         public AuditRecord eventType(SecurityEventType t) { this.eventType = t; return this; }
         public AuditRecord outcome(SecurityEventOutcome o) { this.outcome = o; return this; }
     }

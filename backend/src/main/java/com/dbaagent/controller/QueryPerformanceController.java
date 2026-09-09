@@ -3,6 +3,7 @@ package com.dbaagent.controller;
 import com.dbaagent.model.QueryPerformanceHistory;
 import com.dbaagent.model.QueryPerformanceRegression;
 import com.dbaagent.service.QueryPerformanceService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -12,6 +13,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * REST API for per-query performance history, trends, and regressions.
+ *
+ * <p><b>Authorization:</b> every endpoint here takes a caller-supplied connection id, so
+ * each one asserts access itself ({@code assertCanReadConnectionContent} for reads,
+ * {@code assertCanManageConnectionContent} for writes). {@code SecurityConfig} only
+ * requires an authenticated principal — nothing upstream inspects a connection id. See
+ * {@code ConnectionScopedAuthorizationSafetyTest}.
+ */
 @RestController
 @RequestMapping("/query-performance")
 @Slf4j
@@ -20,6 +30,9 @@ public class QueryPerformanceController {
     @Autowired
     private QueryPerformanceService queryPerformanceService;
 
+    @Autowired
+    private AccessControlService accessControlService;
+
     /**
      * Record a query execution
      */
@@ -27,6 +40,7 @@ public class QueryPerformanceController {
     public ResponseEntity<Map<String, Object>> recordQueryExecution(@RequestBody Map<String, Object> request) {
         try {
             String connectionId = (String) request.get("connectionId");
+            accessControlService.assertCanManageConnectionContent(connectionId);
             String queryText = (String) request.get("queryText");
             Double executionTimeMs = ((Number) request.get("executionTimeMs")).doubleValue();
             Long rowsExamined = request.get("rowsExamined") != null ?
@@ -62,6 +76,7 @@ public class QueryPerformanceController {
     @GetMapping("/queries/{connectionId}")
     public ResponseEntity<Map<String, Object>> getTrackedQueries(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<Map<String, Object>> queries = queryPerformanceService.getTrackedQueries(connectionId);
 
             Map<String, Object> response = new HashMap<>();
@@ -91,6 +106,7 @@ public class QueryPerformanceController {
             @RequestParam(defaultValue = "7") int days
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<QueryPerformanceHistory> history = queryPerformanceService.getQueryHistory(
                     connectionId, queryHash, days
             );
@@ -122,6 +138,7 @@ public class QueryPerformanceController {
             @RequestParam(defaultValue = "7") int days
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             Map<String, Object> trendData = queryPerformanceService.getPerformanceTrend(
                     connectionId, queryHash, days
             );
@@ -151,6 +168,7 @@ public class QueryPerformanceController {
             @RequestParam(defaultValue = "false") boolean unacknowledgedOnly
     ) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             List<QueryPerformanceRegression> regressions = queryPerformanceService.getRegressions(
                     connectionId, unacknowledgedOnly
             );
@@ -181,8 +199,8 @@ public class QueryPerformanceController {
             @RequestBody(required = false) Map<String, String> request
     ) {
         try {
-            String acknowledgedBy = request != null ? request.get("acknowledgedBy") : "user";
-            queryPerformanceService.acknowledgeRegression(regressionId, acknowledgedBy);
+            assertCanManageRegression(regressionId);
+            queryPerformanceService.acknowledgeRegression(regressionId, actor());
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -209,6 +227,7 @@ public class QueryPerformanceController {
             @RequestBody Map<String, String> request
     ) {
         try {
+            assertCanManageRegression(regressionId);
             String resolutionNotes = request.get("resolutionNotes");
             queryPerformanceService.resolveRegression(regressionId, resolutionNotes);
 
@@ -234,6 +253,7 @@ public class QueryPerformanceController {
     @PostMapping("/analyze/{connectionId}")
     public ResponseEntity<Map<String, Object>> triggerAnalysis(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             // This will be run async, so just trigger it
             new Thread(() -> {
                 log.info("Manual performance analysis triggered for connection: {}", connectionId);
@@ -254,5 +274,25 @@ public class QueryPerformanceController {
             error.put("message", e.getMessage());
             return ResponseEntity.badRequest().body(error);
         }
+    }
+
+    /**
+     * Authorize a write keyed only on a regression id. The regression carries
+     * its own connectionId, so resolve that and assert against it — a
+     * regression id is not a capability, and these ids are sequential Longs,
+     * so they are trivially enumerable — walking 1..N would otherwise map out every
+     * tenant's regressions. An unknown id and one the caller cannot manage both report
+     * 404, so the response does not distinguish them.
+     */
+    private void assertCanManageRegression(Long regressionId) {
+        String connectionId = queryPerformanceService.findConnectionIdForRegression(regressionId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Regression not found"));
+        accessControlService.assertCanManageConnectionContentOrNotFound(connectionId, "Regression");
+    }
+
+    /** The authenticated caller. Never trust a client-supplied actor name. */
+    private String actor() {
+        return accessControlService.requireCurrentUsername();
     }
 }

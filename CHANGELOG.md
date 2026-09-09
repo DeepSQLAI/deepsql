@@ -8,6 +8,34 @@ for product tags (`vMAJOR.MINOR.PATCH`).
 
 Product releases follow a **weekly cadence** (Saturday 09:00 America/Los_Angeles). See `docs/oss-ux/RELEASE.md`.
 
+## [1.3.0] — 2026-08-24
+
+### Added
+
+- **DeepSQL Desktop** — first-ship Electron thin client (`desktop/`) with direct TLS and SSH-tunnel transports, connection profiles, OS keychain secrets, and native chrome (#73).
+- Desktop release workflow (`.github/workflows/desktop-release.yml`) for macOS / Windows / Linux installers on `desktop-v*` tags.
+- Enforceable Agent brain-note proposals with non-blocking save bubbles (#75).
+- Schema documentation dedupe / `CODE_DERIVED` compatibility initializers (`V116`) (#74, #77).
+
+### Fixed
+
+- Cross-user MCP credential leak in the Agent tab — provisioner no longer last-writer-wins across Hermes profiles; MCP tokens bind to declared client identity (#78).
+- View as Agent enforces the target user’s data policy on new Agent threads (#71).
+- Chat schema allowlist enumerates the whole statement (#70).
+- Brain endpoints require connection content authorization (#72).
+- Review queue approvals: stale pending counts, bulk `failures[]`, approval path unwedge (#74, #77).
+- Editor CSV export bounded; concurrent-run guards and cancel audit (#76).
+
+### Changed
+
+- Documented CORS loopback wildcards required for Desktop SSH tunnels (`CORS_ALLOWED_ORIGINS`).
+- `@deepsql/mcp` → `0.27.1`.
+- DeepSQL Desktop package → `1.0.0` (cut installers with `desktop-v1.0.0`).
+
+### Notes
+
+- Open follow-up: dashboard workspaces + custom roles (#80) intentionally not in this cut.
+
 ## [1.2.0] — 2026-08-19
 
 ### Added
@@ -82,6 +110,7 @@ First public OSS release.
 - Residual high-severity items tracked in `docs/oss-ux/OSS_SECURITY_REVIEW.md` (IDOR sweep, SET preamble allowlist, SSRF hardening, share-password defaults) are deferred past this cut.
 - Primary distribution path remains `docker compose up --build` (no pre-built container registry in this release).
 
+[1.3.0]: https://github.com/DeepSQLAI/deepsql/releases/tag/v1.3.0
 [1.2.0]: https://github.com/DeepSQLAI/deepsql/releases/tag/v1.2.0
 [1.1.0]: https://github.com/DeepSQLAI/deepsql/releases/tag/v1.1.0
 [1.0.0]: https://github.com/DeepSQLAI/deepsql/releases/tag/v1.0.0

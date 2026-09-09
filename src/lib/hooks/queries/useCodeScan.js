@@ -122,6 +122,7 @@ export function useAllCodeScanSuggestions({ connectionId, status = 'PENDING' }) 
       const pageSize = 200
       // Cap to keep things bounded; one project's worst-case so far is ~750.
       const maxPages = 50
+      let totalElements = null
       while (page < maxPages) {
         const data = await codeScanAPI.listSuggestions({
           connectionId,
@@ -130,15 +131,43 @@ export function useAllCodeScanSuggestions({ connectionId, status = 'PENDING' }) 
           size: pageSize,
         })
         const content = data?.content || []
+        if (typeof data?.totalElements === 'number') {
+          totalElements = data.totalElements
+        }
         out.push(...content)
+        // Prefer server total when present so a truncated first page cannot
+        // silently stop early while the Review badge still shows 198.
+        if (totalElements != null && out.length >= totalElements) break
         if (content.length < pageSize) break
         page += 1
       }
       return out
     },
     enabled: Boolean(connectionId),
-    staleTime: 30_000,
+    // Badge probe and list must stay in sync after scans complete.
+    staleTime: 0,
   })
+}
+
+/**
+ * Everything an approve/reject writes, in one place.
+ *
+ * A decision is not confined to the suggestion row: approving a SCHEMA_DOC
+ * upserts `schema_documentation` (served by `brain/notes`, which backs the Write
+ * notes tab and its coverage counts) and re-embeds it, and approving a
+ * KNOWLEDGE_ENTRY creates a company knowledge entry. Invalidating only codeScan +
+ * companyKnowledge left every schema-doc-derived count stale until a page reload.
+ */
+function invalidateAfterDecision(queryClient, connectionId) {
+  if (!connectionId) return
+  ;[
+    queryKeys.codeScan.all(connectionId),
+    queryKeys.companyKnowledge.all(connectionId),
+    // schema_documentation — brain/notes, coverage counts, understanding.
+    queryKeys.brain.all(connectionId),
+    // Accepting a description can resolve an ambiguity flagged in Unresolved.
+    queryKeys.schemaContext.all(connectionId),
+  ].forEach((queryKey) => queryClient.invalidateQueries({ queryKey }))
 }
 
 export function useDecideCodeScanSuggestion() {
@@ -146,10 +175,7 @@ export function useDecideCodeScanSuggestion() {
   return useMutation({
     mutationFn: codeScanAPI.decide,
     onSuccess: (_data, variables) => {
-      if (variables?.connectionId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.codeScan.all(variables.connectionId) })
-        queryClient.invalidateQueries({ queryKey: queryKeys.companyKnowledge.all(variables.connectionId) })
-      }
+      invalidateAfterDecision(queryClient, variables?.connectionId)
     },
   })
 }
@@ -159,10 +185,7 @@ export function useBulkDecideCodeScanSuggestions() {
   return useMutation({
     mutationFn: codeScanAPI.bulkDecide,
     onSuccess: (_data, variables) => {
-      if (variables?.connectionId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.codeScan.all(variables.connectionId) })
-        queryClient.invalidateQueries({ queryKey: queryKeys.companyKnowledge.all(variables.connectionId) })
-      }
+      invalidateAfterDecision(queryClient, variables?.connectionId)
     },
   })
 }

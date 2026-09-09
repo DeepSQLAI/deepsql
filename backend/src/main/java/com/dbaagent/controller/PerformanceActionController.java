@@ -12,11 +12,14 @@ import com.dbaagent.service.PerformanceActionAggregatorService;
 import com.dbaagent.service.PerformanceActionAggregatorService.ActionSummary;
 import com.dbaagent.service.PerformanceActionAggregatorService.RefreshResult;
 import com.dbaagent.service.SlowQueryHistoryService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
@@ -28,6 +31,12 @@ import java.util.Set;
 /**
  * REST controller for unified performance actions.
  * Provides endpoints for listing, filtering, refreshing, and managing performance recommendations.
+ *
+ * <p><b>Authorization:</b> every endpoint here takes a caller-supplied connection id, so
+ * each one asserts access itself ({@code assertCanReadConnectionContent} for reads,
+ * {@code assertCanManageConnectionContent} for writes). {@code SecurityConfig} only
+ * requires an authenticated principal — nothing upstream inspects a connection id. See
+ * {@code ConnectionScopedAuthorizationSafetyTest}.
  */
 @RestController
 @RequestMapping("/performance-actions")
@@ -40,6 +49,7 @@ public class PerformanceActionController {
 
     private final PerformanceActionAggregatorService aggregatorService;
     private final SlowQueryHistoryService slowQueryHistoryService;
+    private final AccessControlService accessControlService;
 
     /**
      * Get all pending performance actions for a connection, sorted by ROI.
@@ -47,6 +57,7 @@ public class PerformanceActionController {
     @GetMapping("/{connectionId}")
     public ResponseEntity<List<PerformanceAction>> getActions(
             @PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         log.debug("Getting performance actions for connection: {}", connectionId);
         List<PerformanceAction> actions = aggregatorService.getAggregatedActions(connectionId);
         return ResponseEntity.ok(actions);
@@ -59,6 +70,7 @@ public class PerformanceActionController {
     public ResponseEntity<List<PerformanceAction>> getTopActions(
             @PathVariable String connectionId,
             @RequestParam(defaultValue = "10") int limit) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         log.debug("Getting top {} actions for connection: {}", limit, connectionId);
         List<PerformanceAction> actions = aggregatorService.getTopActions(connectionId, limit);
         return ResponseEntity.ok(actions);
@@ -71,6 +83,7 @@ public class PerformanceActionController {
     public ResponseEntity<List<PerformanceAction>> getActionsByCategory(
             @PathVariable String connectionId,
             @PathVariable ActionCategory category) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         log.debug("Getting actions for connection {} by category: {}", connectionId, category);
         List<PerformanceAction> actions = aggregatorService.getActionsByCategory(connectionId, category);
         return ResponseEntity.ok(actions);
@@ -83,6 +96,7 @@ public class PerformanceActionController {
     public ResponseEntity<List<PerformanceAction>> getActionsBySource(
             @PathVariable String connectionId,
             @PathVariable ActionSource source) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         log.debug("Getting actions for connection {} by source: {}", connectionId, source);
         List<PerformanceAction> actions = aggregatorService.getActionsBySource(connectionId, source);
         return ResponseEntity.ok(actions);
@@ -94,6 +108,7 @@ public class PerformanceActionController {
     @GetMapping("/{connectionId}/summary")
     public ResponseEntity<ActionSummary> getSummary(
             @PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         log.debug("Getting action summary for connection: {}", connectionId);
         ActionSummary summary = aggregatorService.getSummary(connectionId);
         return ResponseEntity.ok(summary);
@@ -105,6 +120,7 @@ public class PerformanceActionController {
     @PostMapping("/{connectionId}/refresh")
     public ResponseEntity<RefreshResult> refreshActions(
             @PathVariable String connectionId) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
         log.info("Refreshing performance actions for connection: {}", connectionId);
         RefreshResult result = aggregatorService.refreshActions(connectionId);
         return ResponseEntity.ok(result);
@@ -118,10 +134,13 @@ public class PerformanceActionController {
             @PathVariable String actionId,
             @RequestBody StatusUpdateRequest request) {
         log.info("Updating action {} status to: {}", actionId, request.getStatus());
+        assertCanManageAction(actionId);
+        // The resolver is the authenticated caller, never request.getResolvedBy():
+        // that was client-supplied, so the audit trail could name anyone.
         PerformanceAction updated = aggregatorService.updateStatus(
                 actionId,
                 request.getStatus(),
-                request.getResolvedBy(),
+                accessControlService.requireCurrentUsername(),
                 request.getNotes());
         return ResponseEntity.ok(updated);
     }
@@ -134,12 +153,13 @@ public class PerformanceActionController {
             @RequestBody BatchStatusUpdateRequest request) {
         log.info("Batch updating {} actions to status: {}",
                 request.getActionIds().size(), request.getStatus());
+        request.getActionIds().forEach(this::assertCanManageAction);
 
         List<PerformanceAction> updated = request.getActionIds().stream()
                 .map(id -> aggregatorService.updateStatus(
                         id,
                         request.getStatus(),
-                        request.getResolvedBy(),
+                        accessControlService.requireCurrentUsername(),
                         request.getNotes()))
                 .toList();
 
@@ -158,6 +178,7 @@ public class PerformanceActionController {
         }
         PerformanceAction action = actionOpt.get();
         String connectionId = action.getConnectionId();
+        accessControlService.assertCanReadConnectionContent(connectionId);
         String tableName = action.getTargetObject();
         if (tableName == null || tableName.isBlank()) {
             return ResponseEntity.ok(new AffectedQueriesResponse(List.of(), 0));
@@ -272,5 +293,18 @@ public class PerformanceActionController {
         private final String queryText;
         private final Double avgExecutionTimeMs;
         private final Long callCount;
+    }
+
+    /**
+     * Authorize a write keyed only on an action id. The action carries its own
+     * connectionId, so resolve that first and assert against it — an action id
+     * is not a capability. An unknown id and one on a connection the caller cannot
+     * manage both report 404, so the endpoint cannot be used to probe which action
+     * ids exist.
+     */
+    private void assertCanManageAction(String actionId) {
+        PerformanceAction action = aggregatorService.getActionById(actionId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Action not found"));
+        accessControlService.assertCanManageConnectionContentOrNotFound(action.getConnectionId(), "Action");
     }
 }

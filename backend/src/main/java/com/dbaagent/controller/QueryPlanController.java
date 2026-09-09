@@ -3,6 +3,7 @@ package com.dbaagent.controller;
 import com.dbaagent.model.QueryPlanCache;
 import com.dbaagent.model.QueryPlanComparison;
 import com.dbaagent.service.QueryPlanCacheService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +14,12 @@ import java.util.Map;
 
 /**
  * REST API for query plan caching and comparison
+ *
+ * <p><b>Authorization:</b> every endpoint here takes a caller-supplied connection id, so
+ * each one asserts access itself ({@code assertCanReadConnectionContent} for reads,
+ * {@code assertCanManageConnectionContent} for writes). {@code SecurityConfig} only
+ * requires an authenticated principal — nothing upstream inspects a connection id. See
+ * {@code ConnectionScopedAuthorizationSafetyTest}.
  */
 @RestController
 @RequestMapping("/query-plans")
@@ -21,6 +28,7 @@ import java.util.Map;
 public class QueryPlanController {
 
     private final QueryPlanCacheService planCacheService;
+    private final AccessControlService accessControlService;
 
     /**
      * Capture execution plan for a query
@@ -29,6 +37,7 @@ public class QueryPlanController {
     public ResponseEntity<QueryPlanCache> capturePlan(
             @PathVariable String connectionId,
             @RequestBody Map<String, Object> request) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
 
         String query = (String) request.get("query");
         boolean analyze = Boolean.TRUE.equals(request.get("analyze"));
@@ -46,6 +55,7 @@ public class QueryPlanController {
      */
     @GetMapping("/{connectionId}/recent")
     public ResponseEntity<List<QueryPlanCache>> getRecentPlans(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(planCacheService.getRecentPlans(connectionId));
     }
 
@@ -56,6 +66,7 @@ public class QueryPlanController {
     public ResponseEntity<List<QueryPlanCache>> getPlansForQuery(
             @PathVariable String connectionId,
             @PathVariable String queryHash) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(planCacheService.getPlansForQuery(connectionId, queryHash));
     }
 
@@ -64,6 +75,7 @@ public class QueryPlanController {
      */
     @PostMapping("/plans/{planId}/set-baseline")
     public ResponseEntity<Map<String, String>> setBaseline(@PathVariable String planId) {
+        assertCanManagePlan(planId);
         planCacheService.setBaseline(planId);
         return ResponseEntity.ok(Map.of(
                 "status", "success",
@@ -76,6 +88,7 @@ public class QueryPlanController {
      */
     @GetMapping("/{connectionId}/regressions")
     public ResponseEntity<List<QueryPlanComparison>> getRegressions(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(planCacheService.getRegressions(connectionId));
     }
 
@@ -84,6 +97,7 @@ public class QueryPlanController {
      */
     @GetMapping("/{connectionId}/regressions/unacknowledged")
     public ResponseEntity<List<QueryPlanComparison>> getUnacknowledgedRegressions(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(planCacheService.getUnacknowledgedRegressions(connectionId));
     }
 
@@ -94,9 +108,18 @@ public class QueryPlanController {
     public ResponseEntity<Map<String, Object>> acknowledgeRegressions(
             @PathVariable String connectionId,
             @RequestBody List<String> comparisonIds,
-            @RequestParam(required = false, defaultValue = "user") String acknowledgedBy) {
+            @RequestParam(required = false) String acknowledgedBy) {
+            // Accepted for wire compatibility and deliberately ignored: the actor is
+            // taken from the security context below. It previously defaulted to the
+            // literal string "user", so the trail named nobody.
+        accessControlService.assertCanManageConnectionContent(connectionId);
 
-        int count = planCacheService.acknowledgeRegressions(comparisonIds, acknowledgedBy);
+        if (!planCacheService.allComparisonsBelongTo(connectionId, comparisonIds)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, "Regression not found for this connection");
+        }
+        int count = planCacheService.acknowledgeRegressions(
+                comparisonIds, accessControlService.requireCurrentUsername());
         return ResponseEntity.ok(Map.of(
                 "status", "success",
                 "acknowledgedCount", count
@@ -108,6 +131,20 @@ public class QueryPlanController {
      */
     @GetMapping("/{connectionId}/stats")
     public ResponseEntity<Map<String, Object>> getPlanStats(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(planCacheService.getPlanStats(connectionId));
+    }
+
+    /**
+     * Authorize a write keyed only on a plan id. The cached plan carries its own
+     * connectionId, so resolve that and assert against it. An unknown id reports
+     * 404 — as does a plan belonging to a connection the caller cannot manage, so the
+     * endpoint cannot be used to probe which plan ids exist.
+     */
+    private void assertCanManagePlan(String planId) {
+        String connectionId = planCacheService.findConnectionIdForPlan(planId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Plan not found"));
+        accessControlService.assertCanManageConnectionContentOrNotFound(connectionId, "Plan");
     }
 }

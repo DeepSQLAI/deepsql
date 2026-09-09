@@ -31,6 +31,7 @@ public class AuthSessionService {
     private final UserSessionRepository userSessionRepository;
     private final JwtUtil jwtUtil;
     private final SecurityEventService securityEventService;
+    private final PermissionService permissionService;
 
     @Value("${security.cookie.name:auth_token}")
     private String accessCookieName;
@@ -56,7 +57,7 @@ public class AuthSessionService {
     @Transactional
     public SessionAuthentication createSession(
         User user,
-        Role role,
+        String roleCode,
         Set<Permission> permissions,
         String clientIp,
         String userAgent,
@@ -79,9 +80,10 @@ public class AuthSessionService {
         String accessToken = jwtUtil.generateAccessToken(
             user.getUsername(),
             session.getId(),
-            role,
+            roleCode,
             permissions,
-            Duration.ofMinutes(accessMinutes)
+            Duration.ofMinutes(accessMinutes),
+            null
         );
 
         securityEventService.log(SecurityEventService.EventRequest.builder()
@@ -119,7 +121,7 @@ public class AuthSessionService {
     public Optional<SessionAuthentication> refreshSession(
         String rawRefreshToken,
         User user,
-        Role role,
+        String roleCode,
         Set<Permission> permissions,
         String clientIp,
         String userAgent
@@ -129,7 +131,7 @@ public class AuthSessionService {
             .filter(session -> !session.isRevoked())
             .filter(session -> !session.isRefreshExpired())
             .filter(session -> session.getUserId().equals(user.getId()))
-            .map(session -> rotateSession(session, user, role, permissions, clientIp, userAgent));
+            .map(session -> rotateSession(session, user, roleCode, permissions, clientIp, userAgent));
     }
 
     @Transactional
@@ -169,12 +171,14 @@ public class AuthSessionService {
         if (response == null || sessionId == null || sessionId.isBlank() || sessionOwner == null) {
             return;
         }
-        Role role = sessionOwner.getRoleEnum();
+        // Resolve by role code, not Role enum: a custom-role user has no Role value, and
+        // Role.getPermissions() would also skip any admin-configured override.
+        String roleCode = sessionOwner.getRoleCode();
         String accessToken = jwtUtil.generateAccessToken(
             sessionOwner.getUsername(),
             sessionId,
-            role,
-            role.getPermissions(),
+            roleCode,
+            permissionService.getEffectivePermissions(roleCode),
             Duration.ofMinutes(accessMinutes),
             impersonateUserId
         );
@@ -209,7 +213,7 @@ public class AuthSessionService {
     private SessionAuthentication rotateSession(
         UserSession session,
         User user,
-        Role role,
+        String roleCode,
         Set<Permission> permissions,
         String clientIp,
         String userAgent
@@ -226,9 +230,10 @@ public class AuthSessionService {
         String accessToken = jwtUtil.generateAccessToken(
             user.getUsername(),
             session.getId(),
-            role,
+            roleCode,
             permissions,
-            Duration.ofMinutes(accessMinutes)
+            Duration.ofMinutes(accessMinutes),
+            null
         );
 
         securityEventService.log(SecurityEventService.EventRequest.builder()

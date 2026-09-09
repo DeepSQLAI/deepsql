@@ -59,12 +59,14 @@ public class ConnectionAccessService {
         }
 
         return grantRepository.findByConnectionIdAndUsernameIgnoreCase(connection.getId(), username)
+            // A grant is a grant: assignment implies full content access. Legacy
+            // CHAT_EDITOR rows resolve here too rather than to a lesser tier, so an
+            // existing user gains Dashboards/Brain write access instead of silently
+            // keeping a level the UI no longer explains.
             .map(grant -> buildResolved(
                 connection,
                 ConnectionOwnershipType.ASSIGNED,
-                grant.getAccessLevel() == ConnectionAccessLevel.FULL_CONTENT
-                    ? EffectiveConnectionAccess.FULL_CONTENT
-                    : EffectiveConnectionAccess.CHAT_EDITOR
+                EffectiveConnectionAccess.FULL_CONTENT
             ))
             .orElseGet(() -> buildResolved(connection, null, EffectiveConnectionAccess.NONE));
     }

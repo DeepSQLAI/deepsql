@@ -3,8 +3,10 @@ package com.dbaagent.repository;
 import com.dbaagent.model.QueryLineage;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
@@ -147,23 +149,32 @@ public interface QueryLineageRepository extends JpaRepository<QueryLineage, Stri
      * Callers must apply the SAME transformation to their prefix on the
      * Java side (see {@code SlowQueryAnalyticsService.normalizeForMatching}).
      *
-     * <p>The regex chain runs once per candidate row, so this is intended for
-     * single-row lookups (LIMIT 1) over the per-connection slice. For
-     * d840f866-style connections (~5K lineage rows) it returns in a few ms;
-     * larger connections may benefit from a functional index on the
-     * normalized expression, but none is needed yet.
+     * <p>The normalization is <b>precomputed</b> into the stored generated column
+     * {@code normalized_match} ({@code QueryLineageMatchIndexInitializer}) and matched
+     * against that, so the regex chain runs once at write time rather than once per
+     * candidate row on every read. Inlining the expression here made the predicate
+     * unindexable: Postgres had to materialize a rewritten copy of the whole
+     * per-connection slice, which measured 36 ms at 1,093 rows and 1,112 ms at 34,976 —
+     * and {@code recoverFullText} issues this up to 20 times per "view full query" click,
+     * against a table no retention job prunes. On the same scaled table with the ~120-char
+     * prefix the caller actually sends, the indexed form plans as an Index Scan at
+     * 0.428 ms.
+     *
+     * <p>Matched against the column <b>directly</b>, with no {@code COALESCE} fallback to
+     * the inline expression. That fallback is the obvious way to stay safe on a database
+     * without the column, and it silently undoes the whole fix: wrapping the column in
+     * {@code COALESCE(...)} makes the predicate non-indexable again. Measured on the same
+     * 37,504-row table — {@code COALESCE(normalized_match, …)} plans a Seq Scan at
+     * 48.7 ms, the bare column an Index Scan at 0.39 ms. If the column is ever absent,
+     * {@code QueryLineageMatchIndexInitializer} logs it at WARN and
+     * {@code SlowQueryAnalyticsService.recoverFullText} already treats a failed lookup as
+     * "no longer text available" and returns the sample unchanged.
      */
     @Query(value = """
         SELECT * FROM query_lineage
         WHERE connection_id = :connectionId
           AND LENGTH(query_text) > :minLength
-          AND LOWER(
-                regexp_replace(
-                  regexp_replace(
-                    REPLACE(query_text, '`', ''),
-                    '\\s*([.,();])\\s*', '\\1', 'g'),
-                  '\\s+', ' ', 'g')
-              ) LIKE :escapedPrefix ESCAPE '\\'
+          AND normalized_match LIKE :escapedPrefix ESCAPE '\\'
         ORDER BY LENGTH(query_text) DESC
         LIMIT 1
         """, nativeQuery = true)
@@ -172,4 +183,24 @@ public interface QueryLineageRepository extends JpaRepository<QueryLineage, Stri
         @Param("escapedPrefix") String escapedPrefix,
         @Param("minLength") int minLength
     );
+
+    /**
+     * Drop lineage rows older than the connection's retention window.
+     *
+     * <p>This table was never pruned: {@code SlowQueryRetentionService} covered
+     * {@code slow_query_run}, {@code slow_query_customer_day} and
+     * {@code slow_query_sample} but not lineage, so it grew without bound while the
+     * 30-day analytics tables stayed small. That is what made sample recovery degrade
+     * with age rather than load — the scanned table kept growing even on an idle install.
+     *
+     * <p>Keyed on {@code created_at}, which is non-null and already indexed
+     * ({@code idx_query_lineage_created}).
+     */
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM QueryLineage q WHERE q.connectionId = :connectionId "
+        + "AND q.createdAt < :cutoff")
+    int deleteByConnectionIdAndCreatedAtBefore(
+        @Param("connectionId") String connectionId,
+        @Param("cutoff") java.time.LocalDateTime cutoff);
 }

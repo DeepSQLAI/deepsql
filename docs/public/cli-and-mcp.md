@@ -179,7 +179,7 @@ The MCP surface mirrors the `deepsql` CLI for almost every read/diagnostic opera
 | Tool | What it does |
 |---|---|
 | `list_connections` | List databases this user can see. **Always call first** — every other tool needs the UUID. |
-| `get_current_user` | Authenticated user, role, and bound DeepSQL host. Use to know whether the caller is admin-capable before suggesting DDL. |
+| `get_current_user` | Authenticated user, role, and `callerCapabilities`. Read `doNotOffer` before suggesting a write. |
 | `show_connection` | One connection's saved config with all secret fields masked as `(set)`. |
 | `test_connection` | Run the privilege report (+ SSH check) using the saved encrypted credentials. No plaintext crosses the agent's wire. |
 | `reinit_connection_brain` | Trigger a fresh schema scan + brain re-embedding (use after the user reports stale schema knowledge). |
@@ -190,7 +190,7 @@ The MCP surface mirrors the `deepsql` CLI for almost every read/diagnostic opera
 |---|---|
 | `get_schema` | Fetch cached schema (tables, columns, FKs, types). Fast and cheap — call freely. |
 | `get_database_objects` | Tables, views, functions, procedures. Use when you need DDL-level objects, not just columns. |
-| `get_brain_context` | **Primary retrieval tool.** Returns the tables, columns, FKs, business rules, and anti-patterns most relevant to your question. **Call before generating any non-trivial SQL or DDL.** |
+| `get_brain_context` | **Primary retrieval tool.** Returns the tables, columns, FKs, business rules, and anti-patterns most relevant to your question, plus `callerCapabilities`. **Call before generating any non-trivial SQL or DDL. Never offer an action in `doNotOffer`.** |
 | `list_business_rules` | Active business rules and SQL guardrails. Honor these — they encode domain semantics (e.g. `always_filter_cancelled`). |
 | `get_relationships` | Inferred + validated foreign keys with confidence scores. Many real-world DBs lack declared FKs; this fills the gap. |
 
@@ -252,7 +252,7 @@ The MCP surface mirrors the `deepsql` CLI for almost every read/diagnostic opera
 
 | Tool | What it does |
 |---|---|
-| `execute_sql` | Run any single SQL statement. Developers get SELECT/WITH/SHOW/EXPLAIN; admins also get DML/DDL with a two-step confirmation (DROP is blocked). |
+| `execute_sql` | Run any single SQL statement. Developers get SELECT/WITH/SHOW/EXPLAIN; admins also get DML and CREATE/ALTER with a two-step confirmation (DROP and TRUNCATE are blocked). |
 | `analyze_query_plan` | AI-enriched plan analysis: parsed plan tree, performance issues, index recommendations, written summary using your schema + business rules. `useAnalyze: true` actually executes the query (EXPLAIN ANALYZE). |
 
 ### What's CLI-first
@@ -276,8 +276,8 @@ These are reachable from any terminal where `deepsql` is installed and logged in
 DeepSQL's CLI and MCP `execute_sql` use **the same `QueryExecutionPolicyService` the web SQL Editor uses**. The rules:
 
 1. **Developers** can run read-only SQL: `SELECT`, `WITH … SELECT`, `SHOW`, `EXPLAIN`. Anything else is rejected immediately.
-2. **Admins** can additionally run `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `UPSERT`, plus `CREATE`, `ALTER`, `TRUNCATE`.
-3. `DROP` is **blocked from CLI/MCP/Editor**. Use your database's admin tooling for schema removal.
+2. **Admins** can additionally run `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `UPSERT`, plus non-destructive DDL (`CREATE`, `ALTER`, `CREATE INDEX`) from CLI/MCP.
+3. `DROP` and `TRUNCATE` are **blocked from CLI/MCP** (coding-agent loops), even with confirmation. The web SQL Editor still blocks only `DROP TABLE`; other Editor DROPs and `TRUNCATE` stay confirm-gated.
 4. `UPDATE`/`DELETE` **must include a `WHERE` clause** — unbounded mutations are rejected.
 5. Multi-statement input (e.g. `UPDATE a; UPDATE b;`) is rejected. Use CTEs or run statements separately.
 6. Mutations use a **two-step confirmation**. The first call returns:

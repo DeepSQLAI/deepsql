@@ -22,9 +22,13 @@ import {
 } from 'lucide-react'
 import { adminAPI } from '@/lib/api/client'
 import { useAuth, ROLES } from '@/hooks/useAuth'
+import { PERMISSIONS, roleLabel } from '@/lib/permissions'
+import RoleManager from './RoleManager'
 
 const ROLE_BADGE_CLASSES = {
   [ROLES.ADMIN]: 'bg-red-100 text-red-700 border-red-200',
+  [ROLES.DBA]: 'bg-purple-100 text-purple-700 border-purple-200',
+  [ROLES.DATA_ENGINEER]: 'bg-teal-100 text-teal-700 border-teal-200',
   [ROLES.DEVELOPER]: 'bg-blue-100 text-blue-700 border-blue-200',
 }
 
@@ -35,18 +39,28 @@ const STATUS_BADGE_CLASSES = {
   DISABLED: 'bg-gray-100 text-gray-700 border-gray-200',
 }
 
-const ACCESS_MATRIX = [
-  { area: 'Chat', developer: 'Own + Assigned', admin: 'Full' },
-  { area: 'Editor', developer: 'Own + Assigned', admin: 'Full' },
-  { area: 'Brain', developer: 'Own + Full Access', admin: 'Full' },
-  { area: 'Schema Docs', developer: 'Own + Full Access', admin: 'Full' },
-  { area: 'Company Knowledge', developer: 'Own + Full Access', admin: 'Full' },
-  { area: 'Performance', developer: '—', admin: 'Full' },
+/**
+ * The sidebar sections, and the permission that opens each. Rendered as a live matrix
+ * against whatever roles the backend reports, so a new custom role appears here without
+ * a code change — the previous hardcoded two-column table silently went stale the moment
+ * a third role existed.
+ */
+const SECTION_MATRIX = [
+  { area: 'Agent', permission: PERMISSIONS.VIEW_AGENT },
+  { area: 'Dashboards', permission: PERMISSIONS.VIEW_DASHBOARDS },
+  { area: 'Digest', permission: PERMISSIONS.VIEW_DIGEST },
+  { area: 'Brain', permission: PERMISSIONS.VIEW_BRAIN },
+  { area: 'Performance', permission: PERMISSIONS.VIEW_PERFORMANCE },
+  { area: 'Editor', permission: PERMISSIONS.VIEW_EDITOR },
+  { area: 'Connection settings', permission: PERMISSIONS.MANAGE_CONNECTIONS },
+  { area: 'User management', permission: PERMISSIONS.MANAGE_USERS },
 ]
 
 const FALLBACK_ROLES = [
-  { name: ROLES.DEVELOPER, description: 'Access to Chat and the SQL Editor' },
-  { name: ROLES.ADMIN, description: 'Access to all product areas and administrative controls' },
+  { name: ROLES.ADMIN, description: 'Full access to all product areas and administrative controls' },
+  { name: ROLES.DBA, description: 'All product areas and connection settings, except user management' },
+  { name: ROLES.DATA_ENGINEER, description: 'Agent, Dashboards, and the SQL Editor' },
+  { name: ROLES.DEVELOPER, description: 'Agent, Digest, Dashboards, Performance, and the SQL Editor' },
 ]
 
 function badgeClassForRole(role) {
@@ -552,25 +566,47 @@ export default function UsersTab() {
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_420px] gap-6">
               <div>
                 <h3 className="text-sm font-medium text-gray-700 mb-4">Role Permissions</h3>
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="border border-gray-200 rounded-lg overflow-x-auto">
                   <table className="w-full">
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">Area</th>
-                        <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-500 uppercase">Developer</th>
-                        <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-500 uppercase">Admin</th>
+                        {availableRoles.map((role) => (
+                          <th key={role.name} className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                            {role.displayName || roleLabel(role.name)}
+                          </th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {ACCESS_MATRIX.map((row) => (
+                      {SECTION_MATRIX.map((row) => (
                         <tr key={row.area}>
-                          <td className="px-4 py-2 text-sm text-gray-700 font-medium">{row.area}</td>
-                          <td className="px-4 py-2 text-center text-xs text-gray-600">{row.developer}</td>
-                          <td className="px-4 py-2 text-center text-xs text-green-600 font-medium">{row.admin}</td>
+                          <td className="px-4 py-2 text-sm text-gray-700 font-medium whitespace-nowrap">{row.area}</td>
+                          {availableRoles.map((role) => {
+                            const granted = (role.permissions || []).some(
+                              (p) => (typeof p === 'string' ? p : p?.name) === row.permission,
+                            )
+                            return (
+                              <td key={role.name} className="px-3 py-2 text-center">
+                                {granted ? (
+                                  <CheckCircle size={14} className="inline text-green-600" aria-label="Allowed" />
+                                ) : (
+                                  <span className="text-gray-300" aria-label="Not allowed">—</span>
+                                )}
+                              </td>
+                            )
+                          })}
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                </div>
+                <p className="mt-2 text-xs text-gray-500">
+                  Built-in roles are fixed. Create a custom role below to define your own combination.
+                </p>
+
+                <div className="mt-6">
+                  <RoleManager roles={availableRoles} onChanged={loadData} />
                 </div>
               </div>
 
@@ -668,7 +704,7 @@ function RoleSelector({ user, roles, onRoleChange, loading, disabled }) {
     >
       {roles.map((role) => (
         <option key={role.name} value={role.name}>
-          {role.name}
+          {role.displayName || roleLabel(role.name)}
         </option>
       ))}
     </select>
@@ -921,7 +957,6 @@ function ChangePasswordModal({ user, loading, onClose, onSubmit }) {
 }
 
 function ConnectionAccessModal({ user, data, loading, onClose, onSave, onRevoke, onSavePolicy, onPreviewPolicy }) {
-  const [drafts, setDrafts] = useState({})
   const [policyDrafts, setPolicyDrafts] = useState({})
   const [policyPreviews, setPolicyPreviews] = useState({})
   const [previewLoading, setPreviewLoading] = useState({})
@@ -960,15 +995,14 @@ function ConnectionAccessModal({ user, data, loading, onClose, onSave, onRevoke,
             <div className="space-y-3">
               {assignableConnections.map((connection) => {
                 const assignment = assignmentsByConnection.get(connection.connectionId)
-                const draft = drafts[connection.connectionId] || assignment?.accessLevel || 'CHAT_EDITOR'
+                // Assignment implies full access now, so there is no level to choose.
+                const draft = 'FULL_CONTENT'
                 const policyDraft = policyDrafts[connection.connectionId]
                   ?? assignment?.chatAccessPolicy?.plainEnglishPolicy
                   ?? ''
                 const preview = policyPreviews[connection.connectionId] || assignment?.chatAccessPolicy
 
                 const isAssigned = Boolean(assignment)
-                const isFull = assignment?.accessLevel === 'FULL_CONTENT'
-                const isDirty = isAssigned && draft !== assignment.accessLevel
 
                 return (
                   <div
@@ -984,13 +1018,9 @@ function ConnectionAccessModal({ user, data, loading, onClose, onSave, onRevoke,
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium text-gray-900">{connection.connectionName}</span>
                           {isAssigned ? (
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
-                              isFull
-                                ? 'border-green-300 bg-green-100 text-green-800'
-                                : 'border-emerald-300 bg-emerald-100 text-emerald-800'
-                            }`}>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border border-green-300 bg-green-100 text-green-800">
                               <CheckCircle size={12} />
-                              {isFull ? 'Full Access' : 'Chat + Editor'}
+                              Assigned
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border border-gray-300 bg-gray-100 text-gray-500">
@@ -1003,22 +1033,13 @@ function ConnectionAccessModal({ user, data, loading, onClose, onSave, onRevoke,
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
-                        <select
-                          value={draft}
-                          onChange={(event) => setDrafts((prev) => ({ ...prev, [connection.connectionId]: event.target.value }))}
-                          className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
-                          disabled={loading}
-                        >
-                          <option value="CHAT_EDITOR">Chat + Editor</option>
-                          <option value="FULL_CONTENT">Full Access</option>
-                        </select>
                         <button
                           onClick={() => onSave(user.id, connection.connectionId, draft)}
-                          disabled={loading || (isAssigned && !isDirty)}
+                          disabled={loading || isAssigned}
                           className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-gray-900 hover:bg-gray-800 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           <CheckCircle size={14} />
-                          {isAssigned ? (isDirty ? 'Update' : 'Saved') : 'Assign'}
+                          {isAssigned ? 'Assigned' : 'Assign'}
                         </button>
                         <button
                           onClick={() => onRevoke(user.id, connection.connectionId)}

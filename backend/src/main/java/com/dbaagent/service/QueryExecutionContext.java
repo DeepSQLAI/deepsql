@@ -52,13 +52,38 @@ public record QueryExecutionContext(
     }
 
     public static QueryExecutionContext mcp(String actorUsername, boolean actorIsAdmin) {
+        return mcp(actorUsername, actorIsAdmin, false);
+    }
+
+    /**
+     * MCP / coding-agent SQL. Developers stay read-only. Admins may run
+     * non-destructive DDL/DML after the same confirmation gate as the Editor.
+     * DROP and TRUNCATE stay blocked in {@link QueryExecutionPolicyService}.
+     */
+    public static QueryExecutionContext mcp(
+        String actorUsername,
+        boolean actorIsAdmin,
+        boolean mutationConfirmed
+    ) {
         return new QueryExecutionContext(
             QueryExecutionOrigin.MCP,
-            MutationMode.READ_ONLY_ONLY,
+            actorIsAdmin ? MutationMode.MAY_MUTATE : MutationMode.READ_ONLY_ONLY,
             actorUsername,
             actorIsAdmin,
-            false
+            mutationConfirmed
         );
+    }
+
+    public static QueryExecutionContext forSqlSurface(
+        boolean mcpBearer,
+        String actorUsername,
+        boolean actorIsAdmin,
+        boolean mutationConfirmed
+    ) {
+        if (mcpBearer) {
+            return mcp(actorUsername, actorIsAdmin, mutationConfirmed);
+        }
+        return editor(actorUsername, actorIsAdmin, mutationConfirmed);
     }
 
     public static QueryExecutionContext scheduled() {

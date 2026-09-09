@@ -1,5 +1,10 @@
 # DeepSQL Desktop
 
+<<<<<<< HEAD
+=======
+**Version 1.0.2** — first public Desktop cut (ships with DeepSQL product `v1.3.0`).
+
+>>>>>>> e3581315f820469fc7cfec201084d84f8b6f8254
 A cross-platform desktop client for a self-hosted DeepSQL server. It connects to
 the VM (or bare metal) running the DeepSQL stack either **directly over TLS** or
 through an **SSH tunnel**, and presents the DeepSQL UI in a native window with
@@ -51,12 +56,28 @@ of the transport layer knows or cares which one is in use.
 | Windows | `DeepSQL Setup <version>.exe` (NSIS), portable `.exe` |
 | Linux | `.AppImage`, `.deb`, `.rpm` |
 
+<<<<<<< HEAD
 macOS builds are unsigned unless you supply signing credentials, so the first
 launch needs **right-click → Open** (or `xattr -dr com.apple.quarantine
 /Applications/DeepSQL.app`).
 
 ### From source
 
+=======
+macOS builds are unsigned unless you supply signing credentials, so Gatekeeper
+blocks a normal double-click on first launch (&ldquo;DeepSQL&rdquo; Not Opened).
+Use one of:
+
+1. **Right-click → Open** on `DeepSQL.app`, then click **Open** in the dialog.
+2. **System Settings → Privacy & Security → Open Anyway** after the block.
+3. Terminal: `xattr -dr com.apple.quarantine /Applications/DeepSQL.app`
+
+### From source
+
+**Requires Node.js 22+** (matches the Desktop release CI). GUI needs a display; on
+headless Linux use `xvfb-run` for the packaged app or the selftests.
+
+>>>>>>> e3581315f820469fc7cfec201084d84f8b6f8254
 ```bash
 cd desktop
 npm install
@@ -86,6 +107,16 @@ environment variables to enable it:
 - macOS: `CSC_LINK`, `CSC_KEY_PASSWORD`, plus `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` for notarisation.
 - Windows: `CSC_LINK`, `CSC_KEY_PASSWORD` (or an Azure Trusted Signing config).
 
+<<<<<<< HEAD
+=======
+CI (`.github/workflows/desktop-release.yml`) builds **unsigned** installers unless
+the repository secret `DESKTOP_CSC_LINK` is set. An empty `CSC_LINK` still counts
+as configured for electron-builder and fails the macOS job — the workflow only
+exports `CSC_*` when that secret is non-empty, and otherwise sets
+`CSC_IDENTITY_AUTO_DISCOVERY=false`. Linux selftests set `ELECTRON_DISABLE_SANDBOX=1`
+because hosted runners lack a correctly permissioned `chrome-sandbox`.
+
+>>>>>>> e3581315f820469fc7cfec201084d84f8b6f8254
 **Auto-update** is opt-in. `package.json` sets `"publish": null`, so no update
 feed is baked in and the updater no-ops. To enable it, either set a `publish`
 target (GitHub Releases, S3, generic) before building, or point
@@ -336,6 +367,10 @@ scripts/
   generate-icons.js   SVG → build/icon.png via Electron
   smoke.js            headless connection check
   tunnel-selftest.js  end-to-end SSH tunnel test
+<<<<<<< HEAD
+=======
+  settings-selftest.js proves an edited setting reaches the live connection
+>>>>>>> e3581315f820469fc7cfec201084d84f8b6f8254
 ```
 
 The renderers are plain HTML/CSS/JS with no build step: they are chrome around

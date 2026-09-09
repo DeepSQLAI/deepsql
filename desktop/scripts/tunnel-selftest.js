@@ -224,13 +224,32 @@ app.whenReady().then(async () => {
   check('missing key file is reported clearly', keyError?.code === 'key-unreadable', keyError?.code);
 
   // ── 5. Teardown ────────────────────────────────────────────────────────
+<<<<<<< HEAD
   sshServer.close();
   upstream.close();
   fs.rmSync(tmpDir, { recursive: true, force: true });
+=======
+  await closeServer(sshServer);
+  await closeServer(upstream);
+  try {
+    // Windows can still have Electron file handles open on userData when we
+    // rmSync synchronously; retry briefly so CI doesn't hang after the checks
+    // pass (observed as ENOTEMPTY + no exit on windows-latest).
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  } catch (err) {
+    process.stderr.write(`WARN: temp cleanup: ${err.message}\n`);
+  }
+>>>>>>> e3581315f820469fc7cfec201084d84f8b6f8254
 
   const failed = results.filter((r) => !r.ok).length;
   process.stdout.write(`\n${results.length - failed}/${results.length} checks passed\n`);
   app.exit(failed === 0 ? 0 : 1);
+<<<<<<< HEAD
+=======
+}).catch((err) => {
+  process.stderr.write(`${err?.stack || err}\n`);
+  app.exit(1);
+>>>>>>> e3581315f820469fc7cfec201084d84f8b6f8254
 });
 
 function makeProfile({ keyPath, sshPort, upstreamPort }) {
@@ -291,6 +310,19 @@ function listen(server, port, host) {
   });
 }
 
+<<<<<<< HEAD
+=======
+function closeServer(server) {
+  return new Promise((resolve) => {
+    if (!server || !server.listening) {
+      resolve();
+      return;
+    }
+    server.close(() => resolve());
+  });
+}
+
+>>>>>>> e3581315f820469fc7cfec201084d84f8b6f8254
 function portIsFree(port) {
   return new Promise((resolve) => {
     const socket = net.connect(port, '127.0.0.1');

@@ -57,6 +57,11 @@ class PasswordlessAuthServiceTest {
         ReflectionTestUtils.setField(service, "maxIpStarts", 20);
         ReflectionTestUtils.setField(service, "maxPasswordFailures", 10);
         ReflectionTestUtils.setField(service, "adminMfaEnabled", false);
+        // @Value is not processed by @InjectMocks, so a boolean field defaults to
+        // false. Unlike rateLimitEnabled (checked as `if (enabled)`, so absence
+        // merely skips it), password login is checked as `if (!enabled)` — leaving
+        // it unset would reject every login below.
+        ReflectionTestUtils.setField(service, "passwordLoginEnabled", true);
 
         when(authLoginChallengeRepository.save(any(AuthLoginChallenge.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));

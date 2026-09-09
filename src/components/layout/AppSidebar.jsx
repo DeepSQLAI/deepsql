@@ -3,6 +3,7 @@ import { Brain, Code2, Database, Settings, PanelLeftClose, PanelLeftOpen, LogOut
 import { useActiveSection, useSetActiveSection } from '@/lib/stores/useNavStore'
 import { useConnectionManager } from '@/lib/hooks/useConnectionManager'
 import { AGENTS_ENABLED, canAccessHomeSection, getConnectionAccessBadge, getConnectionAccessLabel } from '@/lib/features'
+import { PERMISSIONS } from '@/lib/permissions'
 import ManageConnectionsModal from '@/components/ManageConnectionsModal'
 import SettingsModal from '@/components/SettingsModal'
 import { useAuth } from '@/hooks/useAuth'
@@ -28,9 +29,18 @@ export default function AppSidebar() {
   const [showConnectionDropdown, setShowConnectionDropdown] = useState(false)
   const userMenuRef = useRef(null)
   const connectionDropdownRef = useRef(null)
-  const { logout, role, username, impersonating } = useAuth()
+  const { logout, role, username, impersonating, permissions, hasPermission } = useAuth()
+  // Connections (add/edit/delete a database) is administrative: the backend already
+  // refuses it to Developer and Data Engineer with 403, so hiding the button stops the
+  // UI offering a door that only leads to an error. Settings is likewise administrative
+  // only — Developer and Data Engineer do not see it at all.
+  const canManageConnections = hasPermission(PERMISSIONS.MANAGE_CONNECTIONS)
+  const canOpenSettings =
+    hasPermission(PERMISSIONS.MANAGE_SETTINGS) ||
+    hasPermission(PERMISSIONS.MANAGE_USERS) ||
+    hasPermission(PERMISSIONS.MANAGE_PERMISSIONS)
   const { connections, connectionId, selectedConnection, changeConnection, isLoading, refetch } = useConnectionManager()
-  const visibleNavItems = NAV_ITEMS.filter(({ id }) => canAccessHomeSection(id, role, selectedConnection))
+  const visibleNavItems = NAV_ITEMS.filter(({ id }) => canAccessHomeSection(id, role, selectedConnection, permissions))
 
   const initials = username.slice(0, 2).toUpperCase()
   const connectionLabel =
@@ -164,16 +174,18 @@ export default function AppSidebar() {
             )}
           </div>
 
-          <button
-            className={styles.bottomItem}
-            onClick={() => setShowConnections(true)}
-            title={collapsed ? 'Connections' : undefined}
-          >
-            <Settings size={15} className={styles.navIcon} />
-            <span className={`${styles.navLabel} ${collapsed ? styles.navLabelHidden : ''}`}>
-              Connections
-            </span>
-          </button>
+          {canManageConnections && (
+            <button
+              className={styles.bottomItem}
+              onClick={() => setShowConnections(true)}
+              title={collapsed ? 'Connections' : undefined}
+            >
+              <Settings size={15} className={styles.navIcon} />
+              <span className={`${styles.navLabel} ${collapsed ? styles.navLabelHidden : ''}`}>
+                Connections
+              </span>
+            </button>
+          )}
           <div className={styles.userMenuWrap} ref={userMenuRef}>
             <button
               className={styles.bottomItem}
@@ -200,13 +212,15 @@ export default function AppSidebar() {
                   </div>
                 </div>
                 <div className={styles.userDropdownDivider} />
-                <button
-                  className={styles.userDropdownItem}
-                  onClick={() => { setShowUserMenu(false); setShowSettings(true) }}
-                >
-                  <Settings size={14} />
-                  <span>Settings</span>
-                </button>
+                {canOpenSettings && (
+                  <button
+                    className={styles.userDropdownItem}
+                    onClick={() => { setShowUserMenu(false); setShowSettings(true) }}
+                  >
+                    <Settings size={14} />
+                    <span>Settings</span>
+                  </button>
+                )}
                 <button
                   className={styles.userDropdownItem}
                   onClick={() => { setShowUserMenu(false); logout() }}

@@ -6,6 +6,17 @@
   border-radius: 14px;
   background: #f9fafb;
   width: fit-content;
+  /* At 390px the four tabs measure 427px, so three of them sat off-screen with no way
+     to reach them: `width: fit-content` lets the bar grow past the viewport and the
+     parent clipped it. Scroll the bar itself rather than wrapping, so the pill keeps
+     its shape; max-width caps it at the container so the rule has something to act on. */
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabBar::-webkit-scrollbar {
+  display: none;
 }
 
 .toolbar {
@@ -18,6 +29,9 @@
 
 .tabButton {
   display: inline-flex;
+  /* Do not shrink inside the scrolling .tabBar — otherwise labels compress to
+     illegible slivers instead of the bar scrolling. */
+  flex: 0 0 auto;
   align-items: center;
   gap: 8px;
   padding: 8px 14px;

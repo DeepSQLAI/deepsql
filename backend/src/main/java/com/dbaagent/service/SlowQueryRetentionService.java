@@ -4,6 +4,7 @@ import com.dbaagent.model.ResourceLimits;
 import com.dbaagent.repository.ResourceLimitsRepository;
 import com.dbaagent.repository.SlowQueryCustomerDayRepository;
 import com.dbaagent.repository.SlowQueryRunRepository;
+import com.dbaagent.repository.QueryLineageRepository;
 import com.dbaagent.repository.SlowQuerySampleRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +33,7 @@ public class SlowQueryRetentionService {
     private final SlowQueryRunRepository runRepository;
     private final SlowQuerySampleRepository sampleRepository;
     private final SlowQueryCustomerDayRepository customerDayRepository;
+    private final QueryLineageRepository queryLineageRepository;
     private final ResourceLimitsRepository resourceLimitsRepository;
 
     /** Resolve the retention window for a connection (days). */
@@ -44,7 +46,12 @@ public class SlowQueryRetentionService {
 
     /**
      * Delete slow-query analytics rows older than the connection's retention
-     * window across all three fact tables. Safe to call repeatedly.
+     * window across all four fact tables. Safe to call repeatedly.
+     *
+     * <p>{@code query_lineage} was missing here, and that mattered more than the row
+     * count suggests: it is the table {@code recoverFullText} scans up to 20 times per
+     * "view full query" click, so leaving it unpruned made sample recovery degrade with
+     * the install's age while the other three tables stayed bounded at 30 days.
      */
     @Transactional
     public void purge(String connectionId) {
@@ -55,11 +62,13 @@ public class SlowQueryRetentionService {
         int customerDays = customerDayRepository.deleteByConnectionIdAndDayBefore(connectionId, cutoff);
         int samples = sampleRepository.deleteByConnectionIdAndCapturedAtBefore(
             connectionId, cutoff.atStartOfDay());
+        int lineage = queryLineageRepository.deleteByConnectionIdAndCreatedAtBefore(
+            connectionId, cutoff.atStartOfDay());
 
-        if (runs > 0 || customerDays > 0 || samples > 0) {
+        if (runs > 0 || customerDays > 0 || samples > 0 || lineage > 0) {
             log.info("Slow-query retention purge for connection {} (>{}d): "
-                    + "{} runs, {} customer-days, {} samples removed",
-                connectionId, days, runs, customerDays, samples);
+                    + "{} runs, {} customer-days, {} samples, {} lineage rows removed",
+                connectionId, days, runs, customerDays, samples, lineage);
         }
     }
 }

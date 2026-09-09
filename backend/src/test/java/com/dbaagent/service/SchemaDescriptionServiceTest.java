@@ -30,6 +30,7 @@ class SchemaDescriptionServiceTest {
     @Mock private com.dbaagent.repository.ColumnProfileRepository columnProfileRepo;
     @Mock private com.dbaagent.repository.InferredTableRelationshipRepository inferredRelationshipRepository;
     @Mock private TrainingService trainingService;
+    @Mock private com.dbaagent.repository.CodeKnowledgeSuggestionRepository codeSuggestionRepo;
     @Mock private ConnectionService connectionService;
     @Mock private com.dbaagent.provider.DatabaseProviderRegistry providerRegistry;
 
@@ -42,8 +43,9 @@ class SchemaDescriptionServiceTest {
             .thenReturn(List.of());
         service = new SchemaDescriptionService(
             chatClientBuilder, schemaScannerService, schemaDocRepo,
-            columnProfileRepo, inferredRelationshipRepository, trainingService, connectionService,
-            providerRegistry, 4
+            columnProfileRepo, inferredRelationshipRepository, trainingService,
+            new SchemaDocumentationDeduplicator(schemaDocRepo, codeSuggestionRepo, trainingService),
+            connectionService, providerRegistry, 4
         );
     }
 
@@ -173,7 +175,7 @@ class SchemaDescriptionServiceTest {
                 .build()
         ));
         when(schemaDocRepo.findByConnectionIdAndObjectTypeAndObjectNameAndSource(any(), any(), any(), any()))
-            .thenReturn(Optional.empty());
+            .thenReturn(List.of());
         when(schemaDocRepo.save(any())).thenAnswer(i -> i.getArgument(0));
         when(connectionService.isDataSamplingEnabled("conn1")).thenReturn(false);
         var schema = buildSchemaWithTables("users");

@@ -27,6 +27,8 @@ import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import com.dbaagent.service.security.AccessControlService;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -53,6 +55,9 @@ class SlowQueryControllerS3Test {
         KeyCustomerService keyCustomerService = mock(KeyCustomerService.class);
         SlowQueryInsightsService slowQueryInsightsService = mock(SlowQueryInsightsService.class);
         ObjectMapper objectMapper = mock(ObjectMapper.class);
+        // The controller now authorizes the connection before doing any work; a plain
+        // mock allows it, so these tests still exercise the S3 path they were written for.
+        AccessControlService accessControlService = mock(AccessControlService.class);
 
         SlowQueryController controller = new SlowQueryController(
             slowQueryService,
@@ -69,7 +74,8 @@ class SlowQueryControllerS3Test {
             explainPlanService,
             keyCustomerService,
             slowQueryInsightsService,
-            objectMapper
+            objectMapper,
+            accessControlService
         );
 
         SlowQueryAnalysis analysis = SlowQueryAnalysis.builder()
@@ -117,6 +123,9 @@ class SlowQueryControllerS3Test {
         KeyCustomerService keyCustomerService = mock(KeyCustomerService.class);
         SlowQueryInsightsService slowQueryInsightsService = mock(SlowQueryInsightsService.class);
         ObjectMapper objectMapper = mock(ObjectMapper.class);
+        // The controller now authorizes the connection before doing any work; a plain
+        // mock allows it, so these tests still exercise the S3 path they were written for.
+        AccessControlService accessControlService = mock(AccessControlService.class);
 
         SlowQueryController controller = new SlowQueryController(
             slowQueryService,
@@ -133,7 +142,8 @@ class SlowQueryControllerS3Test {
             explainPlanService,
             keyCustomerService,
             slowQueryInsightsService,
-            objectMapper
+            objectMapper,
+            accessControlService
         );
 
         SlowQueryInsightsResponse payload = SlowQueryInsightsResponse.builder()

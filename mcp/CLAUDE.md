@@ -60,7 +60,7 @@ in this version; ask before mid-session admin work.
 
 | Tool | Purpose |
 |---|---|
-| `list_connections` | List databases the user has access to. Always call this first — you need IDs for everything else. |
+| `list_connections` | List databases the user has access to. Always call this first — you need IDs for everything else. Each row includes `canManageContent`; if false, do not offer writes on that connection. |
 | `get_schema` | Cached schema metadata (tables, columns, FKs, types). Cheap and fast — call freely. |
 | `get_database_objects` | Tables, views, functions, procedures. Use when you need DDL-level objects, not just columns. |
 | `get_brain_context` | **Your primary retrieval tool.** Given a question, returns the tables/columns/FKs/training docs/business rules/anti-patterns most relevant to it. |
@@ -68,7 +68,7 @@ in this version; ask before mid-session admin work.
 | `get_relationships` | Inferred + validated foreign keys with confidence scores. Many real DBs lack declared FKs; this fills the gap. |
 | `get_anti_patterns` | Schema-level (`kind=table`) or query-level (`kind=query`) anti-patterns. |
 | `list_brain_recommendations` | The brain's AI-proposed notes to review for a connection (priority, reason, indicators, suggested prompt). The company-context review queue. |
-| `save_brain_note` | **Accept/save a fact into the shared brain** — grounds every future answer for the connection. TABLE- or COLUMN-scoped. Admin (manage-content), audited. Personal preferences belong in a DeepSQL skill, not here. |
+| `save_brain_note` | **Accept/save a fact into the shared brain** — only when the user asked to remember it AND `callerCapabilities.canWriteSharedBrainNotes` is true. Never volunteer after answering a question. |
 | `list_brain_notes` | Knowledge already saved to the brain (filter by table/column; can be thousands). |
 | `analyze_slow_queries` | Recent slow queries with fingerprints, durations, examples. Read-only; doesn't trigger new work. |
 | `get_slow_query_timeline` | Day-by-day timeline for one query from the 30-day analytics store — call count, mean/max time, regression factor per day. Identify the query by its fingerprint (the `queryId` from `analyze_slow_queries`). Answers "is this query getting slower". |
@@ -79,8 +79,8 @@ in this version; ask before mid-session admin work.
 | `get_slow_query_insights` | Pre-computed AI insights for slow queries grouped by `kind`: `hotspots` (most total DB time), `remediation` (actionable fixes), `tail-risk` (p95/max outliers), `plan-drift` (execution plan changed), `skew` (one tenant disproportionately loaded). Default `all` returns the combined list. Accepts `window` (`LAST_24_HOURS` / `LAST_7_DAYS` / `LAST_30_DAYS`) and `limit`. |
 | `optimize_slow_query` | AI query REWRITE + plan diagnosis for one specific SQL. Single-query scoped, synchronous. Does NOT recommend indexes — index/pre-aggregation recs require whole-workload context (`get_index_recommendations` / Workload Analysis). Pass `avgExecutionTimeMs` to anchor the impact estimate. |
 | `get_index_recommendations` | **Workload-weighted DBA-grade index advisor.** Pre-computed top-N (default 5) recommendations ranked by net benefit (`Σ calls × mean_exec_time` − write-cost). Each result carries up to 5 contributing query fingerprints, the role each column played, and optional HypoPG cost-delta on Postgres. Covers both `CREATE_INDEX` and `DROP_INDEX` (unused + redundant-prefix) candidates. |
-| **`apply_index_recommendation`** | **The only write-capable MCP tool.** Apply (or dry-run) a recommendation against its target connection and measure the before/after benefit on contributing queries. `DRY_RUN` (default) uses HypoPG (Postgres-only) for zero-write cost-delta. `APPLY` runs real `CREATE/DROP INDEX CONCURRENTLY` (configurable via `concurrent`). `APPLY_AND_MEASURE` additionally runs `EXPLAIN ANALYZE` for wall-clock timings. Write modes require `confirm: true`. The DDL is server-generated from the recommendation row — clients never supply SQL. |
-| **`execute_sql`** | **Run any SQL statement.** Policy is server-enforced: developers can run SELECT/WITH/SHOW/EXPLAIN; admins can also run DML/DDL with a two-step confirmation. EXPLAIN and EXPLAIN ANALYZE are just SQL — no separate flag. |
+| **`apply_index_recommendation`** | Apply (or dry-run) a recommendation against its target connection and measure the before/after benefit on contributing queries. `DRY_RUN` (default) uses HypoPG (Postgres-only) for zero-write cost-delta. `APPLY` runs real `CREATE/DROP INDEX CONCURRENTLY` (configurable via `concurrent`). `APPLY_AND_MEASURE` additionally runs `EXPLAIN ANALYZE` for wall-clock timings. Write modes require `confirm: true`. The DDL is server-generated from the recommendation row — clients never supply SQL. This is the only MCP path that can drop an index; `execute_sql` blocks `DROP`. |
+| **`execute_sql`** | **Run a SQL statement.** Policy is server-enforced: developers can run SELECT/WITH/SHOW/EXPLAIN; admins can also run DML and non-destructive DDL (`CREATE`, `ALTER`, `CREATE INDEX`) with a two-step confirmation. `DROP` and `TRUNCATE` are blocked on this surface even for confirmed admins. EXPLAIN and EXPLAIN ANALYZE are just SQL — no separate flag. |
 | **`analyze_query_plan`** | **AI-enriched plan analysis** for a query. Returns the parsed plan tree, performance issues, index recommendations, and a written summary that takes the connection's schema and business rules into account. Pass `useAnalyze: true` to run `EXPLAIN ANALYZE` (actually executes the query). |
 
 ---
@@ -98,7 +98,10 @@ in this version; ask before mid-session admin work.
    mutation that needs admin confirmation. Show the warnings to the user,
    wait for their explicit OK, then re-call with `confirmMutation: true`.
    Do not silently retry with `confirmMutation: true` on the user's behalf —
-   that defeats the whole point of the gate.
+   that defeats the whole point of the gate. `DROP` and `TRUNCATE` cannot
+   be confirmed around: they return `UNSAFE_MUTATION_BLOCKED`. Use database
+   admin tooling (or `apply_index_recommendation` for advisor-sourced
+   `DROP INDEX`).
 
 3. **Developers cannot run mutations.** If the user's token has
    `Role.DEVELOPER` and they ask you to `UPDATE users …`, the server will
@@ -236,9 +239,11 @@ gates that protect `execute_sql` kick in. You'll get back
 `requiresConfirmation` if you forgot.
 
 **"Apply this migration"** / **"Add this column"** / **"Delete these rows"**
-→ `execute_sql` with the DDL/DML. Only admins can do it. On first call you'll
-get `requiresConfirmation` — surface the warnings to the user verbatim, wait
-for them to say yes, then re-call with `confirmMutation: true`.
+→ `execute_sql` with the DML or non-destructive DDL (`CREATE`/`ALTER`).
+Only admins can do it. On first call you'll get `requiresConfirmation` —
+surface the warnings to the user verbatim, wait for them to say yes, then
+re-call with `confirmMutation: true`. Do not send `DROP` or `TRUNCATE`
+through `execute_sql`; those stay blocked.
 
 **"What indexes should we add?"** → `get_index_recommendations`. Returns
 the workload-weighted top-N (default 5) with net benefit, contributing

@@ -4,6 +4,7 @@ import com.dbaagent.model.DashboardAlert;
 import com.dbaagent.model.SavedDashboard;
 import com.dbaagent.service.DashboardAlertService;
 import com.dbaagent.service.SavedDashboardService;
+import com.dbaagent.service.DashboardWorkspaceService;
 import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +26,7 @@ public class DashboardAlertController {
     private final DashboardAlertService alertService;
     private final SavedDashboardService savedDashboardService;
     private final AccessControlService accessControlService;
+    private final DashboardWorkspaceService dashboardWorkspaceService;
 
     @PostMapping
     public ResponseEntity<Map<String, Object>> create(@PathVariable UUID dashboardId, @RequestBody DashboardAlert draft) {
@@ -93,8 +95,15 @@ public class DashboardAlertController {
         }
     }
 
+    /**
+     * The single point every handler here resolves a dashboard through, so the workspace
+     * membership gate applies to all of them at once. The connection check stays with
+     * each caller because read and write paths need different assertions.
+     */
     private SavedDashboard requireDashboard(UUID dashboardId) {
-        return savedDashboardService.getDashboardById(dashboardId)
+        SavedDashboard dashboard = savedDashboardService.getDashboardById(dashboardId)
             .orElseThrow(() -> new IllegalArgumentException("Dashboard not found"));
+        dashboardWorkspaceService.assertCanReadDashboard(dashboard);
+        return dashboard;
     }
 }

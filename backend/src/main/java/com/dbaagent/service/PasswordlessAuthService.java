@@ -4,8 +4,10 @@ import com.dbaagent.model.*;
 import com.dbaagent.repository.*;
 import com.dbaagent.security.EncryptionService;
 import com.dbaagent.util.SecurityHashUtil;
+import jakarta.annotation.PostConstruct;
 import lombok.Builder;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -25,6 +27,7 @@ import java.util.*;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PasswordlessAuthService {
     private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -72,6 +75,32 @@ public class PasswordlessAuthService {
     @Value("${security.google.enabled:false}")
     private boolean googleEnabled;
 
+    /**
+     * Whether email + password sign-in is accepted at all.
+     *
+     * <p>Defaults to {@code true} so existing installs are unaffected. Set it to
+     * false on deployments that front DeepSQL with Google Workspace SSO: enabling
+     * SSO does NOT by itself close the password path, so without this flag
+     * {@code /auth/login} stays open to every local account even when every human
+     * signs in through Google.
+     *
+     * <p>Turning this off while {@code security.google.enabled} is also off leaves
+     * no way to sign in — {@link #warnIfNoAuthMethodEnabled()} shouts about that at
+     * startup rather than letting it be discovered at the login screen.
+     */
+    @Value("${security.password.enabled:true}")
+    private boolean passwordLoginEnabled;
+
+    @PostConstruct
+    void warnIfNoAuthMethodEnabled() {
+        if (!passwordLoginEnabled && !googleEnabled) {
+            log.error("security.password.enabled=false AND security.google.enabled=false — "
+                + "no sign-in method is available and nobody can log in. Enable one of them.");
+        } else if (!passwordLoginEnabled) {
+            log.info("Password sign-in is DISABLED (security.password.enabled=false); Google SSO only.");
+        }
+    }
+
     @Value("${security.google.client-id:}")
     private String googleClientId;
 
@@ -87,6 +116,23 @@ public class PasswordlessAuthService {
     @Transactional
     public AuthFlowResult loginWithPassword(String email, String password, String clientIp, String userAgent, String requestId) {
         String normalizedEmail = normalizeEmail(email);
+
+        // Checked before the rate limiter and before any credential comparison:
+        // when the password path is closed there is nothing to rate-limit and no
+        // secret to compare, and we must not leak whether the account exists.
+        if (!passwordLoginEnabled) {
+            securityEventService.log(SecurityEventService.EventRequest.builder()
+                .eventType(SecurityEventType.PASSWORD_LOGIN_FAILURE)
+                .outcome(SecurityEventOutcome.FAILURE)
+                .email(normalizedEmail)
+                .clientIp(clientIp)
+                .userAgent(userAgent)
+                .requestId(requestId)
+                .metadata(Map.of("reason", "password_login_disabled"))
+                .build());
+            return AuthFlowResult.invalid("Password sign-in is disabled. Please sign in with Google.");
+        }
+
         if (rateLimitEnabled) enforcePasswordRateLimit(normalizedEmail, clientIp);
 
         User user = normalizedEmail == null ? null : userRepository.findByEmailIgnoreCase(normalizedEmail).orElse(null);
@@ -292,12 +338,12 @@ public class PasswordlessAuthService {
         return authSessionService.findValidSessionByRefreshToken(tokenHash)
             .flatMap(session -> userRepository.findById(session.getUserId())
                 .map(user -> {
-                    Role role = user.getRoleEnum();
+                    String roleCode = user.getRoleCode();
                     return authSessionService.refreshSession(
                         rawRefreshToken,
                         user,
-                        role,
-                        permissionService.getEffectivePermissions(role),
+                        roleCode,
+                        permissionService.getEffectivePermissions(roleCode),
                         clientIp,
                         userAgent
                     );
@@ -531,11 +577,12 @@ public class PasswordlessAuthService {
         String requestId,
         boolean mfaVerified
     ) {
+        String roleCode = user.getRoleCode();
         Role role = user.getRoleEnum();
-        Set<Permission> permissions = permissionService.getEffectivePermissions(role);
+        Set<Permission> permissions = permissionService.getEffectivePermissions(roleCode);
         AuthSessionService.SessionAuthentication session = authSessionService.createSession(
             user,
-            role,
+            roleCode,
             permissions,
             clientIp,
             userAgent,
@@ -547,7 +594,7 @@ public class PasswordlessAuthService {
         user.setLastLoginAt(LocalDateTime.now());
         user.setLastLoginIp(clientIp);
         userRepository.save(user);
-        return AuthFlowResult.authenticated(user, role, permissions, session);
+        return AuthFlowResult.authenticated(user, role, roleCode, permissions, session);
     }
 
     private void markFailedOtp(AuthLoginChallenge challenge, User user, String clientIp, String userAgent, String requestId) {
@@ -746,7 +793,13 @@ public class PasswordlessAuthService {
         boolean mfaRequired,
         boolean mfaSetupRequired,
         User user,
+        /**
+         * The built-in role, or null when the user holds a custom role. Prefer
+         * {@link #roleCode()} — a null here does NOT mean "not authenticated".
+         */
         Role role,
+        /** The user's role code, built-in or custom. Non-null on a successful auth. */
+        String roleCode,
         Set<Permission> permissions,
         AuthSessionService.SessionAuthentication sessionAuthentication
     ) {
@@ -778,10 +831,22 @@ public class PasswordlessAuthService {
             Set<Permission> permissions,
             AuthSessionService.SessionAuthentication sessionAuthentication
         ) {
+            return authenticated(user, role, user != null ? user.getRoleCode() : null,
+                permissions, sessionAuthentication);
+        }
+
+        static AuthFlowResult authenticated(
+            User user,
+            Role role,
+            String roleCode,
+            Set<Permission> permissions,
+            AuthSessionService.SessionAuthentication sessionAuthentication
+        ) {
             return AuthFlowResult.builder()
                 .success(true)
                 .user(user)
                 .role(role)
+                .roleCode(roleCode)
                 .permissions(permissions)
                 .sessionAuthentication(sessionAuthentication)
                 .build();

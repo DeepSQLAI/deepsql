@@ -5,6 +5,7 @@ import com.dbaagent.model.SlowQueryHistory;
 import com.dbaagent.repository.ConnectionAnalyticsConfigRepository;
 import com.dbaagent.service.SlowQueryAnalyticsService;
 import com.dbaagent.service.SlowQueryDailyAnalysisService;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -21,6 +22,12 @@ import java.util.Map;
  * Read endpoints serve the per-query timeline, regressions, and per-customer
  * breakdown the UI / MCP / CLI consume. Write endpoints manage the
  * per-connection analytics config and trigger an on-demand analysis.
+ *
+ * <p><b>Authorization:</b> every endpoint here takes a caller-supplied connection id, so
+ * each one asserts access itself ({@code assertCanReadConnectionContent} for reads,
+ * {@code assertCanManageConnectionContent} for writes). {@code SecurityConfig} only
+ * requires an authenticated principal — nothing upstream inspects a connection id. See
+ * {@code ConnectionScopedAuthorizationSafetyTest}.
  */
 @RestController
 @RequestMapping("/slow-query-analytics")
@@ -31,11 +38,13 @@ public class SlowQueryAnalyticsController {
     private final SlowQueryAnalyticsService analyticsService;
     private final SlowQueryDailyAnalysisService dailyAnalysisService;
     private final ConnectionAnalyticsConfigRepository configRepository;
+    private final AccessControlService accessControlService;
 
     /** Every tracked query for a connection, as of the most recent analysis run. */
     @GetMapping("/{connectionId}/queries")
     public ResponseEntity<List<SlowQueryAnalyticsService.QuerySummary>> queries(
             @PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(analyticsService.listQueries(connectionId));
     }
 
@@ -44,6 +53,7 @@ public class SlowQueryAnalyticsController {
     public ResponseEntity<List<SlowQueryAnalyticsService.TimelinePoint>> timeline(
             @PathVariable String connectionId,
             @PathVariable String fingerprint) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(analyticsService.timeline(connectionId, fingerprint));
     }
 
@@ -56,6 +66,7 @@ public class SlowQueryAnalyticsController {
             @PathVariable String connectionId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate day,
             @RequestParam(required = false, defaultValue = "1.5") double minFactor) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(analyticsService.regressions(connectionId, day, minFactor));
     }
 
@@ -63,23 +74,63 @@ public class SlowQueryAnalyticsController {
     @GetMapping("/{connectionId}/customers")
     public ResponseEntity<List<SlowQueryAnalyticsService.CustomerSummary>> listCustomers(
             @PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(analyticsService.listCustomers(connectionId));
     }
 
-    /** Every slow query attributed to one customer, ranked by their mean exec time. */
-    @GetMapping("/{connectionId}/customer/{customerId}/queries")
-    public ResponseEntity<List<SlowQueryAnalyticsService.CustomerQueryRow>> queriesForCustomer(
+    /**
+     * Every slow query attributed to one customer, ranked by their mean exec time.
+     *
+     * <p>The customer id is a <b>query parameter</b>, not a path segment, because it is a
+     * literal value read out of the tenant column — application data, which can contain
+     * {@code /}, {@code ?} or {@code #}. Such an id is unreachable as a path segment under
+     * any encoding: raw, the slash splits the path; percent-encoded, Jetty rejects it with
+     * {@code 400 Ambiguous URI path separator}. Both were reproduced against this backend
+     * with the tenant value {@code acct/77?x=1}, whose rows were simply invisible in the
+     * By-Customer view.
+     */
+    @GetMapping("/{connectionId}/customer-queries")
+    public ResponseEntity<List<SlowQueryAnalyticsService.CustomerQueryRow>> customerQueries(
             @PathVariable String connectionId,
-            @PathVariable String customerId) {
+            @RequestParam String customerId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(analyticsService.queriesForCustomer(connectionId, customerId));
     }
 
     /** Literal-bearing samples for one (customer, query) pair — copyable SQL. */
+    @GetMapping("/{connectionId}/customer-query-samples")
+    public ResponseEntity<List<SlowQueryAnalyticsService.QuerySample>> customerQuerySamples(
+            @PathVariable String connectionId,
+            @RequestParam String customerId,
+            @RequestParam String fingerprint) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
+        return ResponseEntity.ok(
+            analyticsService.samplesForCustomerQuery(connectionId, customerId, fingerprint));
+    }
+
+    /**
+     * @deprecated superseded by {@link #customerQueries}; a customer id containing a
+     *     slash cannot be expressed here. Retained so existing clients keep working.
+     */
+    @Deprecated
+    @GetMapping("/{connectionId}/customer/{customerId}/queries")
+    public ResponseEntity<List<SlowQueryAnalyticsService.CustomerQueryRow>> queriesForCustomer(
+            @PathVariable String connectionId,
+            @PathVariable String customerId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
+        return ResponseEntity.ok(analyticsService.queriesForCustomer(connectionId, customerId));
+    }
+
+    /**
+     * @deprecated superseded by {@link #customerQuerySamples}; see above.
+     */
+    @Deprecated
     @GetMapping("/{connectionId}/customer/{customerId}/query/{fingerprint}/samples")
     public ResponseEntity<List<SlowQueryAnalyticsService.QuerySample>> samplesForCustomerQuery(
             @PathVariable String connectionId,
             @PathVariable String customerId,
             @PathVariable String fingerprint) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(
             analyticsService.samplesForCustomerQuery(connectionId, customerId, fingerprint));
     }
@@ -89,6 +140,7 @@ public class SlowQueryAnalyticsController {
     public ResponseEntity<List<SlowQueryAnalyticsService.QuerySample>> samples(
             @PathVariable String connectionId,
             @PathVariable String fingerprint) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(analyticsService.querySamples(connectionId, fingerprint));
     }
 
@@ -98,6 +150,7 @@ public class SlowQueryAnalyticsController {
             @PathVariable String connectionId,
             @PathVariable String fingerprint,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate day) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(analyticsService.customerBreakdown(connectionId, fingerprint, day));
     }
 
@@ -110,6 +163,7 @@ public class SlowQueryAnalyticsController {
     public ResponseEntity<List<SlowQueryAnalyticsService.TenantColumnSuggestion>> tenantColumnSuggestions(
             @PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             return ResponseEntity.ok(analyticsService.suggestTenantColumns(connectionId));
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
@@ -127,6 +181,7 @@ public class SlowQueryAnalyticsController {
      */
     @GetMapping("/{connectionId}/config")
     public ResponseEntity<ConnectionAnalyticsConfig> getConfig(@PathVariable String connectionId) {
+        accessControlService.assertCanReadConnectionContent(connectionId);
         return ResponseEntity.ok(analyticsService.effectiveConfig(connectionId));
     }
 
@@ -135,6 +190,7 @@ public class SlowQueryAnalyticsController {
     public ResponseEntity<ConnectionAnalyticsConfig> putConfig(
             @PathVariable String connectionId,
             @RequestBody ConnectionAnalyticsConfig body) {
+        accessControlService.assertCanManageConnectionContent(connectionId);
         ConnectionAnalyticsConfig cfg = configRepository.findById(connectionId)
             .orElseGet(() -> ConnectionAnalyticsConfig.builder()
                 .connectionId(connectionId)
@@ -163,6 +219,7 @@ public class SlowQueryAnalyticsController {
     @PostMapping("/{connectionId}/analyze-now")
     public ResponseEntity<Map<String, Object>> analyzeNow(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             SlowQueryHistory header = dailyAnalysisService.analyzeAndPersist(connectionId);
             if (header != null) {
                 return ResponseEntity.ok(Map.of(
@@ -206,6 +263,7 @@ public class SlowQueryAnalyticsController {
     @DeleteMapping("/{connectionId}/reset")
     public ResponseEntity<Map<String, Object>> reset(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             analyticsService.resetAnalytics(connectionId);
             return ResponseEntity.ok(Map.of("success", true, "connectionId", connectionId));
         } catch (org.springframework.web.server.ResponseStatusException e) {

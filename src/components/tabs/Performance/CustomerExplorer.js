@@ -13,6 +13,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Clock, Users, Copy, Check, X } from "lucide-react";
 import { slowQueryAnalyticsAPI } from "@/lib/api/client";
+import { QueryError } from "./components";
 import styles from "./CustomerExplorer.module.css";
 
 const fmtDuration = (v) => {
@@ -71,7 +72,10 @@ function QuerySamplesModal({ connectionId, customerId, customerName, fingerprint
         </div>
 
         {samplesQ.isLoading && <div className={styles.muted}>Loading samples…</div>}
-        {!samplesQ.isLoading && samples.length === 0 && (
+        {samplesQ.isError && (
+          <QueryError error={samplesQ.error} what="samples" className={styles.muted} />
+        )}
+        {!samplesQ.isLoading && !samplesQ.isError && samples.length === 0 && (
           <div className={styles.muted}>
             No literal-bearing samples captured for this customer + query yet.
             Slow-log ingestion gives the fullest coverage.
@@ -130,7 +134,10 @@ export default function CustomerExplorer({ connectionId }) {
             Customers {customers.length > 0 && <span>({customers.length})</span>}
           </div>
           {customersQ.isLoading && <div className={styles.muted}>Loading…</div>}
-          {!customersQ.isLoading && customers.length === 0 && (
+          {customersQ.isError && (
+            <QueryError error={customersQ.error} what="customers" className={styles.muted} />
+          )}
+          {!customersQ.isLoading && !customersQ.isError && customers.length === 0 && (
             <div className={styles.muted}>
               No customer-attributed slow queries yet. Configure the tenant
               column under Settings, then run an analysis.
@@ -193,7 +200,10 @@ export default function CustomerExplorer({ connectionId }) {
               {queriesQ.isLoading && (
                 <div className={styles.muted}>Loading queries…</div>
               )}
-              {!queriesQ.isLoading && queries.length === 0 && (
+              {queriesQ.isError && (
+                <QueryError error={queriesQ.error} what="queries" className={styles.muted} />
+              )}
+              {!queriesQ.isLoading && !queriesQ.isError && queries.length === 0 && (
                 <div className={styles.muted}>
                   No queries rolled up yet for this customer.
                 </div>

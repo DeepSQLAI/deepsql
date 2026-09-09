@@ -7,15 +7,20 @@ import com.dbaagent.llm.api.LlmCredentials;
 import com.dbaagent.llm.api.LlmErrorCategory;
 import com.dbaagent.llm.api.LlmNotConfiguredException;
 import com.dbaagent.llm.api.UnsupportedLlmProviderException;
+import com.dbaagent.model.LlmUsageRole;
+import com.dbaagent.service.llm.LlmUsageRecorder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.chat.metadata.Usage;
 import reactor.core.publisher.Flux;
 
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 
 /**
  * A {@link ChatModel} that resolves its credentials on every call through
@@ -52,24 +57,58 @@ public class RefreshableChatModel implements ChatModel {
     private final LlmConfigResolver resolver;
     private final LlmProviderRegistry registry;
 
+    /**
+     * Nullable so the accounting dependency stays optional. This class is constructed
+     * directly in tests and in {@code LlmConfig}; a hard dependency would make every
+     * existing construction site a compile error for a concern none of them care about.
+     */
+    private final LlmUsageRecorder usageRecorder;
+
     /** Serialises rebuilds only; the read path is a single lock-free volatile read. */
     private final ReentrantLock buildLock = new ReentrantLock();
     private volatile CachedDelegate cached;
 
     public RefreshableChatModel(LlmConfigResolver resolver, LlmProviderRegistry registry) {
+        this(resolver, registry, null);
+    }
+
+    public RefreshableChatModel(LlmConfigResolver resolver, LlmProviderRegistry registry,
+                                LlmUsageRecorder usageRecorder) {
         this.resolver = resolver;
         this.registry = registry;
+        this.usageRecorder = usageRecorder;
     }
 
     @Override
     public ChatResponse call(Prompt prompt) {
         CachedDelegate active = resolveDelegate();
         try {
-            return active.model().call(prompt);
+            return metered(active, () -> active.model().call(prompt));
         } catch (RuntimeException e) {
             if (shouldRetryWithEnvFallback(e, active.key())) {
-                return resolveDelegate().model().call(prompt);
+                CachedDelegate retry = resolveDelegate();
+                return metered(retry, () -> retry.model().call(prompt));
             }
+            throw e;
+        }
+    }
+
+    /**
+     * Runs a chat call and records what it cost.
+     *
+     * <p>A failed call is recorded too. Providers bill for prompt tokens on responses that
+     * error partway, and an operator investigating a spend spike caused by a retry loop
+     * needs to see the failures — a ledger holding only successes hides exactly the
+     * pathology it would be consulted about.
+     */
+    private ChatResponse metered(CachedDelegate active, Supplier<ChatResponse> call) {
+        long startedAt = System.nanoTime();
+        try {
+            ChatResponse response = call.get();
+            recordUsage(active, response, startedAt, null);
+            return response;
+        } catch (RuntimeException e) {
+            recordUsage(active, null, startedAt, e);
             throw e;
         }
     }
@@ -87,13 +126,63 @@ public class RefreshableChatModel implements ChatModel {
             CachedDelegate active = resolveDelegate();
             AtomicBoolean emitted = new AtomicBoolean(false);
             try {
-                return active.model().stream(prompt)
+                return meteredStream(active, active.model().stream(prompt)
                         .doOnNext(chunk -> emitted.set(true))
-                        .onErrorResume(e -> resumeStream(prompt, e, active.key(), emitted.get()));
+                        .onErrorResume(e -> resumeStream(prompt, e, active.key(), emitted.get())));
             } catch (RuntimeException e) {
-                return resumeStream(prompt, e, active.key(), false);
+                return meteredStream(active, resumeStream(prompt, e, active.key(), false));
             }
         });
+    }
+
+    /**
+     * Records one row for a whole stream, not one per chunk.
+     *
+     * <p>Usage on a stream arrives on a single late chunk — typically the last, after the
+     * provider has finished counting — while every earlier chunk carries either no
+     * metadata or a zero-filled {@link Usage}. Recording per chunk would write hundreds of
+     * rows for one call and inflate the call count enormously; summing across chunks would
+     * be worse, because providers that report cumulative running totals would have their
+     * final figure added on top of every partial. So the last non-zero usage seen wins, and
+     * exactly one row is written when the stream terminates.
+     *
+     * <p>{@code doFinally} rather than {@code doOnComplete}: a stream that errors or is
+     * cancelled partway still consumed prompt tokens, and a cancelled dashboard build is
+     * precisely the kind of silent spend an operator wants on the ledger.
+     */
+    private Flux<ChatResponse> meteredStream(CachedDelegate active, Flux<ChatResponse> source) {
+        if (usageRecorder == null) {
+            return source;
+        }
+        long startedAt = System.nanoTime();
+        AtomicReference<ChatResponse> lastWithUsage = new AtomicReference<>();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicBoolean recorded = new AtomicBoolean(false);
+
+        return source
+                .doOnNext(chunk -> {
+                    if (hasUsage(chunk)) {
+                        lastWithUsage.set(chunk);
+                    }
+                })
+                .doOnError(failure::set)
+                .doFinally(signal -> {
+                    // doFinally can fire once per subscription; a Flux that is retried or
+                    // resubscribed must not double-bill the same logical call.
+                    if (recorded.compareAndSet(false, true)) {
+                        Throwable error = failure.get();
+                        recordUsage(active, lastWithUsage.get(), startedAt,
+                                error instanceof RuntimeException re ? re : null);
+                    }
+                });
+    }
+
+    private static boolean hasUsage(ChatResponse chunk) {
+        if (chunk == null || chunk.getMetadata() == null) {
+            return false;
+        }
+        Usage usage = chunk.getMetadata().getUsage();
+        return usage != null && zeroIfNull(usage.getTotalTokens()) > 0;
     }
 
     /**
@@ -126,6 +215,75 @@ public class RefreshableChatModel implements ChatModel {
                     + "context can start — {}", e.getMessage());
             return ChatOptions.builder().build();
         }
+    }
+
+    /**
+     * Records one chat call, taking token counts from the response the provider returned.
+     *
+     * <p>The model name comes from the response metadata when the provider reports it and
+     * falls back to the configured model. Those can legitimately differ — an alias that
+     * resolves to a dated snapshot, for instance — and the served model is the one that
+     * was actually billed, so it wins.
+     *
+     * <p>Never throws. It runs inside the call path of every chat turn in the product;
+     * a defect here must not become a failed conversation.
+     */
+    private void recordUsage(CachedDelegate active, ChatResponse response,
+                             long startedAt, RuntimeException failure) {
+        if (usageRecorder == null) {
+            return;
+        }
+        try {
+            long latencyMs = (System.nanoTime() - startedAt) / 1_000_000L;
+            LlmCredentials key = active.key();
+
+            long prompt = 0;
+            long completion = 0;
+            long total = 0;
+            long cached = 0;
+            String model = key.getOrDefault("model", "unknown");
+
+            if (response != null && response.getMetadata() != null) {
+                Usage usage = response.getMetadata().getUsage();
+                if (usage != null) {
+                    prompt = zeroIfNull(usage.getPromptTokens());
+                    completion = zeroIfNull(usage.getCompletionTokens());
+                    total = zeroIfNull(usage.getTotalTokens());
+                    cached = zeroIfNullLong(usage.getCacheReadInputTokens());
+                }
+                String served = response.getMetadata().getModel();
+                if (served != null && !served.isBlank()) {
+                    model = served;
+                }
+            }
+
+            String errorCategory = failure == null ? null
+                    : String.valueOf(registry.chatProvider(key.providerId()).classify(failure));
+
+            usageRecorder.record(new LlmUsageRecorder.Call(
+                    LlmUsageRole.CHAT,
+                    key.providerId(),
+                    model,
+                    prompt,
+                    completion,
+                    total,
+                    cached,
+                    false,
+                    latencyMs,
+                    failure == null,
+                    errorCategory));
+        } catch (RuntimeException e) {
+            log.warn("RefreshableChatModel: could not record usage; the call was unaffected", e);
+        }
+    }
+
+    private static long zeroIfNull(Integer value) {
+        return value == null ? 0L : value.longValue();
+    }
+
+    /** Cache token accessors are {@code Long} in Spring AI 2.0, unlike prompt/completion. */
+    private static long zeroIfNullLong(Long value) {
+        return value == null ? 0L : value;
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────

@@ -13,7 +13,11 @@ const getApiBaseUrl = () => {
 export const API_BASE_URL = getApiBaseUrl();
 export const AUTH_CHANGE_EVENT = "deepsql-auth-change";
 
-const AUTH_PUBLIC_PATHS = ["/login", "/signup", "/activate"];
+// "/download" is reachable with no session on purpose: it is the public
+// desktop-client download page, linked from the marketing site by people who
+// do not have an account yet. Without it here, a logged-out visitor is bounced
+// to /login and never sees the installers.
+const AUTH_PUBLIC_PATHS = ["/login", "/signup", "/activate", "/download"];
 
 const isPublicAuthPath = (pathname = "") =>
   AUTH_PUBLIC_PATHS.some((prefix) => pathname.startsWith(prefix));
@@ -475,6 +479,47 @@ export const adminAPI = {
   },
 };
 
+// LLM usage and cost accounting (ADMIN only)
+export const llmUsageAPI = {
+  getSummary: async (days = 30) => {
+    const response = await apiClient.get("/api/admin/llm-usage/summary", {
+      params: { days },
+    });
+    return response.data;
+  },
+
+  getRecent: async ({ days = 30, page = 0, size = 50 } = {}) => {
+    const response = await apiClient.get("/api/admin/llm-usage/recent", {
+      params: { days, page, size },
+    });
+    return response.data;
+  },
+
+  purge: async (olderThanDays) => {
+    const response = await apiClient.delete("/api/admin/llm-usage/purge", {
+      params: { olderThanDays },
+    });
+    return response.data;
+  },
+
+  getPricing: async () => {
+    const response = await apiClient.get("/api/admin/llm-usage/pricing");
+    return response.data;
+  },
+
+  // A dotted name (gpt-5.4) travels fine in the path, but a slash cannot: Spring
+  // Security's StrictHttpFirewall rejects %2F with a bare 400 before the controller
+  // runs. Self-hosted ids look like meta-llama/Llama-3-8b, so those go in the body
+  // instead, against the pathless route.
+  updatePricing: async (model, rates) => {
+    const url = model.includes("/")
+      ? "/api/admin/llm-usage/pricing"
+      : `/api/admin/llm-usage/pricing/${encodeURIComponent(model)}`;
+    const response = await apiClient.put(url, { ...rates, model });
+    return response.data;
+  },
+};
+
 export const slackLinkAPI = {
   getCurrentLinkCode: async () => {
     const response = await apiClient.get('/api/slack/link/code')
@@ -559,6 +604,39 @@ export const permissionsAPI = {
    */
   getRoles: async () => {
     const response = await apiClient.get("/api/permissions/roles");
+    return response.data;
+  },
+
+  /**
+   * Create a custom role from a name plus an explicit permission list (ADMIN only).
+   */
+  createRole: async ({ name, description, permissions }) => {
+    const response = await apiClient.post("/api/permissions/roles", {
+      name,
+      description,
+      permissions,
+    });
+    return response.data;
+  },
+
+  /**
+   * Update a custom role (ADMIN only). Built-in roles are rejected by the backend —
+   * change those with an override instead.
+   */
+  updateRole: async (code, { name, description, permissions }) => {
+    const response = await apiClient.put(`/api/permissions/roles/${code}`, {
+      name,
+      description,
+      permissions,
+    });
+    return response.data;
+  },
+
+  /**
+   * Delete a custom role (ADMIN only). Refused while any user still holds it.
+   */
+  deleteRole: async (code) => {
+    const response = await apiClient.delete(`/api/permissions/roles/${code}`);
     return response.data;
   },
 
@@ -902,6 +980,14 @@ export const brainAPI = {
         params: { limit },
       },
     );
+    return response.data;
+  },
+  proposeNoteFromTurn: async (payload) => {
+    const response = await apiClient.post("/api/brain/notes/propose", payload);
+    return response.status === 204 ? null : response.data;
+  },
+  acceptNote: async (payload) => {
+    const response = await apiClient.post("/api/brain/notes/accept", payload);
     return response.data;
   },
   getKeyColumns: async (connectionId, params = {}) => {
@@ -2831,6 +2917,85 @@ export const retrievalAPI = {
   },
 };
 
+/**
+ * Dashboard workspaces — named groups of dashboards with their own member list.
+ * Visibility is connection access AND workspace membership; admins see all.
+ */
+export const dashboardWorkspacesAPI = {
+  listByConnection: async (connectionId) => {
+    const response = await apiClient.get(
+      `/api/dashboard-workspaces/connection/${connectionId}`,
+    );
+    return response.data;
+  },
+
+  create: async ({ connectionId, name, description, color }) => {
+    const response = await apiClient.post("/api/dashboard-workspaces", {
+      connectionId,
+      name,
+      description,
+      color,
+    });
+    return response.data;
+  },
+
+  get: async (id) => {
+    const response = await apiClient.get(`/api/dashboard-workspaces/${id}`);
+    return response.data;
+  },
+
+  update: async (id, updates) => {
+    const response = await apiClient.put(
+      `/api/dashboard-workspaces/${id}`,
+      updates,
+    );
+    return response.data;
+  },
+
+  remove: async (id) => {
+    const response = await apiClient.delete(`/api/dashboard-workspaces/${id}`);
+    return response.data;
+  },
+
+  listDashboards: async (id) => {
+    const response = await apiClient.get(
+      `/api/dashboard-workspaces/${id}/dashboards`,
+    );
+    return response.data;
+  },
+
+  listMembers: async (id) => {
+    const response = await apiClient.get(
+      `/api/dashboard-workspaces/${id}/members`,
+    );
+    return response.data;
+  },
+
+  addMember: async (id, { username, workspaceRole }) => {
+    const response = await apiClient.post(
+      `/api/dashboard-workspaces/${id}/members`,
+      { username, workspaceRole },
+    );
+    return response.data;
+  },
+
+  removeMember: async (id, username) => {
+    const response = await apiClient.delete(
+      `/api/dashboard-workspaces/${id}/members/${encodeURIComponent(username)}`,
+    );
+    return response.data;
+  },
+
+  // Move a dashboard into a workspace, or out of one with a null/empty workspaceId.
+  moveDashboard: async (dashboardId, workspaceId) => {
+    const response = await apiClient.put(
+      `/api/dashboard-workspaces/dashboards/${dashboardId}`,
+      { workspaceId: workspaceId || "" },
+    );
+    return response.data;
+  },
+};
+
 export const savedDashboardsAPI = {
   // Create a new saved dashboard
   createDashboard: async (dashboardData) => {
@@ -3674,7 +3839,8 @@ export const setupAPI = {
 
   /**
    * Returns current setup state: setupComplete, hasOrganizationInfo,
-   * hasConnections, hasLlmConfig. Public endpoint — no auth required.
+   * hasConnections, hasLlmConfig, googleEnabled, passwordLoginEnabled.
+   * Public endpoint — no auth required.
    */
   getStatus: async () => {
     const response = await apiClient.get("/api/setup/status");
@@ -3747,60 +3913,116 @@ export const slackDigestAPI = {
 };
 
 /**
+ * Digest preferences API — per-user digest configuration.
+ * Users manage their own preferences; admins can seed/view all.
+ */
+export const digestPreferencesAPI = {
+  // Current user's preferences
+  getMyPreferences: () =>
+    apiClient.get("/api/digest/preferences").then((r) => r.data),
+
+  createPreference: (data) =>
+    apiClient.post("/api/digest/preferences", data).then((r) => r.data),
+
+  updatePreference: (id, data) =>
+    apiClient.put(`/api/digest/preferences/${id}`, data).then((r) => r.data),
+
+  setEnabled: (id, enabled) =>
+    apiClient
+      .patch(`/api/digest/preferences/${id}/enabled`, { enabled })
+      .then((r) => r.data),
+
+  deletePreference: (id) =>
+    apiClient.delete(`/api/digest/preferences/${id}`).then((r) => r.data),
+
+  // Metadata
+  getPersonaTags: () =>
+    apiClient.get("/api/digest/preferences/persona-tags").then((r) => r.data),
+
+  getDeliveryMethods: () =>
+    apiClient
+      .get("/api/digest/preferences/delivery-methods")
+      .then((r) => r.data),
+
+  // Status
+  getStatus: () =>
+    apiClient.get("/api/digest/preferences/status").then((r) => r.data),
+
+  // Seed current user's preferences
+  seedForMe: () =>
+    apiClient.post("/api/digest/preferences/seed/me").then((r) => r.data),
+
+  // Admin: seed preview and execution
+  previewSeed: () =>
+    apiClient.get("/api/digest/preferences/admin/seed/preview").then((r) => r.data),
+
+  executeSeed: () =>
+    apiClient.post("/api/digest/preferences/admin/seed").then((r) => r.data),
+};
+
+/**
  * Slow-query analytics — the 30-day per-query time series, regressions,
  * and per-customer breakdown. Backed by /api/slow-query-analytics/**.
  */
 export const slowQueryAnalyticsAPI = {
   getQueries: (connectionId) =>
     apiClient
-      .get(`/api/slow-query-analytics/${connectionId}/queries`)
+      .get(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/queries`)
       .then((r) => r.data),
   getTimeline: (connectionId, fingerprint) =>
     apiClient
-      .get(`/api/slow-query-analytics/${connectionId}/timeline/${fingerprint}`)
+      .get(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/timeline/${encodeURIComponent(fingerprint)}`)
       .then((r) => r.data),
   getRegressions: (connectionId, minFactor = 1.5) =>
     apiClient
-      .get(`/api/slow-query-analytics/${connectionId}/regressions`, {
+      .get(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/regressions`, {
         params: { minFactor },
       })
       .then((r) => r.data),
   getCustomers: (connectionId, fingerprint, day = null) =>
     apiClient
       .get(
-        `/api/slow-query-analytics/${connectionId}/query/${fingerprint}/customers`,
+        `/api/slow-query-analytics/${encodeURIComponent(connectionId)}/query/${encodeURIComponent(fingerprint)}/customers`,
         { params: day ? { day } : {} },
       )
       .then((r) => r.data),
   getSamples: (connectionId, fingerprint) =>
     apiClient
-      .get(`/api/slow-query-analytics/${connectionId}/query/${fingerprint}/samples`)
+      .get(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/query/${encodeURIComponent(fingerprint)}/samples`)
       .then((r) => r.data),
   listCustomers: (connectionId) =>
     apiClient
-      .get(`/api/slow-query-analytics/${connectionId}/customers`)
+      .get(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/customers`)
       .then((r) => r.data),
+  // customerId is a literal value from the tenant column, so it is application data and
+  // may contain "/", "?" or "#". It cannot go in a path segment: raw, the slash splits
+  // the path; percent-encoded, Jetty answers 400 "Ambiguous URI path separator". Both
+  // were reproduced with the real tenant value `acct/77?x=1`, whose rows silently showed
+  // as "no queries rolled up yet". axios encodes `params` for us.
   getCustomerQueries: (connectionId, customerId) =>
     apiClient
-      .get(`/api/slow-query-analytics/${connectionId}/customer/${customerId}/queries`)
+      .get(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/customer-queries`, {
+        params: { customerId },
+      })
       .then((r) => r.data),
   getCustomerQuerySamples: (connectionId, customerId, fingerprint) =>
     apiClient
       .get(
-        `/api/slow-query-analytics/${connectionId}/customer/${customerId}/query/${fingerprint}/samples`,
+        `/api/slow-query-analytics/${encodeURIComponent(connectionId)}/customer-query-samples`,
+        { params: { customerId, fingerprint } },
       )
       .then((r) => r.data),
   getTenantColumnSuggestions: (connectionId) =>
     apiClient
-      .get(`/api/slow-query-analytics/${connectionId}/tenant-column-suggestions`)
+      .get(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/tenant-column-suggestions`)
       .then((r) => r.data),
   getConfig: (connectionId) =>
     apiClient
-      .get(`/api/slow-query-analytics/${connectionId}/config`)
+      .get(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/config`)
       .then((r) => r.data),
   putConfig: (connectionId, body) =>
     apiClient
-      .put(`/api/slow-query-analytics/${connectionId}/config`, body)
+      .put(`/api/slow-query-analytics/${encodeURIComponent(connectionId)}/config`, body)
       .then((r) => r.data),
   analyzeNow: (connectionId) =>
     apiClient

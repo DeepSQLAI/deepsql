@@ -254,11 +254,28 @@ export default function SuggestionsQueueTab({ connectionId }) {
       { connectionId, ids: selectedIds, decision },
       {
         onSuccess: (data) => {
-          const succeeded = data?.succeeded ?? selectedIds.length
+          const succeeded = data?.succeeded ?? 0
           const requested = data?.requested ?? selectedIds.length
-          setBulkSuccess(
-            `${decision === 'APPROVED' ? 'Approved' : 'Rejected'} ${succeeded} of ${requested}`,
-          )
+          const failed = data?.failed ?? Math.max(0, requested - succeeded)
+          const verb = decision === 'APPROVED' ? 'Approved' : 'Rejected'
+          const summary = `${verb} ${succeeded} of ${requested}`
+          if (failed > 0 || succeeded === 0) {
+            const details = Array.isArray(data?.failures)
+              ? data.failures
+                  .slice(0, 3)
+                  .map((f) => f?.error || f?.id)
+                  .filter(Boolean)
+                  .join(' · ')
+              : ''
+            setBulkError(
+              details
+                ? `${summary}. ${failed} failed: ${details}`
+                : `${summary}. ${failed} failed — check server logs for details.`,
+            )
+            setBulkSuccess(null)
+          } else {
+            setBulkSuccess(summary)
+          }
           setSelected(new Set())
         },
         onError: (err) => {
@@ -279,6 +296,12 @@ export default function SuggestionsQueueTab({ connectionId }) {
             return next
           })
           if (pinnedId === id) setPinnedId(null)
+          setBulkError(null)
+          setBulkSuccess(decision === 'APPROVED' ? 'Approved 1 suggestion' : 'Rejected 1 suggestion')
+        },
+        onError: (err) => {
+          setBulkSuccess(null)
+          setBulkError(err?.response?.data?.error || err?.message || 'Decision failed')
         },
       },
     )

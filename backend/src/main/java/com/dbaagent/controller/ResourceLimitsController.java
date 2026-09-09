@@ -2,6 +2,7 @@ package com.dbaagent.controller;
 
 import com.dbaagent.model.ResourceLimits;
 import com.dbaagent.repository.ResourceLimitsRepository;
+import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +15,12 @@ import java.util.UUID;
 /**
  * Resource Limits Configuration Controller
  * Manages capacity limits for Sentinel-DBA analytics
+ *
+ * <p><b>Authorization:</b> every endpoint here takes a caller-supplied connection id, so
+ * each one asserts access itself ({@code assertCanReadConnectionContent} for reads,
+ * {@code assertCanManageConnectionContent} for writes). {@code SecurityConfig} only
+ * requires an authenticated principal — nothing upstream inspects a connection id. See
+ * {@code ConnectionScopedAuthorizationSafetyTest}.
  */
 @RestController
 @RequestMapping("/resource-limits")
@@ -23,6 +30,7 @@ import java.util.UUID;
 public class ResourceLimitsController {
 
     private final ResourceLimitsRepository resourceLimitsRepository;
+    private final AccessControlService accessControlService;
 
     /**
      * GET /api/resource-limits/{connectionId}
@@ -31,6 +39,7 @@ public class ResourceLimitsController {
     @GetMapping("/{connectionId}")
     public ResponseEntity<?> getResourceLimits(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanReadConnectionContent(connectionId);
             log.info("Fetching resource limits for connection: {}", connectionId);
 
             var limits = resourceLimitsRepository.findByConnectionId(connectionId);
@@ -61,6 +70,7 @@ public class ResourceLimitsController {
     @PostMapping
     public ResponseEntity<?> saveResourceLimits(@RequestBody ResourceLimitsRequest request) {
         try {
+            accessControlService.assertCanManageConnectionContent(request.getConnectionId());
             log.info("Saving resource limits for connection: {}", request.getConnectionId());
 
             // Check if limits already exist
@@ -120,6 +130,7 @@ public class ResourceLimitsController {
     @DeleteMapping("/{connectionId}")
     public ResponseEntity<?> deleteResourceLimits(@PathVariable String connectionId) {
         try {
+            accessControlService.assertCanManageConnectionContent(connectionId);
             log.info("Deleting resource limits for connection: {}", connectionId);
 
             resourceLimitsRepository.findByConnectionId(connectionId)

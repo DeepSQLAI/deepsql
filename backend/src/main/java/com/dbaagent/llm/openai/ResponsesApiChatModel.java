@@ -9,6 +9,7 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
+import org.springframework.ai.chat.metadata.DefaultUsage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -252,7 +253,7 @@ public class ResponsesApiChatModel implements ChatModel {
 
     // -- Request building --
 
-    private String buildRequestBody(Prompt prompt, boolean stream) {
+    String buildRequestBody(Prompt prompt, boolean stream) {
         ObjectNode body = objectMapper.createObjectNode();
         body.put("model", model);
         body.put("stream", stream);
@@ -263,6 +264,15 @@ public class ResponsesApiChatModel implements ChatModel {
             effectiveTemperature = prompt.getOptions().getTemperature();
         }
         body.put("temperature", effectiveTemperature);
+
+        // Chat Completions omits usage from a stream unless asked; the Responses API
+        // reports it on its completion event either way. Without this, a streamed turn is
+        // unbillable — the tokens were spent and nothing says how many.
+        if (stream && !useResponsesApi) {
+            ObjectNode streamOptions = objectMapper.createObjectNode();
+            streamOptions.put("include_usage", true);
+            body.set("stream_options", streamOptions);
+        }
 
         if (useResponsesApi) {
             buildResponsesApiBody(prompt, body);
@@ -374,8 +384,60 @@ public class ResponsesApiChatModel implements ChatModel {
         return "";
     }
 
-    private ChatResponseMetadata buildMetadata(JsonNode usage) {
-        return ChatResponseMetadata.builder().build();
+    /**
+     * Carries the provider's token counts onto the response.
+     *
+     * <p>This used to return empty metadata and drop {@code usage} on the floor, which
+     * cost nothing while nobody read it and became a silent zero the moment usage
+     * accounting started summing it — every chat row recorded 0 tokens and $0.00 against
+     * a real, billed call.
+     *
+     * <p>The two API shapes name the same numbers differently, and the difference is not
+     * cosmetic: Responses uses {@code input_tokens}/{@code output_tokens}, Chat
+     * Completions uses {@code prompt_tokens}/{@code completion_tokens}. Both are read
+     * rather than branching on {@code useResponsesApi}, so a mixed or proxied deployment
+     * cannot report zeros just because it answered in the other dialect.
+     *
+     * <p>Package-private as a test seam, like {@link #buildHttpRequest}: it lets both
+     * vendor payload shapes be asserted without a live call.
+     */
+    ChatResponseMetadata buildMetadata(JsonNode usage) {
+        if (usage == null || usage.isMissingNode() || !usage.isObject()) {
+            return ChatResponseMetadata.builder().build();
+        }
+
+        Integer prompt = firstInt(usage, "prompt_tokens", "input_tokens");
+        Integer completion = firstInt(usage, "completion_tokens", "output_tokens");
+        Integer total = firstInt(usage, "total_tokens");
+        if (total == null) {
+            total = (prompt == null ? 0 : prompt) + (completion == null ? 0 : completion);
+        }
+
+        // Cached input is billed below fresh input, so it is read where reported. Both
+        // dialects nest it, under different parents.
+        Long cachedRead = null;
+        JsonNode details = usage.path("prompt_tokens_details");
+        if (details.isMissingNode() || !details.isObject()) {
+            details = usage.path("input_tokens_details");
+        }
+        if (details.isObject() && details.hasNonNull("cached_tokens")) {
+            cachedRead = details.get("cached_tokens").asLong();
+        }
+
+        return ChatResponseMetadata.builder()
+                .usage(new DefaultUsage(prompt, completion, total, null, cachedRead, null))
+                .build();
+    }
+
+    /** First present, integral field among {@code names}, or null when none is reported. */
+    private static Integer firstInt(JsonNode node, String... names) {
+        for (String name : names) {
+            JsonNode field = node.path(name);
+            if (!field.isMissingNode() && field.isNumber()) {
+                return field.asInt();
+            }
+        }
+        return null;
     }
 
     // -- Streaming --
@@ -424,6 +486,15 @@ public class ResponsesApiChatModel implements ChatModel {
                             sink.next(new ChatResponse(
                                     List.of(new Generation(new AssistantMessage(delta)))));
                         }
+
+                        // Usage arrives on its own late event, carrying no text. Emitted as
+                        // a text-free chunk so accounting can read it; consumers concatenate
+                        // deltas, so an empty generation adds nothing to the answer.
+                        ChatResponseMetadata usage = extractStreamUsage(data);
+                        if (usage != null) {
+                            sink.next(new ChatResponse(
+                                    List.of(new Generation(new AssistantMessage(""))), usage));
+                        }
                     }
                 }
                 sink.complete();
@@ -442,6 +513,41 @@ public class ResponsesApiChatModel implements ChatModel {
                 sink.error(new RuntimeException("Streaming failed", e));
                 return;
             }
+        }
+    }
+
+    /**
+     * Token counts from a streaming event, or null when this event carries none.
+     *
+     * <p>Both dialects report usage exactly once, late, on an event whose other fields are
+     * empty: Chat Completions sends a final chunk whose {@code choices} array is empty and
+     * whose {@code usage} is populated (only when {@code stream_options.include_usage} was
+     * requested), while the Responses API nests it under
+     * {@code response.usage} on its {@code response.completed} event.
+     *
+     * <p>A parse failure returns null rather than throwing. This runs per streamed event on
+     * the live answer path; an unexpected shape must cost the usage row, never the reply.
+     */
+    ChatResponseMetadata extractStreamUsage(String data) {
+        try {
+            JsonNode root = objectMapper.readTree(data);
+            JsonNode usage = root.path("usage");
+            if (usage.isMissingNode() || !usage.isObject()) {
+                usage = root.path("response").path("usage");
+            }
+            if (usage.isMissingNode() || !usage.isObject()) {
+                return null;
+            }
+            ChatResponseMetadata metadata = buildMetadata(usage);
+            // buildMetadata returns empty metadata for a shape it did not recognise;
+            // emitting that would add a chunk that says nothing.
+            return metadata.getUsage() == null
+                    || metadata.getUsage().getTotalTokens() == null
+                    || metadata.getUsage().getTotalTokens() == 0
+                    ? null : metadata;
+        } catch (Exception e) {
+            log.debug("Could not read usage from a streamed event", e);
+            return null;
         }
     }
 

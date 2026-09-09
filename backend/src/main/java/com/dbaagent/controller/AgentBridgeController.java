@@ -59,7 +59,7 @@ public class AgentBridgeController {
         Map<String, Object> response = new HashMap<>();
         response.put("profile", bootstrap.profile());
         response.put("username", username);
-        boolean mcpAuthOk = agentBridgeService.probeMcpAuth(bootstrap.token());
+        boolean mcpAuthOk = agentBridgeService.probeMcpAuth(bootstrap.token(), username);
         response.put("mcpAuthOk", mcpAuthOk);
         if (!mcpAuthOk) {
             response.put("mcpAuthError", "The DeepSQL Agent could not authenticate against this API with its "

@@ -6,110 +6,104 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Enumeration of user roles in the system.
- * Roles are hierarchical: each role inherits permissions from lower roles.
+ * Built-in user roles.
  *
- * Hierarchy (lowest to highest):
- *   DEVELOPER (0) → ADMIN (1)
+ * <p>These are <em>not</em> a hierarchy. The old model ranked DEVELOPER below ADMIN and
+ * compared roles with {@code ordinal()}; the current roles deliberately overlap without
+ * nesting — DATA_ENGINEER can open Dashboards but not Digest, DEVELOPER can open Digest
+ * but cannot edit connection settings — so there is no ordering to compare. Every
+ * authorization question is "does this role hold permission X", answered by
+ * {@link Permission#isGrantedByDefaultTo} and, with overrides applied, by
+ * {@code PermissionService}.
  *
- * Permission assignment works via Permission.defaultMinRole:
- *   - Permission with defaultMinRole=DEVELOPER → granted to DEVELOPER, ADMIN
- *   - Permission with defaultMinRole=ADMIN → granted to ADMIN only
- *
- * This can be overridden via RolePermissionOverride for exceptions.
+ * <p>Roles beyond these are defined at runtime as {@link CustomRole} rows. A user's
+ * {@code role} column holds either one of these names or a custom role's code, which is
+ * why {@link #fromString} returns null for anything unrecognised rather than silently
+ * downgrading to DEVELOPER — a custom role name must not be mistaken for a built-in one.
  */
 public enum Role {
-    /**
-     * DEVELOPER: Default product user.
-     * Can use Chat and the SQL Editor.
-     */
-    DEVELOPER("Access to Chat and the SQL Editor"),
+    /** Full access to every product area and all administrative controls. */
+    ADMIN("Admin", "Full access to all product areas and administrative controls"),
 
-    /**
-     * ADMIN: Full access.
-     * Inherits all DEVELOPER permissions plus access to all product areas and admin controls.
-     */
-    ADMIN("Access to all product areas and administrative controls");
+    /** All menu items and connection settings, but not user creation. */
+    DBA("DBA", "All product areas and connection settings, except user management"),
 
+    /** Agent, Dashboards, and the SQL Editor. */
+    DATA_ENGINEER("Data Engineer", "Agent, Dashboards, and the SQL Editor"),
+
+    /** Agent, Digest, Dashboards, Performance, and the SQL Editor. */
+    DEVELOPER("Developer", "Agent, Digest, Dashboards, Performance, and the SQL Editor");
+
+    private final String displayName;
     private final String description;
 
-    Role(String description) {
+    Role(String displayName, String description) {
+        this.displayName = displayName;
         this.description = description;
+    }
+
+    public String getDisplayName() {
+        return displayName;
     }
 
     public String getDescription() {
         return description;
     }
 
-    /**
-     * Get the default permissions for this role based on hierarchy.
-     * A role gets all permissions where permission.defaultMinRole <= this role.
-     */
+    /** The permissions this role holds by default, before any override is applied. */
     public Set<Permission> getDefaultPermissions() {
         return Arrays.stream(Permission.values())
             .filter(p -> p.isGrantedByDefaultTo(this))
             .collect(Collectors.toCollection(() -> EnumSet.noneOf(Permission.class)));
     }
 
-    /**
-     * Get all permissions for this role.
-     * Alias for getDefaultPermissions() for simpler API usage.
-     */
+    /** Alias for {@link #getDefaultPermissions()}. */
     public Set<Permission> getPermissions() {
         return getDefaultPermissions();
     }
 
-    /**
-     * Check if this role has a permission by default (without considering overrides).
-     */
+    /** Whether this role holds the permission by default (ignores overrides). */
     public boolean hasPermissionByDefault(Permission permission) {
-        return permission.isGrantedByDefaultTo(this);
+        return permission != null && permission.isGrantedByDefaultTo(this);
     }
 
-    /**
-     * Check if this role has a specific permission.
-     * Alias for hasPermissionByDefault() for simpler API usage.
-     */
+    /** Alias for {@link #hasPermissionByDefault}. */
     public boolean hasPermission(Permission permission) {
         return hasPermissionByDefault(permission);
     }
 
-    /**
-     * Check if this role is at or above another role in the hierarchy.
-     * Used for permission inheritance.
-     */
-    public boolean isAtLeast(Role other) {
-        return this.ordinal() >= other.ordinal();
+    public boolean isAdmin() {
+        return this == ADMIN;
     }
 
     /**
-     * Check if this role is strictly above another role in the hierarchy.
-     */
-    public boolean isAbove(Role other) {
-        return this.ordinal() > other.ordinal();
-    }
-
-    /**
-     * Get a role by name, case-insensitive.
-     * Legacy roles collapse into DEVELOPER for backward compatibility.
+     * Resolve a built-in role by name, case-insensitive.
+     *
+     * <p>Returns {@code null} when the name is not a built-in role — the caller is then
+     * expected to look for a {@link CustomRole} with that code. Legacy role names that
+     * predate this enum collapse into DEVELOPER, which is what installs upgrading from
+     * the two-role model carry in their {@code users.role} column.
      */
     public static Role fromString(String roleName) {
         if (roleName == null || roleName.isBlank()) {
-            return DEVELOPER;
+            return null;
         }
         return switch (roleName.trim().toUpperCase()) {
             case "ADMIN" -> ADMIN;
+            case "DBA" -> DBA;
+            case "DATA_ENGINEER", "DATA-ENGINEER", "DATAENGINEER" -> DATA_ENGINEER;
             case "DEVELOPER", "EDITOR", "VIEWER", "USER" -> DEVELOPER;
-            default -> DEVELOPER;
+            default -> null;
         };
     }
 
-    /**
-     * Get all roles at or above the given minimum role.
-     */
-    public static Set<Role> getRolesAtOrAbove(Role minRole) {
-        return Arrays.stream(values())
-            .filter(r -> r.isAtLeast(minRole))
-            .collect(Collectors.toSet());
+    /** As {@link #fromString}, but falls back to DEVELOPER instead of returning null. */
+    public static Role fromStringOrDefault(String roleName) {
+        Role role = fromString(roleName);
+        return role != null ? role : DEVELOPER;
+    }
+
+    public static boolean isBuiltIn(String roleName) {
+        return fromString(roleName) != null;
     }
 }

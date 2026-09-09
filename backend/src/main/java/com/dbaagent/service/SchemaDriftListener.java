@@ -78,13 +78,14 @@ public class SchemaDriftListener {
             // Delete table-level doc (if AI-generated). Now also cascade
             // the embedding so the RAG store doesn't keep returning hits
             // for a table that no longer exists.
+            // Iterate: the logical key was not unique before V116, so a legacy
+            // install can hold more than one row here and an Optional finder
+            // would throw instead of cleaning either of them up.
             schemaDocRepo.findByConnectionIdAndObjectTypeAndObjectName(
                 connectionId, SchemaDocumentation.DocumentationType.TABLE, canonical)
-                .ifPresent(doc -> {
-                    if (doc.getSource() == DocumentationSource.AI_GENERATED) {
-                        deleteWithEmbedding(doc, "dropped table " + canonical);
-                    }
-                });
+                .stream()
+                .filter(doc -> doc.getSource() == DocumentationSource.AI_GENERATED)
+                .forEach(doc -> deleteWithEmbedding(doc, "dropped table " + canonical));
 
             // Delete column-level docs for this table (if AI-generated)
             var columnDocs = schemaDocRepo.findByConnectionIdAndParentObject(connectionId, canonical);
