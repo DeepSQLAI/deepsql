@@ -67,3 +67,24 @@ export function useDeleteConnection() {
     },
   })
 }
+
+/**
+ * Pin or unpin a connection as this user's default.
+ *
+ * The `pinned` flag rides the connection list response, so invalidating that one key
+ * updates every surface that shows connections — the sidebar switcher included —
+ * without a second request.
+ */
+export function useSetConnectionPin() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ connectionId, pinned }) =>
+      pinned
+        ? connectionAPI.pinConnection(connectionId)
+        : connectionAPI.unpinConnection(connectionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.connections.all })
+    },
+  })
+}

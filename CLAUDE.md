@@ -498,6 +498,51 @@ so "View as" resolves membership as the target user).
   "authentication is not authorization" trap `BrainController` documents — there is still
   no filter doing it for you.
 
+### Default connection (pinning)
+
+A user can pin one connection as their default, from the pin column in **Manage
+Connections** or the pin toggle in the sidebar connection switcher.
+
+- **The pin is per user, not per connection.** `connection_pin` keys on username with a
+  unique constraint (`V120__create_connection_pin.sql`; applied by `ddl-auto` from the
+  `ConnectionPin` entity — verified on a scratch database, the table and its unique index
+  are created on boot). A column on `database_connection` would have been wrong twice
+  over: a connection shared through `connection_access_grant` would let one user's choice
+  decide what everyone else opens on, and a shared connection is `canManageConfig=false`
+  for its recipients, so exactly the people who most want a default could not set one.
+- **One pin per user is the point.** `ConnectionPinService.pin` moves the existing row
+  rather than inserting a second; the unique constraint is the backstop, and a losing
+  concurrent insert re-reads and updates instead of surfacing a 500.
+- **`PUT|DELETE /connections/{id}/pin` are gated on `assertCanUseConnection`**, not
+  `assertCanManageConnectionConfig` — choosing where you land is a preference, not a
+  change to the connection. Verified live: a DEVELOPER holding only a grant on a
+  connection (`canManageConfig: false`) pins it and gets 200, while the same user pinning
+  a connection they hold no grant on gets **403, not 500** — the `ResponseStatusException`
+  rethrow before the catch-all is doing its job.
+- **Unpin is scoped to the connection named.** A stale click in a background tab must not
+  clear a pin the user has since moved elsewhere.
+- **`GET /connections` carries `pinned` per caller**, so no surface needs a second
+  request, and two users listing the same shared connection see different values —
+  confirmed live. `deleteConnection` clears every pin on the connection alongside its
+  grants.
+- **`ConnectionScopedAuthorizationSafetyTest` flags `GET /connections` now**, because the
+  handler resolves the caller's *pinned* connection id and the scanner matches
+  `(?i)connection_?id` anywhere in a handler body. That endpoint takes no arguments at all
+  — it returns whatever `getConnectionsForUser(username, isAdmin)` gives — so it is in
+  `AUTHORIZED_ELSEWHERE`, and `connectionListingTakesNoCallerSuppliedId` re-derives that
+  claim so the exemption cannot rot into cover for a real gap. Do not resolve this by
+  adding a meaningless assert, and do not weaken the scanner.
+- **The pin must beat an already-selected connection, not just an empty one.**
+  `useDashboardStore` persists `connectionId`, so after a reload something is always
+  selected — the original auto-select ran only when nothing was. `useConnectionManager`
+  therefore applies the pin once per page load (`pinAppliedThisLoad`, module scope, reset
+  by `resetConnectionPinApplied()` in the auth reset). Module scope and not a ref: the
+  hook is called from a dozen sections, and a per-instance guard would let a
+  later-mounted section yank the user back to the pin after they deliberately switched.
+  Switching mid-session still sticks; the pin re-applies on the next load.
+- Pinned connections sort first in `useConnectionManager`, so every consumer — the sidebar
+  switcher included — shows the default at the top.
+
 ### Admin profile switch
 Admins can **View as** a sub-user from the top-right of the home layout (`ProfileSwitch`) to verify connection ACLs, chat/editor policies, and role-gated nav.
 

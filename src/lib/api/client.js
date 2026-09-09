@@ -754,6 +754,21 @@ export const connectionAPI = {
     return response.data;
   },
 
+  // Pin a connection as this user's default. Per user, not per connection — the
+  // backend keys the pin on the caller, so pinning a shared connection does not
+  // change what anyone else opens on.
+  pinConnection: async (connectionId) => {
+    const response = await apiClient.put(`/api/connections/${connectionId}/pin`);
+    return response.data;
+  },
+
+  unpinConnection: async (connectionId) => {
+    const response = await apiClient.delete(
+      `/api/connections/${connectionId}/pin`,
+    );
+    return response.data;
+  },
+
   getInitStatus: async (connectionId) => {
     const response = await apiClient.get(
       `/api/connections/${connectionId}/init-status`,

@@ -9,6 +9,7 @@ import com.dbaagent.model.SchemaDocumentation;
 import com.dbaagent.repository.ConnectionInitHistoryRepository;
 import com.dbaagent.repository.ConnectionInitStatusRepository;
 import com.dbaagent.repository.SchemaDocumentationRepository;
+import com.dbaagent.service.ConnectionPinService;
 import com.dbaagent.service.ConnectionService;
 import com.dbaagent.service.scheduler.BrainInitSchedulerService;
 import com.dbaagent.service.scheduler.BrainJobsService;
@@ -45,6 +46,7 @@ public class ConnectionController {
     private final AccessControlService accessControlService;
     private final ConnectionAccessService connectionAccessService;
     private final com.dbaagent.repository.ConnectionAccessGrantRepository connectionAccessGrantRepository;
+    private final ConnectionPinService connectionPinService;
 
     @PostMapping("/test")
     public ResponseEntity<Map<String, Object>> testConnection(@RequestBody ConnectionRequest request) {
@@ -429,14 +431,64 @@ public class ConnectionController {
             String username = accessControlService.getCurrentUsername();
             boolean isAdmin = accessControlService.isCurrentUserAdmin();
             List<DatabaseConnection> connections = credentialService.getConnectionsForUser(username, isAdmin);
+            // One lookup for the whole list rather than one per row.
+            String pinnedId = connectionPinService.pinnedConnectionId(username).orElse(null);
             List<ConnectionSummaryResponse> decryptedConnections = connections.stream()
-                .map(conn -> toSummary(conn, username, isAdmin))
+                .map(conn -> toSummary(conn, username, isAdmin, pinnedId))
                 .toList();
             return ResponseEntity.ok(decryptedConnections);
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    /**
+     * Pin this connection as the caller's default, replacing any connection they had
+     * pinned before.
+     *
+     * <p>Gated on {@code assertCanUseConnection} rather than
+     * {@code assertCanManageConnectionConfig}: choosing which database you land on is a
+     * personal preference, not a change to the connection, and a shared connection is
+     * config-read-only for its recipients. Requiring manage rights would mean the people
+     * who most want a default — the ones who were granted exactly one connection —
+     * could not set one.
+     */
+    @PutMapping("/{id}/pin")
+    public ResponseEntity<Map<String, Object>> pinConnection(@PathVariable String id) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            accessControlService.assertCanUseConnection(id);
+            connectionPinService.pin(accessControlService.requireCurrentUsername(), id);
+            response.put("success", true);
+            response.put("pinned", true);
+            return ResponseEntity.ok(response);
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("message", "Failed to pin connection: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+
+    /** Clear the caller's default, if this connection is the one currently pinned. */
+    @DeleteMapping("/{id}/pin")
+    public ResponseEntity<Map<String, Object>> unpinConnection(@PathVariable String id) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            accessControlService.assertCanUseConnection(id);
+            connectionPinService.unpin(accessControlService.requireCurrentUsername(), id);
+            response.put("success", true);
+            response.put("pinned", false);
+            return ResponseEntity.ok(response);
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("message", "Failed to unpin connection: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
         }
     }
 
@@ -447,6 +499,7 @@ public class ConnectionController {
             accessControlService.assertCanManageConnectionConfig(id);
             connectionService.closeConnectionPool(id);
             connectionAccessService.deleteAllGrantsForConnection(id);
+            connectionPinService.clearPinsForConnection(id);
             credentialService.deleteConnection(id);
             response.put("success", true);
             response.put("message", "Connection deleted successfully");
@@ -781,7 +834,7 @@ public class ConnectionController {
         }
     }
 
-    private ConnectionSummaryResponse toSummary(DatabaseConnection conn, String username, boolean isAdmin) {
+    private ConnectionSummaryResponse toSummary(DatabaseConnection conn, String username, boolean isAdmin, String pinnedConnectionId) {
         ConnectionSummaryResponse summary = new ConnectionSummaryResponse();
         try {
             ConnectionRequest decrypted = credentialService.getDecryptedConnection(conn.getId());
@@ -821,6 +874,7 @@ public class ConnectionController {
         summary.setAccessLevel(resolved.getEffectiveAccess().name());
         summary.setCanManageConfig(resolved.canManageConfig());
         summary.setCanManageContent(resolved.canManageContent());
+        summary.setPinned(conn.getId() != null && conn.getId().equals(pinnedConnectionId));
         return summary;
     }
 
