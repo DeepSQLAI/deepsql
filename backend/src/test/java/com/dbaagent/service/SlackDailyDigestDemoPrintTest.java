@@ -72,6 +72,7 @@ class SlackDailyDigestDemoPrintTest {
     @Mock private AuthLoginChallengeRepository authLoginChallengeRepository;
     @Mock private IndexAdvisorService indexAdvisorService;
     @Mock private IndexRecommendationService indexRecommendationService;
+    @Mock private com.dbaagent.repository.UserDigestPreferenceRepository userDigestPreferenceRepository;
 
     private SlackDailyDigestService service;
 
@@ -87,7 +88,7 @@ class SlackDailyDigestDemoPrintTest {
             slackUserLinkService,
             lockContentionRepository, queryFingerprintRepository, databaseEventRepository,
             connectionAccessGrantRepository, authLoginChallengeRepository, indexAdvisorService,
-            indexRecommendationService
+            indexRecommendationService, userDigestPreferenceRepository
         );
     }
 
