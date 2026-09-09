@@ -3,11 +3,14 @@ package com.dbaagent.controller;
 import com.dbaagent.model.DigestDeliveryMethod;
 import com.dbaagent.model.PersonaTag;
 import com.dbaagent.model.UserDigestPreference;
+import com.dbaagent.service.DigestPreferenceSeedService;
 import com.dbaagent.service.security.AccessControlService;
 import com.dbaagent.service.UserDigestPreferenceService;
+import com.dbaagent.service.SlackDailyDigestService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -27,6 +30,8 @@ public class DigestPreferenceController {
 
     private final UserDigestPreferenceService preferenceService;
     private final AccessControlService accessControlService;
+    private final DigestPreferenceSeedService seedService;
+    private final SlackDailyDigestService digestService;
 
     /**
      * Get the current user's digest preferences.
@@ -44,9 +49,23 @@ public class DigestPreferenceController {
     public ResponseEntity<UserDigestPreference> createPreference(@RequestBody CreatePreferenceRequest request) {
         String username = accessControlService.requireCurrentUsername();
 
-        DigestDeliveryMethod method = request.deliveryMethod != null
-            ? DigestDeliveryMethod.fromString(request.deliveryMethod)
-            : DigestDeliveryMethod.SLACK_DM;
+        DigestDeliveryMethod method;
+        if (request.deliveryMethod == null || request.deliveryMethod.isBlank()) {
+            method = DigestDeliveryMethod.SLACK_DM;
+        } else {
+            method = DigestDeliveryMethod.fromString(request.deliveryMethod);
+            if (method == null) {
+                throw new IllegalArgumentException("Unknown delivery method: " + request.deliveryMethod);
+            }
+        }
+
+        if (method == DigestDeliveryMethod.EMAIL) {
+            throw new IllegalArgumentException("Email digest delivery is not available yet");
+        }
+
+        if (request.connectionId != null && !request.connectionId.isBlank()) {
+            accessControlService.assertCanReadConnectionContent(request.connectionId);
+        }
 
         PersonaTag persona = request.personaTag != null
             ? PersonaTag.fromString(request.personaTag)
@@ -159,10 +178,10 @@ public class DigestPreferenceController {
      */
     @GetMapping("/delivery-methods")
     public ResponseEntity<List<Map<String, String>>> getDeliveryMethods() {
+        // Only advertise methods this PR actually delivers. EMAIL/WhatsApp are PR4.
         List<Map<String, String>> methods = List.of(
             Map.of("value", "SLACK_DM", "label", DigestDeliveryMethod.SLACK_DM.getDisplayName(), "description", DigestDeliveryMethod.SLACK_DM.getDescription()),
-            Map.of("value", "SLACK_CHANNEL", "label", DigestDeliveryMethod.SLACK_CHANNEL.getDisplayName(), "description", DigestDeliveryMethod.SLACK_CHANNEL.getDescription()),
-            Map.of("value", "EMAIL", "label", DigestDeliveryMethod.EMAIL.getDisplayName(), "description", DigestDeliveryMethod.EMAIL.getDescription())
+            Map.of("value", "SLACK_CHANNEL", "label", DigestDeliveryMethod.SLACK_CHANNEL.getDisplayName(), "description", DigestDeliveryMethod.SLACK_CHANNEL.getDescription())
         );
         return ResponseEntity.ok(methods);
     }
@@ -181,4 +200,90 @@ public class DigestPreferenceController {
         String cronExpression,
         String timezone
     ) {}
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Admin: Seed & Status endpoints
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Preview what preferences would be seeded from singleton config.
+     * Admin only.
+     */
+    @GetMapping("/admin/seed/preview")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<SeedPreviewResponse> previewSeed() {
+        DigestPreferenceSeedService.SeedResult result = seedService.previewSeed();
+        return ResponseEntity.ok(new SeedPreviewResponse(
+            result.usersProcessed(),
+            result.preferencesCreated(),
+            result.skipped(),
+            result.preferences().stream()
+                .map(p -> new PreferencePreview(p.getUsername(), p.getConnectionId(),
+                    p.getPersonaTag() != null ? p.getPersonaTag().name() : null))
+                .toList()
+        ));
+    }
+
+    /**
+     * Seed preferences for all Slack-linked users from singleton config.
+     * Admin only. Idempotent: skips users with existing preferences.
+     */
+    @PostMapping("/admin/seed")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<SeedResultResponse> executeSeed() {
+        DigestPreferenceSeedService.SeedResult result = seedService.executeSeed();
+        log.info("Admin seeded {} digest preferences for {} users",
+            result.preferencesCreated(), result.usersProcessed());
+        return ResponseEntity.ok(new SeedResultResponse(
+            result.usersProcessed(),
+            result.preferencesCreated(),
+            result.skipped()
+        ));
+    }
+
+    /**
+     * Seed preferences for the current user.
+     * Available to any authenticated user.
+     */
+    @PostMapping("/seed/me")
+    public ResponseEntity<SeedResultResponse> seedForCurrentUser() {
+        String username = accessControlService.requireCurrentUsername();
+        DigestPreferenceSeedService.SeedResult result = seedService.seedPreferencesForUser(username, false);
+        return ResponseEntity.ok(new SeedResultResponse(
+            1,
+            result.preferencesCreated(),
+            result.skipped()
+        ));
+    }
+
+    /**
+     * Get current digest mode info.
+     */
+    @GetMapping("/status")
+    public ResponseEntity<DigestStatusResponse> getStatus() {
+        SlackDailyDigestService.DigestModeInfo modeInfo = digestService.getDigestModeInfo();
+        return ResponseEntity.ok(new DigestStatusResponse(
+            modeInfo.perUserMode(),
+            modeInfo.enabledPreferences(),
+            modeInfo.distinctUsers()
+        ));
+    }
+
+    public record SeedPreviewResponse(
+        int usersProcessed,
+        int wouldCreate,
+        List<String> wouldSkip,
+        List<PreferencePreview> preferences
+    ) {}
+
+    public record PreferencePreview(String username, String connectionId, String personaTag) {}
+
+    public record SeedResultResponse(int usersProcessed, int preferencesCreated, List<String> skipped) {}
+
+    public record DigestStatusResponse(boolean perUserMode, long enabledPreferences, int distinctUsers) {}
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, String>> handleBadRequest(IllegalArgumentException e) {
+        return ResponseEntity.badRequest().body(Map.of("message", e.getMessage() != null ? e.getMessage() : "Bad request"));
+    }
 }
