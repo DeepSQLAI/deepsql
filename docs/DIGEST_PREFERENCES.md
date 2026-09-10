@@ -86,7 +86,7 @@ Note: Do not claim EMAIL or WhatsApp delivery is available. These are planned fo
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/digest/preferences` | GET | Get current user's preferences |
+| `/api/digest/preferences` | GET | Get current user's preferences (includes `connectionName`) |
 | `/api/digest/preferences` | POST | Create a new preference |
 | `/api/digest/preferences/{id}` | PUT | Update a preference |
 | `/api/digest/preferences/{id}/enabled` | PATCH | Enable/disable |
@@ -134,16 +134,17 @@ To migrate from legacy singleton mode to per-user mode:
 
 The digest preferences are accessible from:
 
-1. **Digest Section** (sidebar): Click the bell icon (🔔) to open preferences panel
-2. **Preferences Panel**: Create, edit, enable/disable, delete preferences
+1. **Digest Section** (sidebar): Click the **gear** (⚙) to open the preferences panel — single entry point (no competing bell)
+2. **First-run**: Opening Digests with zero preferences (or none enabled) auto-opens the panel once (`localStorage` flag)
+3. **Preferences Panel**: Create, edit, enable/disable, delete preferences
 
 ### Preferences Panel Features
 
-- View all your digest subscriptions
+- Pref cards show **connection display names** (API `connectionName`, with client-side fallback from the connections list; UUID only if name is missing)
 - Toggle digests on/off per connection
-- Change persona without recreating
+- Change persona and schedule inline (compact controls — no duplicate meta labels)
 - Quick schedule presets (8 AM, 9 AM, Noon, etc.) — stored on the preference and honored by the minute-tick scheduler
-- Seed for all your connections at once
+- Seed for all your connections at once (`POST /api/digest/preferences/seed/me`)
 
 ## Database Schema
 
