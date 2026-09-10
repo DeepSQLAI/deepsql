@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Newspaper, RefreshCw, Settings, X, Check, Clock, AlertCircle, Zap, Bell } from 'lucide-react'
-import { slackDigestAPI } from '@/lib/api/client'
+import { Newspaper, RefreshCw, Settings, Check, Clock, AlertCircle, Zap } from 'lucide-react'
+import { slackDigestAPI, digestPreferencesAPI } from '@/lib/api/client'
 import { useConnectionManager } from '@/lib/hooks/useConnectionManager'
 import DigestPreferencesPanel from './DigestPreferencesPanel'
 import styles from './DigestSection.module.css'
@@ -160,114 +160,16 @@ function DigestSection({ section }) {
 }
 
 // ─────────────────────────────────────────────
-// Schedule config panel
-// ─────────────────────────────────────────────
-const PRESETS = [
-  { label: '8 AM daily', value: '0 0 8 * * *' },
-  { label: '9 AM daily', value: '0 0 9 * * *' },
-  { label: '10 AM daily', value: '0 0 10 * * *' },
-  { label: '6 AM daily', value: '0 0 6 * * *' },
-  { label: 'Noon daily', value: '0 0 12 * * *' },
-  { label: 'Custom', value: 'custom' },
-]
-
-function SchedulePanel({ onClose }) {
-  const [config, setConfig] = useState(null)
-  const [cron, setCron] = useState('')
-  const [preset, setPreset] = useState('custom')
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [error, setError] = useState(null)
-
-  useEffect(() => {
-    slackDigestAPI.getConfig().then(cfg => {
-      setConfig(cfg)
-      setCron(cfg.cronExpression ?? '0 0 9 * * *')
-      const match = PRESETS.find(p => p.value === cfg.cronExpression)
-      setPreset(match ? match.value : 'custom')
-    }).catch(() => setError('Could not load config'))
-  }, [])
-
-  const handlePreset = (value) => {
-    setPreset(value)
-    if (value !== 'custom') setCron(value)
-  }
-
-  const save = async () => {
-    setSaving(true)
-    setError(null)
-    try {
-      await slackDigestAPI.updateConfig({ cronExpression: cron })
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2500)
-    } catch {
-      setError('Failed to save')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className={styles.panelOverlay} onClick={onClose}>
-      <div className={styles.panel} onClick={e => e.stopPropagation()}>
-        <div className={styles.panelHeader}>
-          <span className={styles.panelTitle}>Digest Schedule</span>
-          <button className={styles.iconBtn} onClick={onClose}><X size={15} /></button>
-        </div>
-
-        <div className={styles.panelBody}>
-          <p className={styles.panelHint}>
-            Choose when the daily digest is sent to Slack. Changes take effect on the next server restart.
-          </p>
-
-          <label className={styles.fieldLabel}>Quick presets</label>
-          <div className={styles.presets}>
-            {PRESETS.map(p => (
-              <button
-                key={p.value}
-                className={`${styles.presetBtn} ${preset === p.value ? styles.presetBtnActive : ''}`}
-                onClick={() => handlePreset(p.value)}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          <label className={styles.fieldLabel}>Cron expression</label>
-          <input
-            className={styles.cronInput}
-            value={cron}
-            onChange={e => { setCron(e.target.value); setPreset('custom') }}
-            placeholder="0 0 9 * * *"
-            spellCheck={false}
-          />
-          <p className={styles.cronHint}>Format: seconds minutes hours day month weekday</p>
-
-          {error && <p className={styles.errorText}>{error}</p>}
-
-          <button
-            className={styles.saveBtn}
-            onClick={save}
-            disabled={saving || !cron}
-          >
-            {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save schedule'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────
 // Main section
 // ─────────────────────────────────────────────
+const DIGEST_PREFS_AUTOPEN_KEY = 'deepsql.digestPrefs.autoOpened.v1'
+
 export default function DigestFeedSection() {
   const { connectionId, selectedConnection } = useConnectionManager()
   const [digests, setDigests] = useState([])
   const [loading, setLoading] = useState(false)
   const [triggering, setTriggering] = useState(false)
   const [triggerMsg, setTriggerMsg] = useState(null)
-  const [showSettings, setShowSettings] = useState(false)
   const [showPreferences, setShowPreferences] = useState(false)
   const [error, setError] = useState(null)
 
@@ -299,6 +201,40 @@ export default function DigestFeedSection() {
   }, [connectionId])
 
   useEffect(() => { load() }, [load])
+
+  // First-run: auto-open Digest Preferences once when there are no prefs
+  // or none enabled. localStorage flag prevents repeat prompts.
+  useEffect(() => {
+    let cancelled = false
+    try {
+      if (localStorage.getItem(DIGEST_PREFS_AUTOPEN_KEY)) return
+    } catch {
+      return
+    }
+
+    digestPreferencesAPI
+      .getMyPreferences()
+      .then((prefs) => {
+        if (cancelled) return
+        const list = Array.isArray(prefs) ? prefs : []
+        const hasEnabled = list.some((p) => p?.enabled)
+        if (list.length === 0 || !hasEnabled) {
+          setShowPreferences(true)
+          try {
+            localStorage.setItem(DIGEST_PREFS_AUTOPEN_KEY, '1')
+          } catch {
+            // ignore quota / private mode
+          }
+        }
+      })
+      .catch(() => {
+        // Silent: first-run helper must not block the digest feed
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const triggerNow = async () => {
     setTriggering(true)
@@ -357,14 +293,7 @@ export default function DigestFeedSection() {
           <button
             className={styles.actionBtn}
             onClick={() => setShowPreferences(true)}
-            title="My digest preferences"
-          >
-            <Bell size={14} />
-          </button>
-          <button
-            className={styles.actionBtn}
-            onClick={() => setShowSettings(true)}
-            title="Configure schedule"
+            title="Digest preferences"
           >
             <Settings size={14} />
           </button>
@@ -415,7 +344,6 @@ export default function DigestFeedSection() {
         )}
       </div>
 
-      {showSettings && <SchedulePanel onClose={() => setShowSettings(false)} />}
       {showPreferences && <DigestPreferencesPanel onClose={() => setShowPreferences(false)} />}
     </div>
   )
