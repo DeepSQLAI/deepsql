@@ -1,8 +1,11 @@
 package com.dbaagent.controller;
 
+import com.dbaagent.dto.DigestPreferenceResponse;
+import com.dbaagent.model.DatabaseConnection;
 import com.dbaagent.model.DigestDeliveryMethod;
 import com.dbaagent.model.PersonaTag;
 import com.dbaagent.model.UserDigestPreference;
+import com.dbaagent.repository.CredentialRepository;
 import com.dbaagent.service.DigestPreferenceSeedService;
 import com.dbaagent.service.security.AccessControlService;
 import com.dbaagent.service.UserDigestPreferenceService;
@@ -13,8 +16,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * REST controller for managing per-user digest preferences.
@@ -32,21 +39,23 @@ public class DigestPreferenceController {
     private final AccessControlService accessControlService;
     private final DigestPreferenceSeedService seedService;
     private final SlackDailyDigestService digestService;
+    private final CredentialRepository credentialRepository;
 
     /**
-     * Get the current user's digest preferences.
+     * Get the current user's digest preferences (includes connection display names).
      */
     @GetMapping
-    public ResponseEntity<List<UserDigestPreference>> getMyPreferences() {
+    public ResponseEntity<List<DigestPreferenceResponse>> getMyPreferences() {
         String username = accessControlService.requireCurrentUsername();
-        return ResponseEntity.ok(preferenceService.getPreferencesForUser(username));
+        List<UserDigestPreference> prefs = preferenceService.getPreferencesForUser(username);
+        return ResponseEntity.ok(toResponses(prefs));
     }
 
     /**
      * Create a new digest preference for the current user.
      */
     @PostMapping
-    public ResponseEntity<UserDigestPreference> createPreference(@RequestBody CreatePreferenceRequest request) {
+    public ResponseEntity<DigestPreferenceResponse> createPreference(@RequestBody CreatePreferenceRequest request) {
         String username = accessControlService.requireCurrentUsername();
 
         DigestDeliveryMethod method;
@@ -80,14 +89,14 @@ public class DigestPreferenceController {
             request.timezone
         );
 
-        return ResponseEntity.ok(preference);
+        return ResponseEntity.ok(toResponse(preference));
     }
 
     /**
      * Update an existing preference.
      */
     @PutMapping("/{id}")
-    public ResponseEntity<UserDigestPreference> updatePreference(
+    public ResponseEntity<DigestPreferenceResponse> updatePreference(
             @PathVariable Long id,
             @RequestBody UpdatePreferenceRequest request) {
 
@@ -112,14 +121,14 @@ public class DigestPreferenceController {
             request.timezone
         );
 
-        return ResponseEntity.ok(updated);
+        return ResponseEntity.ok(toResponse(updated));
     }
 
     /**
      * Enable or disable a preference.
      */
     @PatchMapping("/{id}/enabled")
-    public ResponseEntity<UserDigestPreference> setEnabled(
+    public ResponseEntity<DigestPreferenceResponse> setEnabled(
             @PathVariable Long id,
             @RequestBody Map<String, Boolean> body) {
 
@@ -138,7 +147,7 @@ public class DigestPreferenceController {
         }
 
         UserDigestPreference updated = preferenceService.setEnabled(id, enabled);
-        return ResponseEntity.ok(updated);
+        return ResponseEntity.ok(toResponse(updated));
     }
 
     /**
@@ -285,5 +294,59 @@ public class DigestPreferenceController {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, String>> handleBadRequest(IllegalArgumentException e) {
         return ResponseEntity.badRequest().body(Map.of("message", e.getMessage() != null ? e.getMessage() : "Bad request"));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Response mapping (connection display names)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private List<DigestPreferenceResponse> toResponses(List<UserDigestPreference> prefs) {
+        Map<String, String> namesById = resolveConnectionNames(prefs);
+        return prefs.stream()
+            .map(pref -> toResponse(pref, namesById))
+            .toList();
+    }
+
+    private DigestPreferenceResponse toResponse(UserDigestPreference pref) {
+        Map<String, String> namesById = resolveConnectionNames(List.of(pref));
+        return toResponse(pref, namesById);
+    }
+
+    private DigestPreferenceResponse toResponse(UserDigestPreference pref, Map<String, String> namesById) {
+        String connectionName = null;
+        if (pref.getConnectionId() != null) {
+            connectionName = namesById.get(pref.getConnectionId());
+        }
+        return DigestPreferenceResponse.builder()
+            .id(pref.getId())
+            .username(pref.getUsername())
+            .connectionId(pref.getConnectionId())
+            .connectionName(connectionName)
+            .enabled(pref.isEnabled())
+            .personaTag(pref.getPersonaTag() != null ? pref.getPersonaTag().name() : null)
+            .cronExpression(pref.getCronExpression())
+            .deliveryMethod(pref.getDeliveryMethod() != null ? pref.getDeliveryMethod().name() : null)
+            .timezone(pref.getTimezone())
+            .createdAt(pref.getCreatedAt())
+            .updatedAt(pref.getUpdatedAt())
+            .build();
+    }
+
+    private Map<String, String> resolveConnectionNames(List<UserDigestPreference> prefs) {
+        Set<String> ids = prefs.stream()
+            .map(UserDigestPreference::getConnectionId)
+            .filter(Objects::nonNull)
+            .filter(id -> !id.isBlank())
+            .collect(Collectors.toSet());
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> names = new HashMap<>();
+        for (DatabaseConnection conn : credentialRepository.findAllById(ids)) {
+            if (conn.getId() != null && conn.getConnectionName() != null) {
+                names.put(conn.getId(), conn.getConnectionName());
+            }
+        }
+        return names;
     }
 }

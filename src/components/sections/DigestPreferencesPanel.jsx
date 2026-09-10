@@ -1,9 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   X,
-  User,
-  Bell,
-  Clock,
   Check,
   AlertCircle,
   RefreshCw,
@@ -21,11 +18,37 @@ const CRON_PRESETS = [
   { label: '9 AM daily', value: '0 0 9 * * *' },
   { label: '10 AM daily', value: '0 0 10 * * *' },
   { label: 'Noon daily', value: '0 0 12 * * *' },
-  { label: 'Use global', value: null },
+  { label: 'Use global', value: '' },
 ]
 
+function cronPresetLabel(cronExpression) {
+  if (!cronExpression) return 'Use global'
+  const match = CRON_PRESETS.find((p) => p.value === cronExpression)
+  return match ? match.label : 'Custom'
+}
+
+/**
+ * Prefer API connectionName; else resolve from the connections list; else UUID.
+ */
+function resolveConnectionDisplayName(pref, connections, selectedConnection, connectionId) {
+  if (pref?.connectionName && String(pref.connectionName).trim()) {
+    return pref.connectionName
+  }
+  if (!pref?.connectionId) {
+    return 'All connections'
+  }
+  const fromList = connections?.find((c) => c.id === pref.connectionId)
+  if (fromList?.connectionName) {
+    return fromList.connectionName
+  }
+  if (pref.connectionId === connectionId && selectedConnection?.connectionName) {
+    return selectedConnection.connectionName
+  }
+  return pref.connectionId
+}
+
 export default function DigestPreferencesPanel({ onClose }) {
-  const { connectionId, selectedConnection } = useConnectionManager()
+  const { connectionId, selectedConnection, connections } = useConnectionManager()
   const [preferences, setPreferences] = useState([])
   const [personaTags, setPersonaTags] = useState([])
   const [status, setStatus] = useState(null)
@@ -63,6 +86,11 @@ export default function DigestPreferencesPanel({ onClose }) {
     load()
   }, [load])
 
+  const showSuccess = (msg) => {
+    setSuccessMsg(msg)
+    setTimeout(() => setSuccessMsg(null), 2500)
+  }
+
   const handleToggleEnabled = async (pref) => {
     try {
       const updated = await digestPreferencesAPI.setEnabled(pref.id, !pref.enabled)
@@ -87,6 +115,23 @@ export default function DigestPreferencesPanel({ onClose }) {
       showSuccess('Persona updated')
     } catch {
       setError('Failed to update persona')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleUpdateSchedule = async (pref, cronExpression) => {
+    setSaving(true)
+    try {
+      const updated = await digestPreferencesAPI.updatePreference(pref.id, {
+        cronExpression: cronExpression ?? '',
+      })
+      setPreferences((prev) =>
+        prev.map((p) => (p.id === pref.id ? updated : p))
+      )
+      showSuccess('Schedule updated')
+    } catch {
+      setError('Failed to update schedule')
     } finally {
       setSaving(false)
     }
@@ -155,14 +200,17 @@ export default function DigestPreferencesPanel({ onClose }) {
     setNewCron(preset.value || '')
   }
 
-  const showSuccess = (msg) => {
-    setSuccessMsg(msg)
-    setTimeout(() => setSuccessMsg(null), 2500)
-  }
-
   const currentConnectionPref = preferences.find(
     (p) => p.connectionId === connectionId
   )
+
+  const connectionNameById = useMemo(() => {
+    const map = {}
+    for (const c of connections || []) {
+      if (c?.id) map[c.id] = c.connectionName
+    }
+    return map
+  }, [connections])
 
   return (
     <div className={styles.panelOverlay} onClick={onClose}>
@@ -170,10 +218,10 @@ export default function DigestPreferencesPanel({ onClose }) {
         {/* Header */}
         <div className={styles.panelHeader}>
           <div className={styles.headerTitle}>
-            <Bell size={16} />
+            <Settings2 size={16} />
             <span>Digest Preferences</span>
           </div>
-          <button className={styles.iconBtn} onClick={onClose}>
+          <button className={styles.iconBtn} onClick={onClose} type="button">
             <X size={15} />
           </button>
         </div>
@@ -203,7 +251,7 @@ export default function DigestPreferencesPanel({ onClose }) {
             <div className={styles.errorBanner}>
               <AlertCircle size={14} />
               <span>{error}</span>
-              <button onClick={() => setError(null)}>×</button>
+              <button type="button" onClick={() => setError(null)}>×</button>
             </div>
           )}
 
@@ -216,7 +264,7 @@ export default function DigestPreferencesPanel({ onClose }) {
 
           {!loading && preferences.length === 0 && (
             <div className={styles.emptyState}>
-              <Bell size={28} color="#d1d5db" />
+              <Settings2 size={28} color="#d1d5db" />
               <h4>No digest preferences yet</h4>
               <p>
                 Set up personalized digests to receive database insights via Slack
@@ -227,6 +275,7 @@ export default function DigestPreferencesPanel({ onClose }) {
                   className={styles.seedBtn}
                   onClick={handleSeedForMe}
                   disabled={saving}
+                  type="button"
                 >
                   <Sparkles size={14} />
                   {saving ? 'Setting up...' : 'Set up for all my connections'}
@@ -235,6 +284,7 @@ export default function DigestPreferencesPanel({ onClose }) {
                   className={styles.createBtn}
                   onClick={() => setShowCreate(true)}
                   disabled={!connectionId}
+                  type="button"
                 >
                   <Plus size={14} />
                   Create for current connection
@@ -257,6 +307,7 @@ export default function DigestPreferencesPanel({ onClose }) {
                       ? 'Already configured for this connection'
                       : 'Add preference for current connection'
                   }
+                  type="button"
                 >
                   <Plus size={14} />
                 </button>
@@ -266,11 +317,21 @@ export default function DigestPreferencesPanel({ onClose }) {
                 <PreferenceCard
                   key={pref.id}
                   pref={pref}
+                  displayName={resolveConnectionDisplayName(
+                    {
+                      ...pref,
+                      connectionName:
+                        pref.connectionName || connectionNameById[pref.connectionId],
+                    },
+                    connections,
+                    selectedConnection,
+                    connectionId
+                  )}
                   personaTags={personaTags}
-                  selectedConnection={selectedConnection}
                   connectionId={connectionId}
                   onToggle={() => handleToggleEnabled(pref)}
                   onUpdatePersona={(tag) => handleUpdatePersona(pref, tag)}
+                  onUpdateSchedule={(cron) => handleUpdateSchedule(pref, cron)}
                   onDelete={() => handleDelete(pref)}
                 />
               ))}
@@ -282,19 +343,22 @@ export default function DigestPreferencesPanel({ onClose }) {
             <div className={styles.createForm}>
               <h4>New digest preference</h4>
               <p className={styles.createHint}>
-                For: {selectedConnection?.connectionName || connectionId || 'Select a connection'}
+                For:{' '}
+                {selectedConnection?.connectionName ||
+                  connectionId ||
+                  'Select a connection'}
               </p>
 
-              <label className={styles.fieldLabel}>Persona (optional)</label>
+              <label className={styles.fieldLabel}>Persona</label>
               <select
                 className={styles.select}
                 value={newPersona}
                 onChange={(e) => setNewPersona(e.target.value)}
               >
-                <option value="">Use my role only</option>
+                <option value="">Role-based (default)</option>
                 {personaTags.map((tag) => (
                   <option key={tag.value} value={tag.value}>
-                    {tag.label} — {tag.description}
+                    {tag.label}
                   </option>
                 ))}
               </select>
@@ -304,6 +368,7 @@ export default function DigestPreferencesPanel({ onClose }) {
                 {CRON_PRESETS.map((p) => (
                   <button
                     key={p.label}
+                    type="button"
                     className={`${styles.presetBtn} ${
                       newCronPreset === p.label ? styles.presetBtnActive : ''
                     }`}
@@ -336,6 +401,7 @@ export default function DigestPreferencesPanel({ onClose }) {
                 <button
                   className={styles.cancelBtn}
                   onClick={() => setShowCreate(false)}
+                  type="button"
                 >
                   Cancel
                 </button>
@@ -343,6 +409,7 @@ export default function DigestPreferencesPanel({ onClose }) {
                   className={styles.saveBtn}
                   onClick={handleCreate}
                   disabled={saving || !connectionId}
+                  type="button"
                 >
                   {saving ? 'Creating...' : 'Create preference'}
                 </button>
@@ -357,28 +424,17 @@ export default function DigestPreferencesPanel({ onClose }) {
 
 function PreferenceCard({
   pref,
+  displayName,
   personaTags,
-  selectedConnection,
   connectionId,
   onToggle,
   onUpdatePersona,
+  onUpdateSchedule,
   onDelete,
 }) {
   const isCurrentConnection = pref.connectionId === connectionId
-  const connName =
-    isCurrentConnection && selectedConnection
-      ? selectedConnection.connectionName
-      : pref.connectionId || 'All connections'
-
-  const personaLabel =
-    personaTags.find((t) => t.value === pref.personaTag)?.label || 'Role-based'
-
-  const deliveryLabel =
-    pref.deliveryMethod === 'SLACK_DM'
-      ? 'Slack DM'
-      : pref.deliveryMethod === 'SLACK_CHANNEL'
-      ? 'Channel'
-      : pref.deliveryMethod || 'Slack'
+  const scheduleValue = pref.cronExpression || ''
+  const knownSchedule = CRON_PRESETS.some((p) => p.value === scheduleValue)
 
   return (
     <div
@@ -388,51 +444,62 @@ function PreferenceCard({
     >
       <div className={styles.prefCardMain}>
         <div className={styles.prefCardHeader}>
-          <span className={styles.prefConnName}>{connName}</span>
+          <span className={styles.prefConnName} title={displayName}>
+            {displayName}
+          </span>
           {isCurrentConnection && (
             <span className={styles.currentBadge}>Current</span>
           )}
-          <span
-            className={`${styles.statusDot} ${
-              pref.enabled ? styles.statusDotActive : ''
-            }`}
-          />
         </div>
 
-        <div className={styles.prefCardMeta}>
-          <span className={styles.metaItem}>
-            <User size={12} />
-            {personaLabel}
-          </span>
-          <span className={styles.metaItem}>
-            <Bell size={12} />
-            {deliveryLabel}
-          </span>
-          {pref.cronExpression && (
-            <span className={styles.metaItem}>
-              <Clock size={12} />
-              Custom schedule
-            </span>
-          )}
+        <div className={styles.prefCardControls}>
+          <label className={styles.controlLabel}>
+            <span>Persona</span>
+            <select
+              className={styles.controlSelect}
+              value={pref.personaTag || ''}
+              onChange={(e) => onUpdatePersona(e.target.value)}
+              title="Persona"
+            >
+              <option value="">Role-based</option>
+              {personaTags.map((tag) => (
+                <option key={tag.value} value={tag.value}>
+                  {tag.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className={styles.controlLabel}>
+            <span>Schedule</span>
+            <select
+              className={styles.controlSelect}
+              value={knownSchedule ? scheduleValue : '__custom__'}
+              onChange={(e) => {
+                const v = e.target.value
+                if (v === '__custom__') return
+                onUpdateSchedule(v)
+              }}
+              title="Schedule"
+            >
+              {CRON_PRESETS.map((p) => (
+                <option key={p.label} value={p.value}>
+                  {p.label}
+                </option>
+              ))}
+              {!knownSchedule && (
+                <option value="__custom__">
+                  Custom ({cronPresetLabel(pref.cronExpression)})
+                </option>
+              )}
+            </select>
+          </label>
         </div>
       </div>
 
       <div className={styles.prefCardActions}>
-        <select
-          className={styles.personaSelect}
-          value={pref.personaTag || ''}
-          onChange={(e) => onUpdatePersona(e.target.value)}
-          title="Change persona"
-        >
-          <option value="">Role-based</option>
-          {personaTags.map((tag) => (
-            <option key={tag.value} value={tag.value}>
-              {tag.label}
-            </option>
-          ))}
-        </select>
-
         <button
+          type="button"
           className={`${styles.toggleBtn} ${
             pref.enabled ? styles.toggleBtnOn : ''
           }`}
@@ -443,6 +510,7 @@ function PreferenceCard({
         </button>
 
         <button
+          type="button"
           className={styles.deleteBtn}
           onClick={onDelete}
           title="Delete preference"

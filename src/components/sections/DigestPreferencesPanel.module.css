@@ -353,6 +353,49 @@
   color: #6b7280;
 }
 
+.prefCardControls {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.controlLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.controlSelect {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  min-width: 110px;
+  max-width: 160px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.controlSelect:hover {
+  border-color: #d1d5db;
+}
+
+.controlSelect:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
 .prefCardActions {
   display: flex;
   align-items: center;
