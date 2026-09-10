@@ -839,6 +839,26 @@ it against a real database — not a theoretical hardening pass.
   `noteId`, `taskId`), resolve the owning connection first via that service's
   `getConnectionId(id)` and assert on the result. Do not skip the check because the
   path has no `connectionId` in it.
+- **A global-config controller is invisible to the connection-scoped scanner.**
+  `SetupController` shipped with **no authorization at all** — no `@PreAuthorize`, no
+  `assertCan*` — so any authenticated user (lowest role included) could `POST
+  /setup/llm-config` and repoint the org's LLM endpoint and API key. `LlmConfigResolver`
+  reads the **database tier before the environment tier**, so that write silently
+  overrode a correctly configured install with no restart, sending every chat turn,
+  schema and query result to a host of the caller's choosing; `/setup/llm-config/test`
+  passed the same unvalidated URL into `RestClient.baseUrl` (SSRF → cloud metadata).
+  Its javadoc said "All other endpoints require an authenticated user" — true, and
+  exactly the trap. `ConnectionScopedAuthorizationSafetyTest` could not see it: that
+  scanner keys on a `connectionId` or a `@PathVariable …Id`, and this controller has
+  **neither**, so the suite stayed green over a critical hole. Fixed with a class-level
+  `@PreAuthorize("hasRole('ADMIN')")` plus explicit `permitAll()` on the two genuinely
+  pre-login routes (`/status`, `/initialize`); the wizard itself is already behind
+  `<ProtectedRoute>` and reached only by the bootstrap-created admin, so no flow breaks.
+  `GlobalConfigAuthorizationSafetyTest` now covers this shape. **Its own detector had to
+  be mutation-tested**: the first version used `source.indexOf("@PreAuthorize")`, which
+  the `import` line and a javadoc mention both satisfy, so deleting the real gate left
+  the test green — match an annotation at the start of a line instead. See
+  `docs/security/2026-09-10-setup-controller-authorization.md`.
 - **An endpoint with no connection scope at all is admin-only.**
   `POST /brain/column-values/embed-all` spans every connection, so it carries
   `@PreAuthorize("hasRole('ADMIN')")` — it cannot be authorized against one
