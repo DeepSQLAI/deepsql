@@ -271,9 +271,12 @@ public class SlackDailyDigestService {
 
     public record TriggerResult(boolean triggered, String message) {}
 
-    /** Runs the digest in a virtual thread so the HTTP trigger returns immediately. */
+    /**
+     * Runs the hybrid digest in a virtual thread so the HTTP trigger returns immediately.
+     * Uses per-user personalized delivery when prefs exist; otherwise legacy broadcast.
+     */
     public void sendDailyDigestAsync() {
-        Thread.ofVirtual().name("digest-send").start(this::sendDailyDigest);
+        Thread.ofVirtual().name("digest-send").start(this::sendDailyDigestHybrid);
     }
 
     public TriggerResult triggerDigest() {
@@ -283,17 +286,21 @@ public class SlackDailyDigestService {
         }
 
         boolean slackEnabled = isSlackDeliveryEnabled();
+        boolean perUserMode = isPerUserModeEnabled();
         long bindingCount = channelBindingRepository.count();
-        if (!slackEnabled) {
-            sendDailyDigestAsync();
-            return new TriggerResult(true, "Digest generation started. Slack delivery is disabled in this environment.");
-        }
-        if (bindingCount == 0) {
-            sendDailyDigestAsync();
-            return new TriggerResult(true, "Digest generation started. No Slack channel bindings found, so it will only appear in the app.");
-        }
 
         sendDailyDigestAsync();
+
+        if (!slackEnabled) {
+            return new TriggerResult(true, "Digest generation started. Slack delivery is disabled in this environment.");
+        }
+        if (perUserMode) {
+            return new TriggerResult(true,
+                "Personalized digest delivery started (Slack DMs per user prefs when linked). Channel bindings are not required for DMs.");
+        }
+        if (bindingCount == 0) {
+            return new TriggerResult(true, "Digest generation started. No Slack channel bindings found, so it will only appear in the app.");
+        }
         return new TriggerResult(true, "Digest generation and Slack delivery are running in the background.");
     }
 
