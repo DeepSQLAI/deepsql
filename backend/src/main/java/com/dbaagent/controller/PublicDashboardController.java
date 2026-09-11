@@ -4,6 +4,8 @@ import com.dbaagent.model.QueryExecutionOrigin;
 import com.dbaagent.model.QueryRequest;
 import com.dbaagent.model.QueryResult;
 import com.dbaagent.model.SavedDashboard;
+import com.dbaagent.service.ConnectionChatAccessPolicyService;
+import com.dbaagent.service.DashboardQueryShapeService;
 import com.dbaagent.service.McpSqlGuardService;
 import com.dbaagent.service.QueryExecutionContext;
 import com.dbaagent.service.QueryExecutorService;
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Optional;
 
 /**
@@ -43,6 +46,8 @@ public class PublicDashboardController {
     private final SavedDashboardService savedDashboardService;
     private final ObjectMapper objectMapper;
     private final McpSqlGuardService sqlGuardService;
+    private final DashboardQueryShapeService queryShapeService;
+    private final ConnectionChatAccessPolicyService policyService;
     private final QueryExecutorService queryExecutorService;
 
     private Optional<SavedDashboard> publicDashboard(String token) {
@@ -100,6 +105,29 @@ public class PublicDashboardController {
         McpSqlGuardService.ValidationOutcome guard = sqlGuardService.validateReadOnlySql(request.sql(), true);
         if (!guard.ok()) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "error", guard.reason()));
+        }
+        // Read-only is not enough on an anonymous path: it asks whether the statement reads,
+        // not whether this dashboard was published to run it. Without the shape check below, a
+        // link shared to show one chart accepted "SELECT * FROM users" just as happily.
+        // A policy added AFTER the link was shared must take effect on it. Enabling a share is
+        // refused while a policy is active (SavedDashboardController), but nothing re-checked
+        // afterwards, so a link created before the policy stayed live and unprotected —
+        // "public-share" has no policy row, so resolveEffectivePolicy returns none() and
+        // column protections and redaction never run. Re-checked here for the same reason
+        // is_public is: revocation has to reach an already-issued link.
+        if (policyService.hasActivePolicy(found.get().getConnectionId())) {
+            log.info("Public dashboard query refused for token {}: connection has an active policy", token);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                "success", false,
+                "error", "This dashboard is no longer available publicly."));
+        }
+        Set<String> publishedShapes =
+            queryShapeService.extractShapes(found.get().getDashboardConfig());
+        if (!queryShapeService.matches(publishedShapes, request.sql())) {
+            log.info("Public dashboard query refused for token {}: shape not published", token);
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "error", "This query is not part of the shared dashboard."));
         }
         int limit = request.limit() == null ? DEFAULT_LIMIT : Math.max(1, Math.min(request.limit(), MAX_LIMIT));
         try {
