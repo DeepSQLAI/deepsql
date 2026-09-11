@@ -122,4 +122,95 @@ class McpSqlGuardServiceTest {
         var commentPlan = service.validateReadOnlySql("EXPLAIN SELECT * FROM comment", true);
         assertTrue(commentPlan.ok());
     }
+
+    // ── dangerous functions ───────────────────────────────────────────────────
+    //
+    // The guard classifies by statement *verb*, so a SELECT that calls a dangerous
+    // function passes every check: the allowlist sees SELECT, and no forbidden verb
+    // appears anywhere. Verified against a real PostgreSQL 17 — inside an explicitly
+    // READ ONLY transaction, `SELECT dblink_exec(..., 'DELETE FROM t')` reported
+    // `DELETE 3` and the table went from 3 rows to 0.
+    //
+    // connection.setReadOnly(true) cannot stop it either: dblink opens a *new outbound
+    // connection* whose transaction is not read-only. The read-only flag constrains the
+    // session it is set on, never one the query dials out and creates. So both of the
+    // product's layers fail at once, and until the public dashboard path was bound to
+    // published query shapes this was reachable anonymously.
+
+    @Test
+    void rejectsDblinkExec() {
+        var result = service.validateReadOnlySql(
+            "SELECT dblink_exec('dbname=app user=postgres host=127.0.0.1','DELETE FROM orders')", true);
+
+        assertFalse(result.ok());
+        assertTrue(result.reason().toLowerCase().contains("dblink"),
+            "reason should name the function it refused, was: " + result.reason());
+    }
+
+    @Test
+    void rejectsEveryDblinkEntryPoint() {
+        for (String sql : new String[] {
+            "SELECT * FROM dblink('dbname=app','SELECT 1') AS t(a int)",
+            "SELECT dblink_connect('dbname=app')",
+            "SELECT dblink_send_query('conn','DELETE FROM orders')",
+            "SELECT dblink_open('conn','cur','SELECT 1')"
+        }) {
+            assertFalse(service.validateReadOnlySql(sql, true).ok(), "should refuse: " + sql);
+        }
+    }
+
+    @Test
+    void rejectsServerSideFileReads() {
+        for (String sql : new String[] {
+            "SELECT pg_read_file('/etc/passwd')",
+            "SELECT pg_read_binary_file('/etc/passwd')",
+            "SELECT pg_ls_dir('/var/lib/postgresql/data')",
+            "SELECT pg_stat_file('/etc/passwd')",
+            "SELECT lo_import('/etc/passwd')",
+            "SELECT lo_export(1,'/tmp/out')"
+        }) {
+            assertFalse(service.validateReadOnlySql(sql, true).ok(), "should refuse: " + sql);
+        }
+    }
+
+    @Test
+    void rejectsMySqlFileReads() {
+        assertFalse(service.validateReadOnlySql("SELECT LOAD_FILE('/etc/passwd')", true).ok());
+    }
+
+    @Test
+    void rejectsDangerousFunctionRegardlessOfSpacingOrCase() {
+        for (String sql : new String[] {
+            "SELECT DBLINK_EXEC('x','DELETE FROM t')",
+            "SELECT dblink_exec ('x','DELETE FROM t')",
+            "SELECT pg_read_file\n('/etc/passwd')",
+            "WITH x AS (SELECT pg_read_file('/etc/passwd') AS f) SELECT * FROM x"
+        }) {
+            assertFalse(service.validateReadOnlySql(sql, true).ok(), "should refuse: " + sql);
+        }
+    }
+
+    /**
+     * The guard must match a function *call*, not a name that merely appears. Column and
+     * table names are ordinary identifiers and plenty of schemas contain them — the same
+     * mistake CLAUDE.md records for the old \\bCOMMENT\\b rule, which rejected
+     * `SELECT * FROM comment`.
+     */
+    @Test
+    void stillAllowsIdentifiersThatMerelyResembleADangerousFunction() {
+        for (String sql : new String[] {
+            "SELECT * FROM public.dblink_audit",
+            "SELECT t.pg_read_file_count FROM public.stats t",
+            "SELECT load_file_name FROM public.imports",
+            "SELECT * FROM comment"
+        }) {
+            assertTrue(service.validateReadOnlySql(sql, true).ok(), "should allow: " + sql);
+        }
+    }
+
+    @Test
+    void stillAllowsOrdinaryAnalyticQueries() {
+        assertTrue(service.validateReadOnlySql(
+            "SELECT count(*), sum(o.total) FROM public.orders o WHERE o.created_at >= '2026-01-01'", true).ok());
+    }
 }
