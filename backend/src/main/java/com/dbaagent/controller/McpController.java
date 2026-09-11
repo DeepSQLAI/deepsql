@@ -78,7 +78,7 @@ public class McpController {
                 queryRequest,
                 QueryExecutionContext.mcp(
                     accessControlService.getCurrentUsername(),
-                    accessControlService.isCurrentUserAdmin()
+                    accessControlService.currentUserMayMutateSql()
                 )
             );
             return ResponseEntity.ok(Map.of(

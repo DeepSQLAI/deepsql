@@ -51,7 +51,7 @@ public class QueryExecutionPolicyException extends RuntimeException {
         return new QueryExecutionPolicyException(
             EDITOR_MUTATION_FORBIDDEN,
             HttpStatus.FORBIDDEN,
-            "Only admins can execute DDL or DML from the SQL Editor. This Editor run was blocked before any database changes were attempted.",
+            "Only admins or DBAs can execute DDL or DML from the SQL Editor. This Editor run was blocked before any database changes were attempted.",
             false,
             queryType,
             List.of()

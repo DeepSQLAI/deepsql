@@ -226,7 +226,7 @@ function looksLikeSingleLineDashComment(sql) {
 }
 
 export default function SqlRunnerTab({ connectionId }) {
-  const { isAdmin, username } = useAuth();
+  const { isAdmin, mayMutateSql, username } = useAuth();
   const { data: connectionsData } = useConnections();
   const currentConnection = (Array.isArray(connectionsData) ? connectionsData : []).find(
     (c) => c?.id === connectionId
@@ -2372,13 +2372,13 @@ export default function SqlRunnerTab({ connectionId }) {
                     <h3>SQL Query Editor</h3>
                     <HelpTooltip
                       content={
-                        isAdmin
-                          ? "Admins can run INSERT, UPDATE, and DELETE (with a WHERE clause) after confirmation. DROP is blocked. The selected database user must still have write privileges."
-                          : "Only admins can run DML from the Editor."
+                        mayMutateSql
+                          ? "Admins and DBAs can run INSERT, UPDATE, and DELETE (with a WHERE clause) after confirmation. DROP TABLE is blocked. The selected database user must still have write privileges."
+                          : "Only admins or DBAs can run DML from the Editor."
                       }
                     >
                       <span className={styles.executionPolicyNote}>
-                        {isAdmin ? "Admin mode" : "Read-only mode"}
+                        {mayMutateSql ? (isAdmin ? "Admin mode" : "DBA mode") : "Read-only mode"}
                       </span>
                     </HelpTooltip>
                     {!connectionId && (
@@ -2891,7 +2891,7 @@ export default function SqlRunnerTab({ connectionId }) {
                 >
                   <span>SELECT</span>
                 </div>
-                {isAdmin ? (
+                {mayMutateSql ? (
                   <>
                     <div
                       className={styles.contextMenuItem}
@@ -2914,7 +2914,7 @@ export default function SqlRunnerTab({ connectionId }) {
                   </>
                 ) : (
                   <div className={`${styles.contextMenuItem} ${styles.contextMenuItemDisabled}`}>
-                    <span>INSERT / UPDATE / DELETE (admins only)</span>
+                    <span>INSERT / UPDATE / DELETE (admins or DBAs only)</span>
                   </div>
                 )}
               </div>

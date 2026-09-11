@@ -446,7 +446,7 @@ public class SchemaController {
         return QueryExecutionContext.forSqlSurface(
             McpTokenService.isMcpAuthorizationHeader(httpRequest.getHeader(HttpHeaders.AUTHORIZATION)),
             accessControlService.getCurrentUsername(),
-            accessControlService.isCurrentUserAdmin(),
+            accessControlService.currentUserMayMutateSql(),
             Boolean.TRUE.equals(queryRequest.getMutationConfirmed())
         );
     }
