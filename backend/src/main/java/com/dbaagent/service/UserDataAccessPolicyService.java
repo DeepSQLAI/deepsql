@@ -129,7 +129,7 @@ public class UserDataAccessPolicyService {
         ConnectionChatAccessPolicyService.EffectivePolicy policy = policyService.resolveEffectivePolicy(
             connectionId,
             executionContext.actorUsername(),
-            executionContext.actorIsAdmin()
+            executionContext.actorMayMutate()
         );
         if (!policy.protectsAnything()) {
             return QueryGuardDecision.allow(policy);
@@ -339,7 +339,7 @@ public class UserDataAccessPolicyService {
         ConnectionChatAccessPolicyService.EffectivePolicy policy = policyService.resolveEffectivePolicy(
             connectionId,
             executionContext.actorUsername(),
-            executionContext.actorIsAdmin()
+            executionContext.actorMayMutate()
         );
         if (!policy.protectsAnything() || !policy.redactMode()) {
             return result;
