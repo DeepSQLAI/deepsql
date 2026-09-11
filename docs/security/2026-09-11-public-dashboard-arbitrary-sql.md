@@ -139,6 +139,39 @@ is deliberately one layer among several.
 cd backend && mvn test -Dtest=DashboardQueryShapeServiceTest
 ```
 
+## What hands-on QA against the real stack found
+
+Three defects survived a green unit suite and were caught only by running the fix against the
+live database and a real browser. All three shared one cause: the fixtures encoded assumptions
+about the agent's output instead of its actual output.
+
+1. **Real artifacts assign the SQL to a variable.** Every call site in this database — 18 of 18,
+   across the names `query`, `sql`, `trendQuery`, `totalQuery` — does
+   `const sql = \`...\`; await deepsql.query(sql)`. The first extractor matched only a literal
+   argument, so it returned an empty set and, failing closed, refused **every** query on **every**
+   existing public dashboard. Executed against a real 33KB artifact: 8 call sites, 0 shapes.
+2. **Widgets are separate scopes that reuse the same variable name.** One dashboard has nine
+   `<script>` blocks, eight declaring their own `const sql`. Resolving into one flat map
+   collapsed them onto one key: 8 calls yielded 1 shape, silently dropping seven widgets.
+   Declarations are now resolved per script block.
+3. **`dashboard_config` stores the broker's JSON envelope, not raw HTML** —
+   `{"version":3,"renderMode":"artifact","html":"<!doctype html>\n..."}` — so the document
+   arrives with newlines as a literal backslash-n. `QueryNormalizer` collapses *real* whitespace,
+   so the published shape kept `customer_count\n from` where the runtime statement has a space
+   and nothing matched. An earlier probe had unescaped the dump by hand, making the harness more
+   forgiving than production. Escape sequences are now decoded during extraction.
+
+After all three fixes, verified against the live stack:
+
+| Check | Result |
+|---|---|
+| Shapes extracted from all 5 real artifacts | 28 call sites -> 28 shapes, 0 unresolvable |
+| Every published shape replayed through the API | 10 of 10 accepted, 0 wrongly refused |
+| Public share page in Chrome (patched backend) | all 9 widgets render real data |
+| "Last 90 days" clicked (new date literals) | 6 new queries, all 200; $1,953 -> $144,270, 6 -> 426 orders |
+| `SELECT * FROM public.customers` | refused |
+| Same request against the unpatched backend | returns `email`, `password_hash`, `phone` |
+
 ## Residual work
 
 The public query path still has **no rate limit**. `docker/nginx/default.conf` declares only
