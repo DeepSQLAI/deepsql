@@ -702,6 +702,24 @@ it against a real database — not a theoretical hardening pass.
   the parse tree (`detectSelectWrite`) **and** runs a text backstop
   (`detectHiddenWrite`) so an unparseable variant fails closed instead of falling
   through to the keyword path.
+- **A verb-based guard cannot see a dangerous *function*, and `setReadOnly(true)` cannot stop
+  one that leaves the session.** `SELECT dblink_exec('dbname=app …','DELETE FROM orders')`
+  defeated **both** layers at once: it begins `SELECT` so the allowlist passes it and no
+  forbidden verb appears, and `dblink` opens a **new outbound connection** whose transaction is
+  not read-only — the flag constrains the session it is set on, never one the query dials out
+  and creates. Reproduced against a real PostgreSQL: inside `BEGIN TRANSACTION READ ONLY`, the
+  statement reported `DELETE 3` and the table went from 3 rows to 0; `pg_read_file` likewise
+  read the server's filesystem under read-only. Until public dashboard queries were bound to
+  published shapes this was reachable **unauthenticated** through the share endpoint, which
+  runs the same executor. `DANGEROUS_SQL_FUNCTIONS` now denies dblink*, `pg_read_file`,
+  `pg_read_binary_file`, `pg_ls_dir`, `pg_stat_file`, `lo_import`, `lo_export` and MySQL
+  `LOAD_FILE`. A denylist is the right shape *here* only because the allowlist governs verbs
+  and there is no allowlist of functions that may sit inside a `SELECT`. **Match the call, not
+  the name** — `(?<![\w$.])(name)\s*\(` — or you reject a `dblink_audit` table and a
+  `load_file_name` column, the same mistake the old `\bCOMMENT\b` rule made with
+  `SELECT * FROM comment`. Mirrored in `mcp/deepsql-phase1-lib.js`; a statement one guard
+  blocks and the other allows *is* the bypass, so parity is asserted over 20 payloads. See
+  `docs/security/2026-09-11-sql-guard-dangerous-functions.md`.
 - **Read-only contexts open read-only JDBC sessions.** `QueryExecutorService` calls
   `connection.setReadOnly(true)` whenever `mutationMode() == READ_ONLY_ONLY`, so
   PostgreSQL refuses the write itself even if classification is wrong. Classification

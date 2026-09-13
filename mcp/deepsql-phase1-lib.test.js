@@ -68,6 +68,49 @@ test("resolveApiUrl appends relative tool paths under the base URL", () => {
   assert.equal(result, "http://localhost:8080/api/connections/123/schema");
 });
 
+// Dangerous functions. The guard classifies by statement verb, so a SELECT calling one of
+// these passed every check; connection.setReadOnly(true) does not stop them either, because
+// dblink opens a new outbound connection whose transaction is not read-only. Verified against
+// a real PostgreSQL: inside BEGIN TRANSACTION READ ONLY, dblink_exec(..., 'DELETE FROM t')
+// reported DELETE 3 and the table went from three rows to zero.
+test("validateReadOnlySql blocks dblink and other outbound-connection functions", () => {
+  for (const sql of [
+    "SELECT dblink_exec('dbname=app','DELETE FROM orders')",
+    "SELECT * FROM dblink('dbname=app','SELECT 1') AS t(a int)",
+    "SELECT dblink_connect('dbname=app')",
+    "SELECT dblink_send_query('c','DELETE FROM orders')",
+  ]) {
+    assert.equal(validateReadOnlySql(sql).ok, false, `should refuse: ${sql}`);
+  }
+});
+
+test("validateReadOnlySql blocks server-side file reads", () => {
+  for (const sql of [
+    "SELECT pg_read_file('/etc/passwd')",
+    "SELECT pg_read_binary_file('/etc/passwd')",
+    "SELECT pg_ls_dir('/tmp')",
+    "SELECT pg_stat_file('/etc/passwd')",
+    "SELECT lo_import('/etc/passwd')",
+    "SELECT LOAD_FILE('/etc/passwd')",
+  ]) {
+    assert.equal(validateReadOnlySql(sql).ok, false, `should refuse: ${sql}`);
+  }
+});
+
+// The name must be matched as a *call*, not wherever it appears: plenty of schemas have a
+// dblink_audit table or a load_file_name column. Same mistake the old \bCOMMENT\b rule made
+// when it rejected "SELECT * FROM comment".
+test("validateReadOnlySql still allows identifiers that resemble a dangerous function", () => {
+  for (const sql of [
+    "SELECT * FROM public.dblink_audit",
+    "SELECT t.pg_read_file_count FROM public.stats t",
+    "SELECT load_file_name FROM public.imports",
+    "SELECT * FROM comment",
+  ]) {
+    assert.equal(validateReadOnlySql(sql).ok, true, `should allow: ${sql}`);
+  }
+});
+
 test("validateReadOnlySql accepts a simple select", () => {
   const result = validateReadOnlySql("SELECT * FROM orders LIMIT 10;");
   assert.equal(result.ok, true);

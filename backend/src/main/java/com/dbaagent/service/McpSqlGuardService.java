@@ -45,6 +45,51 @@ public class McpSqlGuardService {
         "COMMENT"
     );
 
+    /**
+     * Functions that read or write outside the current read-only session.
+     *
+     * <p>Every check above classifies by statement <em>verb</em>, so a {@code SELECT} that calls
+     * one of these passes cleanly: the allowlist sees SELECT and no forbidden verb appears.
+     * {@code connection.setReadOnly(true)} does not stop them either — {@code dblink} opens a
+     * <em>new outbound connection</em> whose transaction is not read-only, so the flag
+     * constrains the session it is set on but never one the query dials out and creates.
+     *
+     * <p>Verified against a real PostgreSQL, not inferred: inside an explicitly
+     * {@code BEGIN TRANSACTION READ ONLY}, {@code SELECT dblink_exec(..., 'DELETE FROM t')}
+     * reported {@code DELETE 3} and the table went from three rows to zero;
+     * {@code pg_read_file('/etc/hostname')} returned its contents from the database server's
+     * filesystem. Both of the product's layers failed at once.
+     *
+     * <p>A denylist is the wrong shape in general, but it is the right shape here: the guard's
+     * allowlist governs <em>verbs</em>, and there is no allowlist of functions to sit inside
+     * a SELECT. Names are matched as calls (see {@link #DANGEROUS_FUNCTION_CALL}) so an
+     * ordinary identifier of the same name still works.
+     */
+    private static final List<String> DANGEROUS_SQL_FUNCTIONS = List.of(
+        // outbound connections — escape the read-only session entirely
+        "dblink", "dblink_exec", "dblink_connect", "dblink_open", "dblink_send_query",
+        // server-side file access
+        "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_stat_file",
+        "lo_import", "lo_export",
+        // MySQL equivalents
+        "load_file"
+    );
+
+    private static final String DANGEROUS_FUNCTION_ALTERNATION =
+        String.join("|", DANGEROUS_SQL_FUNCTIONS);
+
+    /**
+     * A dangerous function being <em>called</em>: the name, optional whitespace, then an open
+     * paren. Matching the bare name would reject ordinary identifiers — plenty of schemas have
+     * a {@code dblink_audit} table or a {@code load_file_name} column, the same mistake
+     * CLAUDE.md records for the old {@code \bCOMMENT\b} rule that rejected
+     * {@code SELECT * FROM comment}. A leading word-boundary check keeps {@code my_dblink(} —
+     * a different function — from matching.
+     */
+    private static final Pattern DANGEROUS_FUNCTION_CALL = Pattern.compile(
+        "(?<![\\w$.])(" + DANGEROUS_FUNCTION_ALTERNATION + ")\\s*\\(",
+        Pattern.CASE_INSENSITIVE);
+
     private static final Set<String> FORBIDDEN_SQL_KEYWORD_SET = Set.copyOf(FORBIDDEN_SQL_KEYWORDS);
 
     private static final String FORBIDDEN_ALTERNATION = String.join("|", FORBIDDEN_SQL_KEYWORDS);
@@ -102,7 +147,27 @@ public class McpSqlGuardService {
             );
         }
 
+        String dangerousFunction = containsDangerousFunction(statement);
+        if (dangerousFunction != null) {
+            return ValidationOutcome.invalid(
+                "Blocked SQL function that reads or writes outside this session: "
+                    + dangerousFunction + "."
+            );
+        }
+
         return ValidationOutcome.valid(stripTrailingSemicolons(sql), keyword);
+    }
+
+    /**
+     * The first dangerous function call in the statement, or null.
+     *
+     * <p>Inspected with comments and string literals stripped, so neither
+     * {@code /*x*} + {@code /dblink_exec(} nor a name mentioned inside a quoted literal can
+     * hide or falsely trigger a match.
+     */
+    String containsDangerousFunction(String statement) {
+        var matcher = DANGEROUS_FUNCTION_CALL.matcher(normalizeSqlForInspection(statement));
+        return matcher.find() ? matcher.group(1).toLowerCase(Locale.ROOT) : null;
     }
 
     String normalizeSqlForInspection(String sql) {

@@ -27,6 +27,27 @@ const FORBIDDEN_SQL_KEYWORDS = [
   "COMMENT",
 ];
 
+// Functions that read or write outside the current read-only session. Every check in this
+// guard classifies by statement *verb*, so a SELECT calling one of these passes cleanly, and
+// connection.setReadOnly(true) cannot stop them: dblink opens a new outbound connection whose
+// transaction is not read-only. Verified against a real PostgreSQL — inside an explicit
+// BEGIN TRANSACTION READ ONLY, `SELECT dblink_exec(..., 'DELETE FROM t')` reported DELETE 3
+// and the table went from three rows to zero. Mirrors DANGEROUS_SQL_FUNCTIONS in
+// McpSqlGuardService.java; the two must stay in sync or a statement one blocks the other allows.
+const DANGEROUS_SQL_FUNCTIONS = [
+  "dblink", "dblink_exec", "dblink_connect", "dblink_open", "dblink_send_query",
+  "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_stat_file",
+  "lo_import", "lo_export",
+  "load_file",
+];
+
+// The function being *called* — name, optional whitespace, open paren. Matching the bare name
+// would reject ordinary identifiers like a dblink_audit table or a load_file_name column.
+const DANGEROUS_FUNCTION_CALL = new RegExp(
+  `(?<![\\w$.])(${DANGEROUS_SQL_FUNCTIONS.join("|")})\\s*\\(`,
+  "i"
+);
+
 const FORBIDDEN_SQL_KEYWORD_SET = new Set(FORBIDDEN_SQL_KEYWORDS);
 const FORBIDDEN_ALTERNATION = FORBIDDEN_SQL_KEYWORDS.join("|");
 const CTE_MUTATION_PATTERN = new RegExp(
@@ -1158,6 +1179,11 @@ function containsForbiddenKeyword(sql) {
   return findForbiddenMutation(inspect);
 }
 
+function containsDangerousFunction(sql) {
+  const match = DANGEROUS_FUNCTION_CALL.exec(normalizeSqlForInspection(sql));
+  return match ? match[1].toLowerCase() : null;
+}
+
 function validateReadOnlySql(sql, { allowExplain = true } = {}) {
   if (!sql || !String(sql).trim()) {
     return {
@@ -1202,6 +1228,14 @@ function validateReadOnlySql(sql, { allowExplain = true } = {}) {
     return {
       ok: false,
       reason: `Blocked potentially mutating SQL keyword: ${forbiddenKeyword}.`,
+    };
+  }
+
+  const dangerousFunction = containsDangerousFunction(statement);
+  if (dangerousFunction) {
+    return {
+      ok: false,
+      reason: `Blocked SQL function that reads or writes outside this session: ${dangerousFunction}.`,
     };
   }
 
@@ -2717,6 +2751,7 @@ module.exports = {
   clampInteger,
   compactWhitespace,
   containsForbiddenKeyword,
+  containsDangerousFunction,
   createConfigFromEnv,
   firstKeyword,
   getAuthToken,
