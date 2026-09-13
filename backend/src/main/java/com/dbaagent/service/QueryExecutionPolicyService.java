@@ -156,7 +156,7 @@ public class QueryExecutionPolicyService {
         }
 
         StatementClassification mutation = classifications.getFirst();
-        if (!effectiveContext.actorIsAdmin()) {
+        if (!effectiveContext.actorMayMutate()) {
             throw QueryExecutionPolicyException.editorMutationForbidden(mutation.queryType());
         }
 
@@ -164,7 +164,7 @@ public class QueryExecutionPolicyService {
             && isDropOrTruncateStatement(mutation.queryType(), statements.getFirst())) {
             throw QueryExecutionPolicyException.unsafeMutation(
                 "DROP and TRUNCATE are blocked on MCP and coding-agent loops. "
-                    + "CREATE, ALTER, and DML still require admin privileges plus confirmation.",
+                    + "CREATE, ALTER, and DML still require admin or DBA privileges plus confirmation.",
                 mutation.queryType()
             );
         }
@@ -316,7 +316,7 @@ public class QueryExecutionPolicyService {
         // provider's `isReadOnlyQuery` strips only comments, still sees the leading quote,
         // and answers false. That combination used to fall through as mutating=true, and a
         // user pasting a SELECT with the double quotes it carried in source code was told
-        // "Only admins can execute DDL or DML" — a permissions error for a syntax problem.
+        // "Only admins or DBAs can execute DDL or DML" — a permissions error for a syntax problem.
         //
         // It stays blocked: the parser rejected it, so nothing here can vouch for it being
         // read-only, and this is deliberately reported the same way to admins rather than

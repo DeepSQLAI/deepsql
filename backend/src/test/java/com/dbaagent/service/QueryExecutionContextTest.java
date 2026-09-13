@@ -13,18 +13,27 @@ class QueryExecutionContextTest {
         assertThat(ctx.origin()).isEqualTo(QueryExecutionOrigin.MCP);
         assertThat(ctx.mutationMode()).isEqualTo(QueryExecutionContext.MutationMode.READ_ONLY_ONLY);
         assertThat(ctx.actorUsername()).isEqualTo("user-1");
-        assertThat(ctx.actorIsAdmin()).isFalse();
+        assertThat(ctx.actorMayMutate()).isFalse();
         assertThat(ctx.mutationConfirmed()).isFalse();
     }
 
     @Test
-    void mcpFactoryHonoursAdminFlagFromSecurityContext() {
+    void mcpFactoryHonoursMayMutateFlagFromSecurityContext() {
         QueryExecutionContext ctx = QueryExecutionContext.mcp("admin", true);
         assertThat(ctx.origin()).isEqualTo(QueryExecutionOrigin.MCP);
         assertThat(ctx.actorUsername()).isEqualTo("admin");
-        assertThat(ctx.actorIsAdmin()).isTrue();
+        assertThat(ctx.actorMayMutate()).isTrue();
         assertThat(ctx.mutationMode()).isEqualTo(QueryExecutionContext.MutationMode.MAY_MUTATE);
         assertThat(ctx.mutationConfirmed()).isFalse();
+    }
+
+    @Test
+    void mcpDbaMayMutateWithConfirmation() {
+        QueryExecutionContext ctx = QueryExecutionContext.mcp("dba", true, true);
+        assertThat(ctx.origin()).isEqualTo(QueryExecutionOrigin.MCP);
+        assertThat(ctx.mutationMode()).isEqualTo(QueryExecutionContext.MutationMode.MAY_MUTATE);
+        assertThat(ctx.actorMayMutate()).isTrue();
+        assertThat(ctx.mutationConfirmed()).isTrue();
     }
 
     @Test
@@ -36,11 +45,19 @@ class QueryExecutionContextTest {
     }
 
     @Test
-    void mcpNonAdminRemainsReadOnlyEvenWhenConfirmed() {
+    void mcpNonMutatorRemainsReadOnlyEvenWhenConfirmed() {
         QueryExecutionContext ctx = QueryExecutionContext.mcp("dev", false, true);
         assertThat(ctx.origin()).isEqualTo(QueryExecutionOrigin.MCP);
         assertThat(ctx.mutationMode()).isEqualTo(QueryExecutionContext.MutationMode.READ_ONLY_ONLY);
-        assertThat(ctx.actorIsAdmin()).isFalse();
+        assertThat(ctx.actorMayMutate()).isFalse();
+    }
+
+    @Test
+    void editorDbaGetsMayMutateMode() {
+        QueryExecutionContext ctx = QueryExecutionContext.editor("dba", true, false);
+        assertThat(ctx.origin()).isEqualTo(QueryExecutionOrigin.EDITOR);
+        assertThat(ctx.mutationMode()).isEqualTo(QueryExecutionContext.MutationMode.MAY_MUTATE);
+        assertThat(ctx.actorMayMutate()).isTrue();
     }
 
     @Test
@@ -60,7 +77,7 @@ class QueryExecutionContextTest {
         assertThat(ctx.origin()).isEqualTo(QueryExecutionOrigin.SCHEDULED);
         assertThat(ctx.mutationMode()).isEqualTo(QueryExecutionContext.MutationMode.MAY_MUTATE);
         assertThat(ctx.actorUsername()).isNull();
-        assertThat(ctx.actorIsAdmin()).isTrue();
+        assertThat(ctx.actorMayMutate()).isTrue();
         assertThat(ctx.mutationConfirmed()).isTrue();
     }
 

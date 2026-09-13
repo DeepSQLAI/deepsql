@@ -96,7 +96,7 @@ public class ExplainController {
                             httpRequest.getHeader(HttpHeaders.AUTHORIZATION)
                         ),
                         accessControlService.getCurrentUsername(),
-                        accessControlService.isCurrentUserAdmin(),
+                        accessControlService.currentUserMayMutateSql(),
                         Boolean.TRUE.equals(request.getMutationConfirmed())
                     ),
                     dbType
