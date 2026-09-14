@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { Brain, Code2, Database, Settings, PanelLeftClose, PanelLeftOpen, LogOut, User, ChevronDown, Check, Newspaper, Gauge, MessageSquare, LayoutDashboard } from 'lucide-react'
+import { Brain, Code2, Database, Settings, PanelLeftClose, PanelLeftOpen, LogOut, User, ChevronDown, Check, Pin, Newspaper, Gauge, MessageSquare, LayoutDashboard } from 'lucide-react'
 import { useActiveSection, useSetActiveSection } from '@/lib/stores/useNavStore'
 import { useConnectionManager } from '@/lib/hooks/useConnectionManager'
+import { useSetConnectionPin } from '@/lib/hooks/queries'
 import { AGENTS_ENABLED, canAccessHomeSection, getConnectionAccessBadge, getConnectionAccessLabel } from '@/lib/features'
 import { PERMISSIONS } from '@/lib/permissions'
 import ManageConnectionsModal from '@/components/ManageConnectionsModal'
@@ -40,6 +41,10 @@ export default function AppSidebar() {
     hasPermission(PERMISSIONS.MANAGE_USERS) ||
     hasPermission(PERMISSIONS.MANAGE_PERMISSIONS)
   const { connections, connectionId, selectedConnection, changeConnection, isLoading, refetch } = useConnectionManager()
+  // Pinning lives here as well as in Manage Connections because that modal needs
+  // MANAGE_CONNECTIONS to open at all — a Developer or Data Engineer would otherwise
+  // have no way to choose the connection they land on, which is exactly who benefits.
+  const setConnectionPin = useSetConnectionPin()
   const visibleNavItems = NAV_ITEMS.filter(({ id }) => canAccessHomeSection(id, role, selectedConnection, permissions))
 
   const initials = username.slice(0, 2).toUpperCase()
@@ -153,22 +158,41 @@ export default function AppSidebar() {
               <div className={styles.connectionDropdown}>
                 <div className={styles.dropdownLabel}>Connections</div>
                 {connections.map((conn) => (
-                  <button
+                  <div
                     key={conn.id}
-                    className={`${styles.dropdownItem} ${conn.id === connectionId ? styles.dropdownItemActive : ''}`}
-                    onClick={() => {
-                      changeConnection(conn.id)
-                      setShowConnectionDropdown(false)
-                    }}
+                    className={`${styles.dropdownRow} ${conn.id === connectionId ? styles.dropdownItemActive : ''}`}
                   >
-                    <Database size={14} />
-                    <span className={styles.dropdownItemName}>
-                      {conn.connectionName}
-                      {getConnectionAccessLabel(conn) ? ` · ${getConnectionAccessLabel(conn)}` : ''}
-                    </span>
-                    <span className={styles.dbTypeBadge}>{getConnectionAccessBadge(conn) || conn.dbType}</span>
-                    {conn.id === connectionId && <Check size={13} className={styles.dropdownItemCheck} />}
-                  </button>
+                    <button
+                      className={styles.dropdownItem}
+                      onClick={() => {
+                        changeConnection(conn.id)
+                        setShowConnectionDropdown(false)
+                      }}
+                    >
+                      <Database size={14} />
+                      <span className={styles.dropdownItemName}>
+                        {conn.connectionName}
+                        {getConnectionAccessLabel(conn) ? ` · ${getConnectionAccessLabel(conn)}` : ''}
+                      </span>
+                      <span className={styles.dbTypeBadge}>{getConnectionAccessBadge(conn) || conn.dbType}</span>
+                      {conn.id === connectionId && <Check size={13} className={styles.dropdownItemCheck} />}
+                    </button>
+                    <button
+                      className={`${styles.dropdownPin} ${conn.pinned ? styles.dropdownPinActive : ''}`}
+                      onClick={() =>
+                        setConnectionPin.mutate({ connectionId: conn.id, pinned: !conn.pinned })
+                      }
+                      disabled={setConnectionPin.isPending}
+                      aria-pressed={Boolean(conn.pinned)}
+                      title={
+                        conn.pinned
+                          ? 'Pinned as your default — DeepSQL opens on this connection. Click to unpin.'
+                          : 'Pin as your default — DeepSQL will open on this connection every time you load it.'
+                      }
+                    >
+                      <Pin size={13} />
+                    </button>
+                  </div>
                 ))}
               </div>
             )}

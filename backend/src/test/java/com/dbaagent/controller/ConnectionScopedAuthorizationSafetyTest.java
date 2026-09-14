@@ -66,6 +66,11 @@ class ConnectionScopedAuthorizationSafetyTest {
      *       decryption or session opening. Same reasoning as {@code DashboardWorkspaceController}:
      *       a second identical assert in the controller is not defence-in-depth (same
      *       mechanism, same failure mode), only a second copy to keep in sync.
+     *   <li>{@code ConnectionController.getAllConnections} takes no arguments at all. It
+     *       lists whatever {@code getConnectionsForUser(username, isAdmin)} returns, so
+     *       the caller cannot name a connection to be shown one — the scan sees it only
+     *       because the handler resolves the caller's <em>pinned</em> connection id.
+     *       {@link #connectionListingTakesNoCallerSuppliedId()} re-derives that claim.
      * </ul>
      *
      * {@link #everyDelegatedCheckStillExists()} re-derives the first group, so removing the
@@ -77,7 +82,8 @@ class ConnectionScopedAuthorizationSafetyTest {
         "AgentChatController.java:25",
         "AgentConversationController.java:29",
         "AgentConversationController.java:45",
-        "MigrationRiskController.java:19"
+        "MigrationRiskController.java:19",
+        "ConnectionController.java:428"
     );
 
     /** Service methods that own a delegated connection check. */
@@ -387,6 +393,30 @@ class ConnectionScopedAuthorizationSafetyTest {
                 + "reported as a 500 attributed to the feature. Add an "
                 + "@ExceptionHandler(ResponseStatusException.class) that preserves the status.")
             .isEmpty();
+    }
+
+    /**
+     * {@code GET /connections} is exempt because it accepts nothing from the caller — the
+     * list it returns is derived entirely from the authenticated username. That is a claim
+     * about the handler's signature, so check it: if it ever grows a parameter, the
+     * exemption would start covering an endpoint that <em>can</em> be pointed at someone
+     * else's connection.
+     */
+    @Test
+    void connectionListingTakesNoCallerSuppliedId() throws IOException {
+        String source = Files.readString(CONTROLLER_DIR.resolve("ConnectionController.java"));
+
+        assertThat(source)
+            .as("GET /connections has gained a parameter, so it may no longer be scoped "
+                + "purely by the authenticated user. Remove its AUTHORIZED_ELSEWHERE entry "
+                + "and authorize the caller-supplied value.")
+            .contains("public ResponseEntity<List<ConnectionSummaryResponse>> getAllConnections() {");
+
+        assertThat(source)
+            .as("GET /connections no longer filters by the calling user. Its exemption from "
+                + "the connection-scope scan assumed getConnectionsForUser(username, isAdmin) "
+                + "was doing the scoping.")
+            .contains("credentialService.getConnectionsForUser(username, isAdmin)");
     }
 
     /**

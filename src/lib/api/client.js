@@ -754,6 +754,21 @@ export const connectionAPI = {
     return response.data;
   },
 
+  // Pin a connection as this user's default. Per user, not per connection — the
+  // backend keys the pin on the caller, so pinning a shared connection does not
+  // change what anyone else opens on.
+  pinConnection: async (connectionId) => {
+    const response = await apiClient.put(`/api/connections/${connectionId}/pin`);
+    return response.data;
+  },
+
+  unpinConnection: async (connectionId) => {
+    const response = await apiClient.delete(
+      `/api/connections/${connectionId}/pin`,
+    );
+    return response.data;
+  },
+
   getInitStatus: async (connectionId) => {
     const response = await apiClient.get(
       `/api/connections/${connectionId}/init-status`,
@@ -3910,6 +3925,54 @@ export const slackDigestAPI = {
     apiClient.get("/api/admin/slack/digest/config").then((r) => r.data),
   updateConfig: (data) =>
     apiClient.put("/api/admin/slack/digest/config", data).then((r) => r.data),
+};
+
+/**
+ * Digest preferences API — per-user digest configuration.
+ * Users manage their own preferences; admins can seed/view all.
+ */
+export const digestPreferencesAPI = {
+  // Current user's preferences
+  getMyPreferences: () =>
+    apiClient.get("/api/digest/preferences").then((r) => r.data),
+
+  createPreference: (data) =>
+    apiClient.post("/api/digest/preferences", data).then((r) => r.data),
+
+  updatePreference: (id, data) =>
+    apiClient.put(`/api/digest/preferences/${id}`, data).then((r) => r.data),
+
+  setEnabled: (id, enabled) =>
+    apiClient
+      .patch(`/api/digest/preferences/${id}/enabled`, { enabled })
+      .then((r) => r.data),
+
+  deletePreference: (id) =>
+    apiClient.delete(`/api/digest/preferences/${id}`).then((r) => r.data),
+
+  // Metadata
+  getPersonaTags: () =>
+    apiClient.get("/api/digest/preferences/persona-tags").then((r) => r.data),
+
+  getDeliveryMethods: () =>
+    apiClient
+      .get("/api/digest/preferences/delivery-methods")
+      .then((r) => r.data),
+
+  // Status
+  getStatus: () =>
+    apiClient.get("/api/digest/preferences/status").then((r) => r.data),
+
+  // Seed current user's preferences
+  seedForMe: () =>
+    apiClient.post("/api/digest/preferences/seed/me").then((r) => r.data),
+
+  // Admin: seed preview and execution
+  previewSeed: () =>
+    apiClient.get("/api/digest/preferences/admin/seed/preview").then((r) => r.data),
+
+  executeSeed: () =>
+    apiClient.post("/api/digest/preferences/admin/seed").then((r) => r.data),
 };
 
 /**

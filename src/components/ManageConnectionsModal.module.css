@@ -326,3 +326,56 @@
     color: var(--color-grey);
     font-size: var(--font-size-sm);
 }
+
+/* Default-connection pin */
+.pinHeader {
+    width: 40px;
+    text-align: center;
+}
+
+.pinButton {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-light-5);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.pinButton:hover:not(:disabled) {
+    background: var(--color-light-1);
+    border-color: var(--color-light-3);
+    color: var(--color-black);
+}
+
+.pinButton:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.pinButtonActive {
+    color: var(--color-black);
+    border-color: var(--color-light-3);
+    background: var(--color-light-1);
+}
+
+.pinButton .spinner {
+    animation: spin 1s linear infinite;
+}
+
+.pinnedLabel {
+    align-self: flex-start;
+    padding: 2px 6px;
+    border: 1px solid var(--color-light-3);
+    border-radius: var(--radius-sm);
+    background: var(--color-light-1);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--color-light-7);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}

@@ -31,4 +31,13 @@ public class ConnectionSummaryResponse {
     private String accessLevel;
     private Boolean canManageConfig;
     private Boolean canManageContent;
+
+    /**
+     * Whether the calling user has pinned this connection as their default.
+     *
+     * <p>Per caller, not per connection — two users listing the same shared connection
+     * see different values here. It rides the list response so the UI needs no second
+     * request to know which row carries the pin.
+     */
+    private Boolean pinned;
 }

@@ -3,14 +3,15 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { getActionPermission, getActionConfig } from '@/lib/actions'
 import { authAPI, setupAPI, adminAPI, AUTH_CHANGE_EVENT } from '@/lib/api/client'
 import { clearAgentRemoteUser } from '@/lib/api/agentClient'
+import { resetConnectionPinApplied } from '@/lib/hooks/useConnectionManager'
 import { queryClient } from '@/lib/queryClient'
 import { useChatStore } from '@/lib/stores/useChatStore'
 import { useConnectionStore } from '@/lib/stores/useConnectionStore'
 import { useDashboardStore } from '@/lib/stores/useDashboardStore'
 import { useNavStore } from '@/lib/stores/useNavStore'
 
-export { PERMISSIONS, ROLES, ROLE_LABELS, normalizeRole, roleLabel, isAdminRole, isBuiltInRole } from '@/lib/permissions'
-import { PERMISSIONS, ROLES, ROLE_BASELINE_PERMISSIONS, normalizeRole, isAdminRole, roleLabel } from '@/lib/permissions'
+export { PERMISSIONS, ROLES, ROLE_LABELS, normalizeRole, roleLabel, isAdminRole, mayMutateSqlRole, isBuiltInRole } from '@/lib/permissions'
+import { PERMISSIONS, ROLES, ROLE_BASELINE_PERMISSIONS, normalizeRole, isAdminRole, mayMutateSqlRole, roleLabel } from '@/lib/permissions'
 
 const AuthContext = createContext(null)
 
@@ -21,6 +22,10 @@ const isPublicAuthPath = (pathname) => AUTH_PUBLIC_PATHS.some((prefix) => pathna
 
 const resetClientSessionState = () => {
   localStorage.removeItem('selectedConnectionId')
+
+  // The pinned connection is applied once per page load; sign-out has to re-arm it or
+  // the next user to sign in on this tab would land on whatever was selected last.
+  resetConnectionPinApplied()
 
   useChatStore.getState().resetStore()
 
@@ -286,6 +291,7 @@ export function AuthProvider({ children }) {
   }, [role, permissions])
 
   const isAdmin = useMemo(() => isAdminRole(role), [role])
+  const mayMutateSql = useMemo(() => mayMutateSqlRole(role), [role])
   const isDeveloper = useMemo(() => normalizeRole(role) === ROLES.DEVELOPER, [role])
   const roleDisplayName = useMemo(() => roleLabel(role, user?.roleName), [role, user?.roleName])
   const impersonating = Boolean(user?.impersonating)
@@ -323,6 +329,7 @@ export function AuthProvider({ children }) {
     hasRole,
     hasRoleLevel,
     isAdmin,
+    mayMutateSql,
     isDeveloper,
     canExecute,
     canChat,
@@ -351,6 +358,7 @@ export function AuthProvider({ children }) {
     hasRole,
     hasRoleLevel,
     isAdmin,
+    mayMutateSql,
     isDeveloper,
     canExecute,
     canChat,

@@ -130,6 +130,12 @@ export function isAdminRole(role) {
   return normalizeRole(role) === ROLES.ADMIN
 }
 
+/** Built-in ADMIN or DBA may confirm DDL/DML in the SQL Editor / MCP. */
+export function mayMutateSqlRole(role) {
+  const normalized = normalizeRole(role)
+  return normalized === ROLES.ADMIN || normalized === ROLES.DBA
+}
+
 /**
  * Whether a permission set grants a permission. Admin is a fixed point on the backend
  * (it holds every permission), so no special case is needed here.

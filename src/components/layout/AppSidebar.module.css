@@ -260,12 +260,27 @@
   padding: 8px 10px 4px;
 }
 
+/* Row wrapper: the connection itself is one button, the pin toggle another. They
+   cannot nest — a button inside a button is invalid HTML and the inner click never
+   behaves. */
+.dropdownRow {
+  display: flex;
+  align-items: center;
+  width: calc(100% - 8px);
+  margin: 0 4px 4px;
+  border-radius: 8px;
+}
+
+.dropdownRow:hover {
+  background: #f3f4f6;
+}
+
 .dropdownItem {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: calc(100% - 8px);
-  margin: 0 4px 4px;
+  flex: 1;
+  min-width: 0;
   padding: 8px 10px;
   border: none;
   border-radius: 8px;
@@ -277,9 +292,6 @@
   transition: background 0.1s;
 }
 
-.dropdownItem:hover {
-  background: #f3f4f6;
-}
 
 .dropdownItemActive {
   background: #f3f4f6;
@@ -294,6 +306,35 @@
 }
 
 .dropdownItemCheck {
+  color: #111827;
+}
+
+.dropdownPin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 7px;
+  margin-right: 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #d1d5db;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.dropdownPin:hover:not(:disabled) {
+  background: #e5e7eb;
+  color: #111827;
+}
+
+.dropdownPin:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dropdownPinActive {
   color: #111827;
 }
 

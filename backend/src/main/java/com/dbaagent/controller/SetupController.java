@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestClient;
 
@@ -17,14 +18,32 @@ import java.util.Map;
 /**
  * REST API for the first-run onboarding wizard.
  *
- * <p>The {@code GET /setup/status} endpoint is publicly accessible (no auth required)
- * so the frontend can detect first-run before login. All other endpoints require
- * an authenticated user.
+ * <p>{@code GET /setup/status} and {@code POST /setup/initialize} are publicly accessible
+ * (both sit in {@code SecurityConfig}'s permitAll set) because they run before any account
+ * exists: the frontend probes {@code /status} to detect a first run, and {@code /initialize}
+ * performs it. Both are annotated {@code @PreAuthorize("permitAll()")} so the class-level
+ * gate below does not close the onboarding flow.
+ *
+ * <p>Every other endpoint here writes <em>installation-wide</em> configuration and is
+ * admin-only. This class previously carried no authorization at all, and its javadoc said
+ * "All other endpoints require an authenticated user" — true, and exactly the trap:
+ * authentication is not authorization. Any authenticated user, the lowest role included,
+ * could POST {@code /setup/llm-config} and repoint the organization's LLM endpoint and API
+ * key. {@code LlmConfigResolver} reads the database tier before the environment tier, so
+ * that write silently overrode a correctly configured install with no restart, sending every
+ * chat turn, schema and query result to a host of the caller's choosing;
+ * {@code /setup/llm-config/test} issued a server-side request to the same unvalidated URL.
+ *
+ * <p>These settings belong to no single connection, so they cannot be authorized against
+ * one — which is why {@code ConnectionScopedAuthorizationSafetyTest} could not see the gap.
+ * {@code GlobalConfigAuthorizationSafetyTest} covers this shape and fails the build if a
+ * handler here loses its gate.
  */
 @RestController
 @RequestMapping("/setup")
 @RequiredArgsConstructor
 @Slf4j
+@PreAuthorize("hasRole('ADMIN')")
 public class SetupController {
 
     /** Provider id used when the caller does not name one. */
@@ -57,6 +76,7 @@ public class SetupController {
     // ── GET /setup/status ─────────────────────────────────────────────────────
 
     /** Returns setup completion state. Public endpoint — no auth required. */
+    @PreAuthorize("permitAll()")
     @GetMapping("/status")
     public SetupStatusResponse getStatus() {
         boolean hasOrgInfo     = systemConfigService.get("setup.org.name")
@@ -87,6 +107,7 @@ public class SetupController {
      * and returns a JWT so the caller is immediately logged in.
      * Returns 409 if any user already exists (setup already done).
      */
+    @PreAuthorize("permitAll()")
     @PostMapping("/initialize")
     public ResponseEntity<Map<String, Object>> initialize(
             @RequestBody InitializeRequest request) {

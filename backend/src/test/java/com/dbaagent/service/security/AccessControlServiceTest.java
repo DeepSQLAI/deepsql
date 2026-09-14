@@ -295,6 +295,70 @@ class AccessControlServiceTest {
         assertEquals(403, ex.getStatusCode().value());
     }
 
+
+    @Test
+    void dbaMayMutateSqlButIsNotAdmin() {
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(
+                "dba-user",
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_DBA"))
+            )
+        );
+
+        assertTrue(accessControlService.currentUserMayMutateSql());
+        assertFalse(accessControlService.isCurrentUserAdmin());
+    }
+
+    @Test
+    void adminMayMutateSql() {
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(
+                "admin",
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))
+            )
+        );
+
+        assertTrue(accessControlService.currentUserMayMutateSql());
+        assertTrue(accessControlService.isCurrentUserAdmin());
+    }
+
+    @Test
+    void developerMayNotMutateSql() {
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(
+                "dev",
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_DEVELOPER"))
+            )
+        );
+
+        assertFalse(accessControlService.currentUserMayMutateSql());
+        assertFalse(accessControlService.isCurrentUserAdmin());
+    }
+
+    @Test
+    void impersonatingDbaAllowsMutateSql() {
+        com.dbaagent.model.User impersonator = new com.dbaagent.model.User();
+        impersonator.setId(1L);
+        impersonator.setUsername("admin");
+        impersonator.setRole("ADMIN");
+        com.dbaagent.model.User target = new com.dbaagent.model.User();
+        target.setId(2L);
+        target.setUsername("dba-target");
+        target.setRole("DBA");
+        com.dbaagent.security.ImpersonationContext.enter(
+            new com.dbaagent.security.ImpersonationContext.State(impersonator, target)
+        );
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken("dba-target", null, List.of())
+        );
+
+        assertTrue(accessControlService.currentUserMayMutateSql());
+        assertFalse(accessControlService.isCurrentUserAdmin());
+    }
+
     private ConnectionAccessService.ResolvedConnectionAccess resolved(
         String connectionId,
         EffectiveConnectionAccess effectiveAccess,

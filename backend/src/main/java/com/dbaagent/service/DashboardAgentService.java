@@ -43,6 +43,13 @@ import java.util.regex.Pattern;
  * falls back to the older single-block contract if no shell/widget fences are
  * present at all, so a reply that predates this contract still works.
  *
+ * <p>A final {@code dashboard-note} fence carries the agent's own account of the
+ * turn — what changed, and what it could not do or verify — which becomes the
+ * chat reply. Before this, the contract banned prose and the UI showed a
+ * hardcoded "Done — built and verified against your data" on every build, so a
+ * turn that ignored the user's correction still reported success. The note is
+ * stripped before HTML extraction and falls back to that constant if absent.
+ *
  * <p>The old JSON-spec contract (metrics/charts/tables + a {{placeholder}}
  * substitution engine + a fixed renderer) is gone: it couldn't express real SQL
  * (e.g. a Unix-epoch date filter) and boxed the agent in.
@@ -146,7 +153,8 @@ public class DashboardAgentService {
                 "The agent couldn't build the dashboard: " + (reply.error() == null ? "it ended early" : reply.error()));
         }
 
-        String html = extractHtml(reply.text());
+        String summary = extractSummary(reply.text());
+        String html = extractHtml(stripNotes(reply.text()));
         if (html == null || html.isBlank()) {
             log.warn("Dashboard agent returned no HTML artifact. Reply head: {}",
                 reply.text() == null ? "null" : reply.text().substring(0, Math.min(300, reply.text().length())));
@@ -165,6 +173,7 @@ public class DashboardAgentService {
         cfg.put("renderMode", "artifact");
         cfg.put("title", title);
         cfg.put("html", html);
+        if (summary != null) cfg.put("summary", summary);
         cfg.put("trace", trace);
         return cfg;
     }
@@ -321,9 +330,22 @@ public class DashboardAgentService {
               --ds-shadow). Do NOT import fonts or set font-family. Stay monochrome; use a subtle soft color/gradient
               ONLY to highlight the 1–2 most important KPIs. Clean, minimal, lots of whitespace — not dark or neon.
 
-            Output your FINAL message as ONLY the fenced blocks described in step 5 above (one ```dashboard-shell```
-            first, then one ```dashboard-widget id="..."``` per widget) — no prose, no tool calls after the last one.
-            Do NOT wrap the whole thing in a single ```html block — the shell and each widget are SEPARATE fences.""");
+            Output your FINAL message as ONLY fenced blocks (one ```dashboard-shell``` first, then one
+            ```dashboard-widget id="..."``` per widget, then the ```dashboard-note``` below) — no loose prose
+            outside a fence, no tool calls after the last one.
+            Do NOT wrap the whole thing in a single ```html block — the shell and each widget are SEPARATE fences.
+
+            7. END with a ```dashboard-note``` fence: 1-3 sentences to the person who asked, in the same plain
+               business language as the two hard rules above (a note naming a table, a column, SQL, or the
+               connection id breaks the same security requirement the dashboard itself is bound by).
+               Say what THIS turn actually changed — not that a dashboard exists. Then, in the same note:
+               - State anything you could NOT do, could not verify, or chose to skip, and why. A build that
+                 partly worked must say so. Never claim a number is correct because a query returned it.
+               - If the user was correcting or disputing something (a wrong figure, a chart that didn't load),
+                 say plainly whether it is now fixed, and what the value/behaviour is now versus what they
+                 reported. If you could not reproduce or resolve their complaint, say THAT — do not answer a
+                 correction with a description of what you built.
+               Write it as you would to a colleague: specific and short. Never open with "Done".""");
         return sb.toString();
     }
 
@@ -336,6 +358,28 @@ public class DashboardAgentService {
     private static final Pattern SHELL_OR_WIDGET_FENCE = Pattern.compile(
         "```dashboard-(shell|widget)(?:\\s+id=\"([^\"]+)\")?\\s*\\n(.*?)\\n```",
         Pattern.DOTALL);
+
+    // The agent's own account of the turn. Stripped before HTML extraction runs:
+    // prose mentioning a tag would otherwise be a candidate for extractHtml's
+    // looks-like-markup fallback.
+    private static final Pattern NOTE_FENCE = Pattern.compile(
+        "```dashboard-note\\s*\\n(.*?)\\n```", Pattern.DOTALL);
+
+    private static final int MAX_SUMMARY_CHARS = 600;
+
+    /** The agent's summary of this turn, or null if it emitted no note. */
+    private String extractSummary(String text) {
+        if (text == null || text.isBlank()) return null;
+        Matcher m = NOTE_FENCE.matcher(text);
+        String note = null;
+        while (m.find()) note = m.group(1).trim();
+        if (note == null || note.isBlank()) return null;
+        return trim(note, MAX_SUMMARY_CHARS);
+    }
+
+    private String stripNotes(String text) {
+        return text == null ? null : NOTE_FENCE.matcher(text).replaceAll("");
+    }
 
     /**
      * Assembles the final document from the agent's shell + widget chunks (the

@@ -69,6 +69,9 @@ class SlackDailyDigestServiceTest {
     @Mock private AuthLoginChallengeRepository authLoginChallengeRepository;
     @Mock private IndexAdvisorService indexAdvisorService;
     @Mock private IndexRecommendationService indexRecommendationService;
+    @Mock private com.dbaagent.repository.UserDigestPreferenceRepository userDigestPreferenceRepository;
+    @Mock private com.dbaagent.service.digest.DigestInsightAssemblerService digestInsightAssemblerService;
+    @Mock private com.dbaagent.repository.UserRepository userRepository;
 
     private SlackDailyDigestService service;
 
@@ -102,7 +105,10 @@ class SlackDailyDigestServiceTest {
             connectionAccessGrantRepository,
             authLoginChallengeRepository,
             indexAdvisorService,
-            indexRecommendationService
+            indexRecommendationService,
+            userDigestPreferenceRepository,
+            digestInsightAssemblerService,
+            userRepository
         );
     }
 
@@ -490,7 +496,8 @@ class SlackDailyDigestServiceTest {
             service, "appendNewcomersSection", sb, style, "conn-1", since);
 
         String out = sb.toString();
-        assertThat(out).contains("new_pricing_table");
+        assertThat(out).containsIgnoringCase("pricing table");
+        assertThat(out).contains("abc");
         assertThat(out).doesNotContain("SELECT 1");
     }
 
