@@ -93,4 +93,10 @@ public interface DatabaseDialect {
      * @return The sampling provider
      */
     SamplingProvider sampling();
+
+    /**
+     * Get the migration risk provider for this database.
+     * @return The migration risk provider
+     */
+    MigrationRiskProvider migrationRisk();
 }

@@ -74,7 +74,7 @@ test("every command in the catalog has a COMMAND_HELP entry", () => {
   void _main;
   const expected = [
     "agent",
-    "login","logout","whoami","config","mcp","connections","query","analyze","schema",
+    "login","logout","whoami","config","mcp","connections","query","analyze","migration","schema",
     "digest","brain-context","brain","business-rules","relationships","anti-patterns","indexes",
     "users","access","permissions","slow-queries","setup",
   ];
@@ -138,6 +138,7 @@ test("--no-color suppresses ANSI escapes in help output", async () => {
 const HELP_DRIFT_TARGETS = [
   { command: "slow-queries", modulePath: "./commands/slow-queries" },
   { command: "brain", modulePath: "./commands/brain" },
+  { command: "migration", modulePath: "./commands/migration" },
   // `config` dispatched from a bare switch with no SUBCOMMANDS export, so it sat
   // outside this guard entirely and its help could drift unnoticed. It now
   // exports the map like its siblings.

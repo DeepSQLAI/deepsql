@@ -1,0 +1,6 @@
+package com.dbaagent.service.migration;
+
+public enum DdlOperation {
+    ADD_COLUMN, DROP_COLUMN, RENAME_COLUMN, ALTER_COLUMN_TYPE, SET_NOT_NULL,
+    ADD_CHECK, ADD_FOREIGN_KEY, VALIDATE_CONSTRAINT, CREATE_INDEX, UNKNOWN
+}
