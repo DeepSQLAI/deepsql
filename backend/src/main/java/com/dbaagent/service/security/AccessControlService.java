@@ -5,6 +5,7 @@ import com.dbaagent.model.Chat;
 import com.dbaagent.model.ChatFeedback;
 import com.dbaagent.model.EffectiveConnectionAccess;
 import com.dbaagent.model.Permission;
+import com.dbaagent.model.Role;
 import com.dbaagent.repository.AnalysisHistoryRepository;
 import com.dbaagent.repository.ChatFeedbackRepository;
 import com.dbaagent.repository.ChatRepository;
@@ -295,6 +296,38 @@ public class AccessControlService {
         Authentication authentication = currentAuthentication();
         return authentication != null && authentication.getAuthorities().stream()
             .anyMatch(authority -> "ROLE_ADMIN".equals(authority.getAuthority()));
+    }
+
+    /**
+     * Whether the current principal may run confirmed DDL/DML on SQL surfaces
+     * (Editor / MCP). Built-in ADMIN and DBA only — not custom roles, and not
+     * DEVELOPER / DATA_ENGINEER. Distinct from {@link #isCurrentUserAdmin()}:
+     * DBA must not receive MANAGE_USERS or other admin-only product controls.
+     */
+    public boolean currentUserMayMutateSql() {
+        if (ImpersonationContext.isActive()) {
+            return ImpersonationContext.current()
+                .map(state -> {
+                    if (state.target() == null) {
+                        return false;
+                    }
+                    Role role = state.target().getRoleEnum();
+                    return role == Role.ADMIN || role == Role.DBA;
+                })
+                .orElse(false);
+        }
+        if (!authEnabled) {
+            return true;
+        }
+        Authentication authentication = currentAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return false;
+        }
+        return authentication.getAuthorities().stream()
+            .anyMatch(authority -> {
+                String value = authority.getAuthority();
+                return "ROLE_ADMIN".equals(value) || "ROLE_DBA".equals(value);
+            });
     }
 
     private Authentication currentAuthentication() {

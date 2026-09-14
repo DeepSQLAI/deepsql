@@ -4,11 +4,20 @@ import com.dbaagent.model.QueryExecutionOrigin;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+/**
+ * Execution origin + mutation privileges for a SQL run.
+ *
+ * <p>{@code actorMayMutate} is true for built-in ADMIN and DBA (wired from
+ * {@code AccessControlService.currentUserMayMutateSql()}). It gates Editor/MCP
+ * DDL/DML; chat stays {@link MutationMode#READ_ONLY_ONLY}. The same flag is
+ * consulted by data-access policy during query execution so mutators are not
+ * blocked by schema redaction meant for read-only roles.
+ */
 public record QueryExecutionContext(
     QueryExecutionOrigin origin,
     MutationMode mutationMode,
     String actorUsername,
-    boolean actorIsAdmin,
+    boolean actorMayMutate,
     boolean mutationConfirmed
 ) {
 
@@ -27,12 +36,12 @@ public record QueryExecutionContext(
         );
     }
 
-    public static QueryExecutionContext editor(String actorUsername, boolean actorIsAdmin, boolean mutationConfirmed) {
+    public static QueryExecutionContext editor(String actorUsername, boolean actorMayMutate, boolean mutationConfirmed) {
         return new QueryExecutionContext(
             QueryExecutionOrigin.EDITOR,
-            actorIsAdmin ? MutationMode.MAY_MUTATE : MutationMode.READ_ONLY_ONLY,
+            actorMayMutate ? MutationMode.MAY_MUTATE : MutationMode.READ_ONLY_ONLY,
             actorUsername,
-            actorIsAdmin,
+            actorMayMutate,
             mutationConfirmed
         );
     }
@@ -51,25 +60,25 @@ public record QueryExecutionContext(
         return mcp(actorUsername, false);
     }
 
-    public static QueryExecutionContext mcp(String actorUsername, boolean actorIsAdmin) {
-        return mcp(actorUsername, actorIsAdmin, false);
+    public static QueryExecutionContext mcp(String actorUsername, boolean actorMayMutate) {
+        return mcp(actorUsername, actorMayMutate, false);
     }
 
     /**
-     * MCP / coding-agent SQL. Developers stay read-only. Admins may run
+     * MCP / coding-agent SQL. Developers stay read-only. Admins and DBAs may run
      * non-destructive DDL/DML after the same confirmation gate as the Editor.
      * DROP and TRUNCATE stay blocked in {@link QueryExecutionPolicyService}.
      */
     public static QueryExecutionContext mcp(
         String actorUsername,
-        boolean actorIsAdmin,
+        boolean actorMayMutate,
         boolean mutationConfirmed
     ) {
         return new QueryExecutionContext(
             QueryExecutionOrigin.MCP,
-            actorIsAdmin ? MutationMode.MAY_MUTATE : MutationMode.READ_ONLY_ONLY,
+            actorMayMutate ? MutationMode.MAY_MUTATE : MutationMode.READ_ONLY_ONLY,
             actorUsername,
-            actorIsAdmin,
+            actorMayMutate,
             mutationConfirmed
         );
     }
@@ -77,13 +86,13 @@ public record QueryExecutionContext(
     public static QueryExecutionContext forSqlSurface(
         boolean mcpBearer,
         String actorUsername,
-        boolean actorIsAdmin,
+        boolean actorMayMutate,
         boolean mutationConfirmed
     ) {
         if (mcpBearer) {
-            return mcp(actorUsername, actorIsAdmin, mutationConfirmed);
+            return mcp(actorUsername, actorMayMutate, mutationConfirmed);
         }
-        return editor(actorUsername, actorIsAdmin, mutationConfirmed);
+        return editor(actorUsername, actorMayMutate, mutationConfirmed);
     }
 
     public static QueryExecutionContext scheduled() {
@@ -100,12 +109,16 @@ public record QueryExecutionContext(
         return api(actorUsername, false);
     }
 
-    public static QueryExecutionContext api(String actorUsername, boolean actorIsAdmin) {
+    /**
+     * API / dashboard SQL is always read-only. The {@code actorMayMutate} flag here
+     * only influences data-access policy bypass (admins), not mutation mode.
+     */
+    public static QueryExecutionContext api(String actorUsername, boolean actorMayMutate) {
         return new QueryExecutionContext(
             QueryExecutionOrigin.API,
             MutationMode.READ_ONLY_ONLY,
             actorUsername,
-            actorIsAdmin,
+            actorMayMutate,
             false
         );
     }

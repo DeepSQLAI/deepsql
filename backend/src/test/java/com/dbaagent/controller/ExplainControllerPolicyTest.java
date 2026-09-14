@@ -140,7 +140,7 @@ class ExplainControllerPolicyTest {
         when(httpRequest.getHeader(HttpHeaders.AUTHORIZATION))
             .thenReturn("Bearer dsql_mcp_public.secret");
         when(accessControlService.getCurrentUsername()).thenReturn("admin");
-        when(accessControlService.isCurrentUserAdmin()).thenReturn(true);
+        when(accessControlService.currentUserMayMutateSql()).thenReturn(true);
         when(explainPlanService.analyzeQuery(eq("conn-1"), anyString(), eq(true)))
             .thenReturn(new ExplainPlanAnalysis());
 
@@ -154,7 +154,7 @@ class ExplainControllerPolicyTest {
         assertThat(captor.getValue().origin()).isEqualTo(QueryExecutionOrigin.MCP);
         assertThat(captor.getValue().mutationMode())
             .isEqualTo(QueryExecutionContext.MutationMode.MAY_MUTATE);
-        assertThat(captor.getValue().actorIsAdmin()).isTrue();
+        assertThat(captor.getValue().actorMayMutate()).isTrue();
     }
 
     @Test

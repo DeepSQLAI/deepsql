@@ -98,6 +98,48 @@ class QueryExecutionPolicyServiceTest {
     }
 
     @Test
+    void editorMutation_dbaRequiresConfirmation() {
+        QueryExecutionPolicyException exception = assertThrows(
+            QueryExecutionPolicyException.class,
+            () -> service.enforce(
+                new QueryRequest("UPDATE customers SET property_status = 'ACTIVE' WHERE customer_id = 9", null, null),
+                QueryExecutionContext.editor("dba", true, false),
+                "mysql"
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo(QueryExecutionPolicyException.EDITOR_MUTATION_CONFIRMATION_REQUIRED);
+        assertThat(exception.isRequiresConfirmation()).isTrue();
+    }
+
+    @Test
+    void editorMutation_dbaConfirmedIsAllowed() {
+        QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
+            new QueryRequest("UPDATE customers SET property_status = 'ACTIVE' WHERE customer_id = 9", null, null),
+            QueryExecutionContext.editor("dba", true, true),
+            "mysql"
+        );
+
+        assertThat(decision.mutating()).isTrue();
+        assertThat(decision.primaryQueryType()).isEqualTo("UPDATE");
+    }
+
+    @Test
+    void editorMutation_developerStillForbidden() {
+        QueryExecutionPolicyException exception = assertThrows(
+            QueryExecutionPolicyException.class,
+            () -> service.enforce(
+                new QueryRequest("DELETE FROM bookings WHERE id = 1", null, null),
+                QueryExecutionContext.editor("developer", false, true),
+                "mysql"
+            )
+        );
+
+        assertThat(exception.getErrorCode()).isEqualTo(QueryExecutionPolicyException.EDITOR_MUTATION_FORBIDDEN);
+        assertThat(exception.getMessage()).contains("admins or DBAs");
+    }
+
+    @Test
     void editorConfirmedDeleteWithoutWhere_isBlocked() {
         QueryExecutionPolicyException exception = assertThrows(
             QueryExecutionPolicyException.class,
@@ -619,7 +661,7 @@ class QueryExecutionPolicyServiceTest {
     // ── A malformed statement is a syntax error, not a permissions problem ──────────
     //
     // Reported from the field: a user pasted a SELECT that still carried the double
-    // quotes it had in source code and was told "Only admins can execute DDL or DML from
+    // quotes it had in source code and was told "Only admins or DBAs can execute DDL or DML from
     // the SQL Editor", which reads as a permissions problem and sent them looking for a
     // role fix. The statement is neither DDL nor DML — it is not valid SQL at all.
     //
@@ -644,7 +686,7 @@ class QueryExecutionPolicyServiceTest {
         );
 
         assertThat(exception.getErrorCode()).isEqualTo(QueryExecutionPolicyException.STATEMENT_NOT_PARSEABLE);
-        assertThat(exception.getMessage()).doesNotContain("Only admins");
+        assertThat(exception.getMessage()).doesNotContain("Only admins or DBAs");
         assertThat(exception.getMessage()).contains("could not parse");
     }
 
