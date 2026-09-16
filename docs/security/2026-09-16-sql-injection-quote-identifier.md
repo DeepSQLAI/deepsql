@@ -61,6 +61,17 @@ No errors at all — the count returned, the table was dropped, the trailing sel
 rows. The payload contains no `/`, so Spring's `StrictHttpFirewall` (which rejects `%2F`) does
 not stand in its way.
 
+**HTTP exploit path — corrected by hands-on QA.** The reproduction above uses `psql` and a
+`;`-separated `DROP TABLE`, which demonstrates the *quoter* flaw exactly. But over the real HTTP
+endpoint, Spring's `StrictHttpFirewall` rejects a `;` in a path segment (400) before the
+controller runs, so multi-statement chaining is **not** reachable that way. The double quote
+*is* allowed through, so the HTTP-reachable exploit is a **single-statement quote breakout**:
+`tableName` = `orders" AS x` returned **200** on the unpatched backend (the quote closed the
+identifier and `"orders" AS x` executed as an aliased table reference) and **400** on the fixed
+one. `nonexistent_xyz" AS x` also returned 200 unpatched, so the attacker controls the whole
+FROM clause regardless of any real table name. The fix blocks both the quote breakout and,
+defensively, the semicolon form.
+
 **There is no second line of defence on this path.** It never reaches
 `QueryExecutorService`, so it gets no `connection.setReadOnly(true)`, no policy service and no
 row cap — a `grep` for `setReadOnly` over `src/main/java` returns exactly one hit, and it is
