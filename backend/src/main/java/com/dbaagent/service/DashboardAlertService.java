@@ -85,6 +85,17 @@ public class DashboardAlertService {
         alertRepository.deleteById(alertId);
     }
 
+    /**
+     * The dashboard an alert belongs to, or empty if there is no such alert. The controller
+     * authorises the dashboard, then binds the alert to it with this — update/delete took an
+     * alertId beside the dashboardId and acted on the alert without checking it belonged to the
+     * authorised dashboard, so a dashboard you own paired with another tenant's alertId let you
+     * repoint or delete their alert.
+     */
+    public java.util.Optional<UUID> findDashboardIdForAlert(UUID alertId) {
+        return alertRepository.findById(alertId).map(DashboardAlert::getDashboardId);
+    }
+
     private DashboardAlert requireAlert(UUID id) {
         return alertRepository.findById(id)
             .orElseThrow(() -> new IllegalArgumentException("Alert not found with id: " + id));
