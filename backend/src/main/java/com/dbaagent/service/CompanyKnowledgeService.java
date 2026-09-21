@@ -404,6 +404,17 @@ public class CompanyKnowledgeService {
         return annotateEntry(saved, schema);
     }
 
+    /**
+     * The connection an entry belongs to, or empty if there is no such entry. The controller
+     * authorises against this — not a caller-supplied connectionId that it never compares to
+     * the entry, and that on the update path was only consulted when the caller chose to send
+     * it, so omitting it skipped the check entirely.
+     */
+    public java.util.Optional<String> findConnectionIdForEntry(String entryId) {
+        return companyKnowledgeEntryRepository.findById(entryId)
+            .map(CompanyKnowledgeEntry::getConnectionId);
+    }
+
     @Transactional
     public CompanyKnowledgeEntry updateEntry(String entryId, CompanyKnowledgeEntry request) {
         validate(request, false);

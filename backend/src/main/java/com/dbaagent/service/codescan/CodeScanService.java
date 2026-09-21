@@ -174,6 +174,30 @@ public class CodeScanService {
         return sourceRepository.findByConnectionIdAndActiveTrueOrderByCreatedAtDesc(connectionId);
     }
 
+    /**
+     * The connection a scan source belongs to, or empty if there is no such source.
+     *
+     * <p>The controller authorises against this, not against a caller-supplied {@code
+     * connectionId}. Every scan endpoint took a {@code @RequestParam connectionId} beside a
+     * {@code @PathVariable sourceId}/{@code jobId} and asserted on the param — so a caller
+     * passed a connection they own next to another tenant's source id, the assert passed, and
+     * the operation hit a row they had no access to.
+     */
+    public java.util.Optional<String> findConnectionIdForSource(String sourceId) {
+        return sourceRepository.findById(sourceId).map(CodeScanSource::getConnectionId);
+    }
+
+    /** The connection a scan job belongs to, or empty if there is no such job. */
+    public java.util.Optional<String> findConnectionIdForJob(String jobId) {
+        return jobRepository.findById(jobId).map(CodeScanJob::getConnectionId);
+    }
+
+    /** The connection a suggestion belongs to, or empty if there is no such suggestion. */
+    public java.util.Optional<String> findConnectionIdForSuggestion(String suggestionId) {
+        return suggestionRepository.findById(suggestionId)
+            .map(CodeKnowledgeSuggestion::getConnectionId);
+    }
+
     @Transactional
     public void deleteSource(String sourceId) {
         sourceRepository.findById(sourceId).ifPresent(s -> {

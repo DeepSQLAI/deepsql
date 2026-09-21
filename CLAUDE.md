@@ -1088,6 +1088,25 @@ it against a real database — not a theoretical hardening pass.
   while an allowed origin gets `200` + ACAO — so the annotation never had effect. It
   still reads like an intentional hole to the next person.
 
+- **A guard can be present and still authorize the wrong id.** Twelve endpoints across
+  `CodeScanController` (8), `CompanyKnowledgeController` (2) and `DashboardAlertController` (2)
+  each called `assertCanManageConnectionContent` — so the scanner passed them — but on an id
+  unrelated to what they operated on. The scan endpoints checked a `@RequestParam connectionId`
+  the caller owns while deleting/reading a `@PathVariable sourceId`/`jobId`/`suggestionId`
+  belonging to another tenant; `CompanyKnowledgeController.update` wrapped its guard in
+  `if (entry.getConnectionId() != null)`, so omitting the field skipped it entirely;
+  `DashboardAlertController` authorized `dashboardId` but acted on an `alertId` never bound to
+  it. Verified live: `analyst` (grant on one connection) deleted another tenant's scan source,
+  deleted and overwrote a knowledge entry, and deleted an alert — **200 unpatched, 404 patched**
+  in every case. **Resolve the row's own connection and assert on that** — `CodeScanService`
+  `findConnectionIdForSource/Job/Suggestion`, `CompanyKnowledgeService.findConnectionIdForEntry`,
+  `DashboardAlertService.findDashboardIdForAlert` — never a caller-supplied id. **404 for both
+  "unknown" and "not yours"** so the endpoint is not an existence oracle; **`bulk-decide` checks
+  every id and fails on one that resolves to nothing**. The `ConnectionScopedAuthorizationSafetyTest`
+  `AUTHORIZED` regex is presence-only (does *an* assert appear), not dataflow (does it assert on
+  the *right* id), so it cannot catch this class — the live cross-tenant test is the real guard.
+  See `docs/security/2026-09-16-wrong-id-authorization.md`.
+
 ### MCP & CLI Release Rules
 
 **Whenever you add, rename, or remove an MCP tool or a CLI subcommand, you MUST update all of these in the same commit — they are agent-facing surfaces and drift silently breaks discoverability:**

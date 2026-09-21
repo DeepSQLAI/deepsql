@@ -36,9 +36,11 @@ public class CompanyKnowledgeController {
     public ResponseEntity<CompanyKnowledgeEntry> update(
             @PathVariable String entryId,
             @RequestBody CompanyKnowledgeEntry entry) {
-        if (entry.getConnectionId() != null && !entry.getConnectionId().isBlank()) {
-            accessControlService.assertCanManageConnectionContent(entry.getConnectionId());
-        }
+        // Authorise against the stored entry's connection, unconditionally. The old check ran
+        // only when the body carried a connectionId, so omitting that field skipped it and let
+        // any authenticated user edit any tenant's entry. The body's connectionId is never
+        // trusted here; updateEntry already refuses to change it.
+        assertCanManageEntry(entryId);
         if (entry.getCreatedBy() == null || entry.getCreatedBy().isBlank()) {
             entry.setCreatedBy(accessControlService.getCurrentUsername());
         }
@@ -48,9 +50,15 @@ public class CompanyKnowledgeController {
     @DeleteMapping("/{entryId}")
     public ResponseEntity<Void> delete(
             @PathVariable String entryId,
-            @RequestParam String connectionId) {
-        accessControlService.assertCanManageConnectionContent(connectionId);
+            @RequestParam(required = false) String connectionId) {
+        // The connectionId param was never compared to the entry being deleted; authorise on
+        // the entry's own connection instead. Accepted for wire compatibility, not trusted.
+        assertCanManageEntry(entryId);
         companyKnowledgeService.deleteEntry(entryId);
         return ResponseEntity.ok().build();
+    }
+    private void assertCanManageEntry(String entryId) {
+        accessControlService.assertCanManageConnectionContentOrNotFound(
+            companyKnowledgeService.findConnectionIdForEntry(entryId).orElse(null), "Knowledge entry");
     }
 }
