@@ -112,12 +112,13 @@ check_docker() {
     echo
     if [[ "$OS_TYPE" == "linux" ]]; then
       echo "On a fresh Linux server, run the bootstrap script first:"
-      echo "  ${BOLD}sudo ./scripts/self-host/bootstrap-server.sh${NC}"
+      echo "  ${BOLD}curl -fsSL https://raw.githubusercontent.com/${DEEPSQL_REPO}/main/scripts/self-host/bootstrap-server.sh | sudo bash${NC}"
       echo
       echo "Or install Docker manually:"
       echo "  curl -fsSL https://get.docker.com | sh"
       echo
-      echo "After installing Docker, re-run this installer."
+      echo "After installing Docker, re-run this installer:"
+      echo "  curl -fsSL https://raw.githubusercontent.com/${DEEPSQL_REPO}/main/scripts/self-host/remote-install.sh | bash"
     elif [[ "$OS_TYPE" == "darwin" ]]; then
       echo "Install Docker Desktop for Mac from:"
       echo "  https://www.docker.com/products/docker-desktop"
@@ -165,7 +166,9 @@ check_docker() {
     echo "  apt install docker-buildx-plugin   # Debian/Ubuntu"
     echo
     echo "Or run the bootstrap script:"
-    echo "  sudo ./scripts/self-host/bootstrap-server.sh"
+    echo "  curl -fsSL https://raw.githubusercontent.com/${DEEPSQL_REPO}/main/scripts/self-host/bootstrap-server.sh | sudo bash"
+    echo
+    echo "Then re-run this installer."
     exit 1
   fi
   if ! version_ge "$buildx_version" "0.17.0"; then
@@ -180,7 +183,7 @@ check_docker() {
 # ── Release Tag Detection ─────────────────────────────────────────────────────
 
 get_latest_release_tag() {
-  # Query GitHub API for tags, filter to product tags (v*), exclude desktop-only tags
+  # Query GitHub API for tags, filter to product tags (v[0-9]*), exclude desktop-v* tags
   local tags
   tags="$(curl -fsSL "https://api.github.com/repos/${DEEPSQL_REPO}/tags?per_page=50" 2>/dev/null || true)"
   
@@ -188,9 +191,16 @@ get_latest_release_tag() {
     return 1
   fi
   
-  # Extract tag names that match v* but not desktop-v*
+  # Extract tag names, filter to product releases only:
+  # - Must start with v followed by a digit (v1.0.0, v2.3.4, etc.)
+  # - Excludes desktop-v*, agent-v*, or any other prefixed tags
   local latest
-  latest="$(echo "$tags" | grep -o '"name": *"v[^"]*"' | head -1 | cut -d'"' -f4 || true)"
+  latest="$(echo "$tags" \
+    | grep -o '"name": *"[^"]*"' \
+    | cut -d'"' -f4 \
+    | grep -E '^v[0-9]' \
+    | grep -v '^desktop-' \
+    | head -1 || true)"
   
   if [[ -n "$latest" ]]; then
     echo "$latest"
