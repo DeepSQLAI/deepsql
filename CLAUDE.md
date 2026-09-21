@@ -502,6 +502,26 @@ report in chat, but it never computes it.
 7. **Virtual Threads**: Enabled for concurrency (JDK 25).
 
 ### Frontend Rules
+
+0. **Anything reaching `dangerouslySetInnerHTML` must be escaped at the source.**
+   `AgentView`'s `boldify` applied its markdown substitutions to the raw string and escaped
+   nothing, so every character of an assistant reply was parsed as markup — verified by
+   executing it: `boldify('<img src=x onerror=…>')` returned the payload byte for byte, and
+   in a browser Chromium built a real `<img>` element and fired its handler. It is **stored**
+   XSS: `agent_conversation.transcript` is replayed into the renderer on load, and the agent
+   echoes database content, so a table named `<img src=x onerror=…>` renders in an analyst's
+   browser. httpOnly cookies mean the token cannot be read, but `withCredentials` means the
+   payload acts *as* the reader. **Escape before substituting, never after** — escaping after
+   would escape the `<strong>`/`<code>` tags the function itself emits and print literal tag
+   text. Note `<script>` via `innerHTML` does **not** execute (HTML spec); the live vector is
+   an event-handler attribute, which is what a regression test must assert on.
+   `Brain/AgentArtifacts.jsx` had the same bug with a styled `<code>`; both now share one
+   escape and pass only presentation in, so the two cannot drift. A safe renderer already
+   exists (`AgentChat/AgentMarkdown.jsx` — `ReactMarkdown` + `remarkGfm`, no `rehype-raw`)
+   and is the better long-term shape, but swapping it into `AgentView` is a visual redesign,
+   not a security fix. There is still **no CSP header**, so nothing stands behind this.
+   See `docs/security/2026-09-16-agent-chat-stored-xss.md`.
+
 1. **API Centralization**: ALL API calls through `src/lib/api/client.js`. Never create direct axios instances.
 2. **Server State**: Use TanStack Query hooks from `src/lib/hooks/queries/` (not useState/useEffect for data fetching).
 3. **UI State**: Use Zustand stores from `src/lib/stores/`. Prefer selector hooks for optimized re-renders.
