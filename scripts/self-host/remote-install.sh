@@ -180,14 +180,11 @@ check_docker() {
 # ── Release Tag Detection ─────────────────────────────────────────────────────
 
 get_latest_release_tag() {
-  info "Finding latest stable release..."
-  
   # Query GitHub API for tags, filter to product tags (v*), exclude desktop-only tags
   local tags
   tags="$(curl -fsSL "https://api.github.com/repos/${DEEPSQL_REPO}/tags?per_page=50" 2>/dev/null || true)"
   
   if [[ -z "$tags" ]]; then
-    warn "Could not query GitHub API for tags. Using default branch."
     return 1
   fi
   
@@ -212,7 +209,7 @@ clone_or_update() {
     info "Updating existing checkout at $DEEPSQL_HOME..."
     cd "$DEEPSQL_HOME"
     
-    # Fetch latest
+    # Fetch latest (include tags)
     if ! git fetch --tags origin 2>/dev/null; then
       warn "Failed to fetch updates. Continuing with existing checkout."
     fi
@@ -228,6 +225,7 @@ clone_or_update() {
     fi
     
     success "Repository updated"
+    report_version "$target_ref"
   else
     info "Cloning DeepSQL to $DEEPSQL_HOME..."
     
@@ -245,17 +243,33 @@ clone_or_update() {
     
     cd "$DEEPSQL_HOME"
     success "Repository cloned"
+    report_version "$target_ref"
+  fi
+}
+
+report_version() {
+  local target_ref="$1"
+  
+  # For shallow clones, git describe may not work correctly, so prefer the
+  # target ref we requested if it looks like a version tag
+  if [[ "$target_ref" =~ ^v[0-9] ]]; then
+    success "Version: $target_ref"
+    return
   fi
   
-  # Report what version we're on
+  # Try to get the current tag or branch
   local current_tag current_branch
   current_tag="$(git describe --tags --exact-match 2>/dev/null || true)"
   current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   
   if [[ -n "$current_tag" ]]; then
     success "Version: $current_tag"
-  else
+  elif [[ -n "$target_ref" ]]; then
+    success "Branch: $target_ref"
+  elif [[ -n "$current_branch" && "$current_branch" != "HEAD" ]]; then
     success "Branch: $current_branch"
+  else
+    success "Checked out at $(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
   fi
 }
 
@@ -422,12 +436,13 @@ main() {
   # Determine target ref
   local target_ref="$DEEPSQL_BRANCH"
   if [[ -z "$target_ref" ]]; then
+    info "Finding latest stable release..."
     target_ref="$(get_latest_release_tag || true)"
     if [[ -z "$target_ref" ]]; then
       target_ref="main"
-      info "No release tags found, using default branch: $target_ref"
+      warn "Could not determine latest release. Using default branch: $target_ref"
     else
-      info "Latest release: $target_ref"
+      success "Latest release: $target_ref"
     fi
   fi
   
