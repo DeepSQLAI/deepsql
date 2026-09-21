@@ -23,6 +23,18 @@ DeepSQL Desktop first ship + Agent/Brain/Editor hardening. Notes:
 
 ## Quick start
 
+### One-liner install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DeepSQLAI/deepsql/main/scripts/self-host/remote-install.sh | bash
+```
+
+This checks prerequisites, clones the latest release to `~/deepsql`, and guides you
+through configuration. See [`scripts/self-host/remote-install.sh`](scripts/self-host/remote-install.sh)
+for options (`--yes` for noninteractive, `--branch` for a specific version).
+
+### Step-by-step
+
 Five steps, in order. Budget about fifteen minutes, most of it waiting on the first build.
 
 ### 1. Check you have what you need
