@@ -4,10 +4,13 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # One-liner install:
+#   curl -fsSL https://deepsql.ai/install.sh | bash
+#
+# Fallback (raw GitHub URL):
 #   curl -fsSL https://raw.githubusercontent.com/DeepSQLAI/deepsql/main/scripts/self-host/remote-install.sh | bash
 #
-# This script is a convenience wrapper. The source of truth is the public GitHub
-# repository: https://github.com/DeepSQLAI/deepsql
+# This script is the source of truth. deepsql.ai/install.sh serves a copy for the
+# homepage CTA. The public GitHub repository: https://github.com/DeepSQLAI/deepsql
 #
 # You can always clone and build manually instead:
 #   git clone https://github.com/DeepSQLAI/deepsql.git
@@ -118,7 +121,7 @@ check_docker() {
       echo "  curl -fsSL https://get.docker.com | sh"
       echo
       echo "After installing Docker, re-run this installer:"
-      echo "  curl -fsSL https://raw.githubusercontent.com/${DEEPSQL_REPO}/main/scripts/self-host/remote-install.sh | bash"
+      echo "  curl -fsSL https://deepsql.ai/install.sh | bash"
     elif [[ "$OS_TYPE" == "darwin" ]]; then
       echo "Install Docker Desktop for Mac from:"
       echo "  https://www.docker.com/products/docker-desktop"
@@ -388,13 +391,16 @@ Environment variables:
 
 Examples:
   # Interactive setup (edit .env, then run install.sh yourself)
-  curl -fsSL https://raw.githubusercontent.com/DeepSQLAI/deepsql/main/scripts/self-host/remote-install.sh | bash
+  curl -fsSL https://deepsql.ai/install.sh | bash
 
   # Noninteractive (requires .env to be pre-configured or prompts)
-  curl -fsSL .../remote-install.sh | bash -s -- --yes
+  curl -fsSL https://deepsql.ai/install.sh | bash -s -- --yes
 
   # Install a specific version
-  curl -fsSL .../remote-install.sh | bash -s -- --branch v1.3.0
+  curl -fsSL https://deepsql.ai/install.sh | bash -s -- --branch v1.3.0
+
+  # Fallback: raw GitHub URL (if deepsql.ai is unreachable)
+  curl -fsSL https://raw.githubusercontent.com/DeepSQLAI/deepsql/main/scripts/self-host/remote-install.sh | bash
 EOF
 }
 
