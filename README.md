@@ -26,12 +26,15 @@ DeepSQL Desktop first ship + Agent/Brain/Editor hardening. Notes:
 ### One-liner install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DeepSQLAI/deepsql/main/scripts/self-host/remote-install.sh | bash
+curl -fsSL https://deepsql.ai/install.sh | bash
 ```
 
 This checks prerequisites, clones the latest release to `~/deepsql`, and guides you
 through configuration. See [`scripts/self-host/remote-install.sh`](scripts/self-host/remote-install.sh)
 for options (`--yes` for noninteractive, `--branch` for a specific version).
+
+> The script source of truth is [`scripts/self-host/remote-install.sh`](scripts/self-host/remote-install.sh)
+> in this repository. `deepsql.ai/install.sh` serves a copy for the homepage CTA.
 
 ### Step-by-step
 
