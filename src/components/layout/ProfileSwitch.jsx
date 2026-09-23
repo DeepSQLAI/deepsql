@@ -6,7 +6,12 @@ import { adminAPI } from '@/lib/api/client'
 import { useSetActiveSection } from '@/lib/stores/useNavStore'
 import styles from './ProfileSwitch.module.css'
 
-export default function ProfileSwitch() {
+/**
+ * Profile switch / "View as" control for admins to impersonate sub-users.
+ * @param {Object} props
+ * @param {boolean} [props.collapsed] - When true (sidebar collapsed mode), hide labels
+ */
+export default function ProfileSwitch({ collapsed = false }) {
   const {
     isAdmin,
     impersonating,
@@ -86,82 +91,104 @@ export default function ProfileSwitch() {
     }
   }
 
+  // When impersonating, show an indicator with exit option
   if (impersonating) {
     return (
-      <div className={styles.banner} ref={rootRef} data-testid="profile-switch-banner">
-        <div className={styles.bannerCopy}>
-          <span className={styles.bannerLabel}>Viewing as</span>
-          <strong className={styles.bannerName}>{username}</strong>
-          <span className={styles.roleBadge}>{role}</span>
-          {impersonatorUsername && (
-            <span className={styles.bannerMeta}>signed in as {impersonatorUsername}</span>
-          )}
-        </div>
-        <div className={styles.bannerActions}>
-          {error && <span className={styles.error}>{error}</span>}
-          <button
-            type="button"
-            className={styles.secondaryBtn}
-            onClick={() => setOpen((value) => !value)}
-            disabled={switching}
-          >
-            Switch user
-            <ChevronDown size={14} />
-          </button>
-          <button
-            type="button"
-            className={styles.exitBtn}
-            onClick={handleStop}
-            disabled={switching}
-            data-testid="profile-switch-exit"
-          >
-            <X size={14} />
-            Exit
-          </button>
-        </div>
-        {open && (
-          <CandidateMenu
-            candidates={candidates}
-            loading={loading}
-            switching={switching}
-            activeUsername={username}
-            onSelect={handleSelect}
-          />
+      <div className={styles.sidebarWrap} ref={rootRef} data-testid="profile-switch-banner">
+        <button
+          type="button"
+          className={styles.sidebarTriggerActive}
+          onClick={() => setOpen((value) => !value)}
+          disabled={switching}
+          title={collapsed ? `Viewing as ${username}` : undefined}
+        >
+          <ArrowLeftRight size={15} className={styles.sidebarIcon} />
+          <span className={`${styles.sidebarLabel} ${collapsed ? styles.sidebarLabelHidden : ''}`}>
+            Viewing as {username}
+          </span>
+          {!collapsed && <ChevronDown size={14} className={styles.chevronIcon} />}
+        </button>
+        {open && !collapsed && (
+          <div className={styles.sidebarDropdown}>
+            <div className={styles.sidebarDropdownInfo}>
+              <span className={styles.sidebarDropdownLabel}>Viewing as</span>
+              <strong className={styles.sidebarDropdownName}>{username}</strong>
+              <span className={styles.roleBadge}>{role}</span>
+            </div>
+            {impersonatorUsername && (
+              <div className={styles.sidebarDropdownMeta}>Signed in as {impersonatorUsername}</div>
+            )}
+            <div className={styles.sidebarDropdownDivider} />
+            {error && <div className={styles.sidebarDropdownError}>{error}</div>}
+            <button
+              type="button"
+              className={styles.sidebarDropdownAction}
+              onClick={() => setOpen((value) => !value)}
+              disabled={switching}
+            >
+              Switch to another user
+            </button>
+            <button
+              type="button"
+              className={styles.sidebarDropdownActionPrimary}
+              onClick={handleStop}
+              disabled={switching}
+              data-testid="profile-switch-exit"
+            >
+              <X size={14} />
+              Exit View as
+            </button>
+            {open && (
+              <CandidateMenu
+                candidates={candidates}
+                loading={loading}
+                switching={switching}
+                activeUsername={username}
+                onSelect={handleSelect}
+                isSidebar
+              />
+            )}
+          </div>
         )}
       </div>
     )
   }
 
+  // Normal state: show "View as" trigger
   return (
-    <div className={styles.switchWrap} ref={rootRef} data-testid="profile-switch">
-        <button
-          type="button"
-          className={styles.trigger}
-          onClick={() => setOpen((value) => !value)}
-          disabled={switching}
-          aria-label="View as another user"
-          data-testid="profile-switch-trigger"
-        >
-          <ArrowLeftRight size={14} />
-          <span>View as</span>
-          <ChevronDown size={14} />
-        </button>
-      {open && (
+    <div className={styles.sidebarWrap} ref={rootRef} data-testid="profile-switch">
+      <button
+        type="button"
+        className={styles.sidebarTrigger}
+        onClick={() => setOpen((value) => !value)}
+        disabled={switching}
+        aria-label="View as another user"
+        title={collapsed ? 'View as' : undefined}
+        data-testid="profile-switch-trigger"
+      >
+        <ArrowLeftRight size={15} className={styles.sidebarIcon} />
+        <span className={`${styles.sidebarLabel} ${collapsed ? styles.sidebarLabelHidden : ''}`}>
+          View as
+        </span>
+        {!collapsed && <ChevronDown size={14} className={styles.chevronIcon} />}
+      </button>
+      {open && !collapsed && (
         <CandidateMenu
           candidates={candidates}
           loading={loading}
           switching={switching}
           error={error}
           onSelect={handleSelect}
+          isSidebar
         />
       )}
     </div>
   )
 }
 
-function CandidateMenu({ candidates, loading, switching, error, activeUsername, onSelect }) {
+function CandidateMenu({ candidates, loading, switching, error, activeUsername, onSelect, isSidebar }) {
   return (
-    <div className={styles.menu} role="listbox" aria-label="Users to view as">
+    <div className={isSidebar ? styles.sidebarMenu : styles.menu} role="listbox" aria-label="Users to view as">
       <div className={styles.menuLabel}>Switch into a user</div>
       {loading && <div className={styles.menuEmpty}>Loading users…</div>}
       {!loading && error && <div className={styles.menuError}>{error}</div>}

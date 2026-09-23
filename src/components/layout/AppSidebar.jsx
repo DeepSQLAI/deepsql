@@ -7,6 +7,7 @@ import { AGENTS_ENABLED, canAccessHomeSection, getConnectionAccessBadge, getConn
 import { PERMISSIONS } from '@/lib/permissions'
 import ManageConnectionsModal from '@/components/ManageConnectionsModal'
 import SettingsModal from '@/components/SettingsModal'
+import ProfileSwitch from './ProfileSwitch'
 import { useAuth } from '@/hooks/useAuth'
 import styles from './AppSidebar.module.css'
 
@@ -30,7 +31,7 @@ export default function AppSidebar() {
   const [showConnectionDropdown, setShowConnectionDropdown] = useState(false)
   const userMenuRef = useRef(null)
   const connectionDropdownRef = useRef(null)
-  const { logout, role, username, impersonating, permissions, hasPermission } = useAuth()
+  const { logout, role, username, impersonating, permissions, hasPermission, canSwitchProfile } = useAuth()
   // Connections (add/edit/delete a database) is administrative: the backend already
   // refuses it to Developer and Data Engineer with 403, so hiding the button stops the
   // UI offering a door that only leads to an error. Settings is likewise administrative
@@ -137,6 +138,7 @@ export default function AppSidebar() {
         {/* Bottom: connections + profile */}
         <div className={styles.divider} />
         <div className={styles.bottom}>
+          {canSwitchProfile && <ProfileSwitch collapsed={collapsed} />}
           <div className={styles.connectionSwitcher} ref={connectionDropdownRef}>
             <button
               className={styles.bottomItem}
