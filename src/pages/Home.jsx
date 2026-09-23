@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import AppSidebar from '@/components/layout/AppSidebar'
-import ProfileSwitch from '@/components/layout/ProfileSwitch'
 import AgentView from '@/components/Agent/AgentView'
 import AgentChatSection from '@/components/sections/AgentChatSection'
 import DigestFeedSection from '@/components/sections/DigestSection'
@@ -27,7 +26,7 @@ const SECTION_MAP = {
 }
 
 export default function Home() {
-  const { role, canSwitchProfile, permissions } = useAuth()
+  const { role, permissions } = useAuth()
   const { selectedConnection } = useConnectionManager()
   const activeSection = useActiveSection()
   const setActiveSection = useSetActiveSection()
@@ -78,9 +77,7 @@ export default function Home() {
       {!immersive && <AppSidebar />}
 
       {/* Main content — lazy-mount sections on first visit, then keep alive */}
-      <div style={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-        {canSwitchProfile && <ProfileSwitch />}
-        <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+      <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
           {visibleSections.map(([key, Section]) => {
             if (!mounted.has(key)) return null
             return (
@@ -98,7 +95,6 @@ export default function Home() {
             )
           })}
         </div>
-      </div>
     </main>
   )
 }

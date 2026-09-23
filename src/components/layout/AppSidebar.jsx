@@ -7,6 +7,7 @@ import { AGENTS_ENABLED, canAccessHomeSection, getConnectionAccessBadge, getConn
 import { PERMISSIONS } from '@/lib/permissions'
 import ManageConnectionsModal from '@/components/ManageConnectionsModal'
 import SettingsModal from '@/components/SettingsModal'
+import ProfileSwitch from './ProfileSwitch'
 import { useAuth } from '@/hooks/useAuth'
 import styles from './AppSidebar.module.css'
 
@@ -30,7 +31,7 @@ export default function AppSidebar() {
   const [showConnectionDropdown, setShowConnectionDropdown] = useState(false)
   const userMenuRef = useRef(null)
   const connectionDropdownRef = useRef(null)
-  const { logout, role, username, impersonating, permissions, hasPermission } = useAuth()
+  const { logout, role, username, impersonating, permissions, hasPermission, canSwitchProfile } = useAuth()
   // Connections (add/edit/delete a database) is administrative: the backend already
   // refuses it to Developer and Data Engineer with 403, so hiding the button stops the
   // UI offering a door that only leads to an error. Settings is likewise administrative
@@ -137,12 +138,13 @@ export default function AppSidebar() {
         {/* Bottom: connections + profile */}
         <div className={styles.divider} />
         <div className={styles.bottom}>
+          {canSwitchProfile && <ProfileSwitch collapsed={collapsed} />}
           <div className={styles.connectionSwitcher} ref={connectionDropdownRef}>
             <button
               className={styles.bottomItem}
               onClick={() => setShowConnectionDropdown((v) => !v)}
               title={collapsed ? connectionLabel : undefined}
-              disabled={isLoading || connections.length === 0}
+              disabled={isLoading || (connections.length === 0 && !canManageConnections)}
             >
               <Database size={15} className={styles.navIcon} />
               <span className={`${styles.navLabel} ${collapsed ? styles.navLabelHidden : ''}`}>
@@ -154,62 +156,69 @@ export default function AppSidebar() {
               {!collapsed && <ChevronDown size={14} className={styles.chevronIcon} />}
             </button>
 
-            {showConnectionDropdown && !collapsed && connections.length > 0 && (
+            {showConnectionDropdown && !collapsed && (
               <div className={styles.connectionDropdown}>
-                <div className={styles.dropdownLabel}>Connections</div>
-                {connections.map((conn) => (
-                  <div
-                    key={conn.id}
-                    className={`${styles.dropdownRow} ${conn.id === connectionId ? styles.dropdownItemActive : ''}`}
-                  >
+                {connections.length > 0 && (
+                  <>
+                    <div className={styles.dropdownLabel}>Connections</div>
+                    {connections.map((conn) => (
+                      <div
+                        key={conn.id}
+                        className={`${styles.dropdownRow} ${conn.id === connectionId ? styles.dropdownItemActive : ''}`}
+                      >
+                        <button
+                          className={styles.dropdownItem}
+                          onClick={() => {
+                            changeConnection(conn.id)
+                            setShowConnectionDropdown(false)
+                          }}
+                        >
+                          <Database size={14} />
+                          <span className={styles.dropdownItemName}>
+                            {conn.connectionName}
+                            {getConnectionAccessLabel(conn) ? ` · ${getConnectionAccessLabel(conn)}` : ''}
+                          </span>
+                          <span className={styles.dbTypeBadge}>{getConnectionAccessBadge(conn) || conn.dbType}</span>
+                          {conn.id === connectionId && <Check size={13} className={styles.dropdownItemCheck} />}
+                        </button>
+                        <button
+                          className={`${styles.dropdownPin} ${conn.pinned ? styles.dropdownPinActive : ''}`}
+                          onClick={() =>
+                            setConnectionPin.mutate({ connectionId: conn.id, pinned: !conn.pinned })
+                          }
+                          disabled={setConnectionPin.isPending}
+                          aria-pressed={Boolean(conn.pinned)}
+                          title={
+                            conn.pinned
+                              ? 'Pinned as your default — DeepSQL opens on this connection. Click to unpin.'
+                              : 'Pin as your default — DeepSQL will open on this connection every time you load it.'
+                          }
+                        >
+                          <Pin size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {canManageConnections && (
+                  <>
+                    {connections.length > 0 && <div className={styles.dropdownDivider} />}
                     <button
-                      className={styles.dropdownItem}
+                      className={styles.dropdownManage}
                       onClick={() => {
-                        changeConnection(conn.id)
                         setShowConnectionDropdown(false)
+                        setShowConnections(true)
                       }}
                     >
-                      <Database size={14} />
-                      <span className={styles.dropdownItemName}>
-                        {conn.connectionName}
-                        {getConnectionAccessLabel(conn) ? ` · ${getConnectionAccessLabel(conn)}` : ''}
-                      </span>
-                      <span className={styles.dbTypeBadge}>{getConnectionAccessBadge(conn) || conn.dbType}</span>
-                      {conn.id === connectionId && <Check size={13} className={styles.dropdownItemCheck} />}
+                      <Settings size={14} />
+                      <span>Manage connections…</span>
                     </button>
-                    <button
-                      className={`${styles.dropdownPin} ${conn.pinned ? styles.dropdownPinActive : ''}`}
-                      onClick={() =>
-                        setConnectionPin.mutate({ connectionId: conn.id, pinned: !conn.pinned })
-                      }
-                      disabled={setConnectionPin.isPending}
-                      aria-pressed={Boolean(conn.pinned)}
-                      title={
-                        conn.pinned
-                          ? 'Pinned as your default — DeepSQL opens on this connection. Click to unpin.'
-                          : 'Pin as your default — DeepSQL will open on this connection every time you load it.'
-                      }
-                    >
-                      <Pin size={13} />
-                    </button>
-                  </div>
-                ))}
+                  </>
+                )}
               </div>
             )}
           </div>
 
-          {canManageConnections && (
-            <button
-              className={styles.bottomItem}
-              onClick={() => setShowConnections(true)}
-              title={collapsed ? 'Connections' : undefined}
-            >
-              <Settings size={15} className={styles.navIcon} />
-              <span className={`${styles.navLabel} ${collapsed ? styles.navLabelHidden : ''}`}>
-                Connections
-              </span>
-            </button>
-          )}
           <div className={styles.userMenuWrap} ref={userMenuRef}>
             <button
               className={styles.bottomItem}

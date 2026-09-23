@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { LineChart, ArrowUp, ChevronLeft, Sparkles, Check, Loader2, Brain, PencilRuler, Pencil, ClipboardCheck, TrendingUp, Users, PieChart, Layers, Code2, X, Copy, Undo2, Play, Database, History, RotateCcw, Eye, RefreshCw, ChevronDown, BellRing, Trash2 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import DashboardArtifact from '@/components/DashboardArtifact'
 import ShareMenu from './ShareMenu'
 import { savedDashboardsAPI } from '@/lib/api/client'
@@ -506,7 +508,7 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
     <div className={styles.root}>
       <header className={styles.topbar}>
         <button className={styles.logoBtn} onClick={onClose} title="Back to dashboards" aria-label="Back to dashboards">
-          <span className={styles.logoMark}><LineChart size={15} color="#fff" /></span>
+          <LineChart size={18} className={styles.logoIcon} />
         </button>
         <button className={styles.crumbLink} onClick={onClose}>Dashboards</button>
         <span className={styles.sep}>/</span>
@@ -556,7 +558,11 @@ export default function DashboardWorkspace({ connectionId, dashboard, onClose })
           <div className={intro ? styles.agentScrollIntro : styles.agentScroll} ref={scrollRef}>
             {!intro && messages.map((msg, i) => (
               <div key={i} className={msg.role === 'user' ? styles.bubbleUser : (msg.error ? styles.bubbleErr : styles.bubbleAgent)}>
-                {msg.text}
+                {msg.role === 'agent' && !msg.error ? (
+                  <div className={styles.agentMarkdown}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
+                  </div>
+                ) : msg.text}
               </div>
             ))}
             {!intro && thinking && (

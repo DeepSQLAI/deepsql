@@ -338,6 +338,34 @@
   color: #111827;
 }
 
+.dropdownDivider {
+  height: 1px;
+  background: #e5e7eb;
+  margin: 4px 8px;
+}
+
+.dropdownManage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 8px);
+  margin: 4px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 13px;
+  color: #6b7280;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s, color 0.1s;
+}
+
+.dropdownManage:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
 /* ── User profile dropdown ── */
 .userMenuWrap {
   position: relative;
