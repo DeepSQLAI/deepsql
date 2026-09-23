@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Newspaper, RefreshCw, Settings, Check, Clock, AlertCircle, Zap } from 'lucide-react'
+import { Loader2, Newspaper, RefreshCw, Settings, Check, Clock, AlertCircle, Zap } from 'lucide-react'
 import { slackDigestAPI, digestPreferencesAPI } from '@/lib/api/client'
 import { useConnectionManager } from '@/lib/hooks/useConnectionManager'
 import DigestPreferencesPanel from './DigestPreferencesPanel'
@@ -165,7 +165,7 @@ function DigestSection({ section }) {
 const DIGEST_PREFS_AUTOPEN_KEY = 'deepsql.digestPrefs.autoOpened.v1'
 
 export default function DigestFeedSection() {
-  const { connectionId, selectedConnection } = useConnectionManager()
+  const { connectionId, selectedConnection, isLoading: connectionsLoading } = useConnectionManager()
   const [digests, setDigests] = useState([])
   const [loading, setLoading] = useState(false)
   const [triggering, setTriggering] = useState(false)
@@ -257,6 +257,26 @@ export default function DigestFeedSection() {
     }
   }
 
+  // Wait for connection list to load first
+  if (connectionsLoading) {
+    return (
+      <div className={styles.root}>
+        <div className={styles.topBar}>
+          <div className={styles.topBarLeft}>
+            <Newspaper size={17} className={styles.topBarIcon} />
+            <span className={styles.topBarTitle}>DB Digest</span>
+          </div>
+        </div>
+        <div className={styles.feed}>
+          <div className={styles.loadingState}>
+            <Loader2 size={20} className={styles.spinning} color="#9ca3af" />
+            <span>Loading connections…</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={styles.root}>
       {/* Top bar */}
@@ -309,7 +329,8 @@ export default function DigestFeedSection() {
           </div>
         )}
 
-        {!error && !loading && !connectionId && (
+        {/* Either no connection or stale connectionId not in the effective user's list */}
+        {!error && !loading && (!connectionId || !selectedConnection) && (
           <div className={styles.emptyState}>
             <Newspaper size={32} color="#d1d5db" />
             <h3>No connection selected</h3>
@@ -317,7 +338,7 @@ export default function DigestFeedSection() {
           </div>
         )}
 
-        {!error && !loading && !!connectionId && digests.length === 0 && (
+        {!error && !loading && !!connectionId && !!selectedConnection && digests.length === 0 && (
           <div className={styles.emptyState}>
             <Newspaper size={32} color="#d1d5db" />
             <h3>No digests yet</h3>

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { BarChart2 } from 'lucide-react'
+import { BarChart2, Loader2 } from 'lucide-react'
 import { slowQueriesAPI } from '@/lib/api/client'
 import { useConnectionManager } from '@/lib/hooks/useConnectionManager'
 import AnalyticsTab from '@/components/tabs/Monitoring/AnalyticsTab'
 import styles from './SectionEmpty.module.css'
 
 export default function MonitorSection() {
-  const { connectionId } = useConnectionManager()
+  const { connectionId, selectedConnection, isLoading: connectionsLoading } = useConnectionManager()
   const [hasData, setHasData] = useState(null) // null = loading
   const [loading, setLoading] = useState(true)
 
@@ -27,7 +27,18 @@ export default function MonitorSection() {
       .finally(() => setLoading(false))
   }, [connectionId])
 
-  if (!connectionId) {
+  // Wait for connection list to load first
+  if (connectionsLoading) {
+    return (
+      <div className={styles.root}>
+        <Loader2 size={24} color="#9ca3af" className={styles.spin} />
+        <p className={styles.subtitle}>Loading connections…</p>
+      </div>
+    )
+  }
+
+  // Either no connection or stale connectionId not in the effective user's list
+  if (!connectionId || !selectedConnection) {
     return (
       <div className={styles.root}>
         <div className={styles.iconWrap}>

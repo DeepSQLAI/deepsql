@@ -72,6 +72,14 @@
   background: #f9fafb;
 }
 
+.spin {
+  animation: sectionSpin 1s linear infinite;
+}
+
+@keyframes sectionSpin {
+  to { transform: rotate(360deg); }
+}
+
 .pills {
   display: flex;
   gap: 8px;

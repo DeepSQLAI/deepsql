@@ -1,12 +1,22 @@
-import { Building2 } from 'lucide-react'
+import { Building2, Loader2 } from 'lucide-react'
 import { useConnectionManager } from '@/lib/hooks/useConnectionManager'
 import CompanyKnowledgePanel from '@/components/company-knowledge/CompanyKnowledgePanel'
 import styles from './SectionEmpty.module.css'
 
 export default function CompanyKnowledgeSection() {
-  const { connectionId } = useConnectionManager()
+  const { connectionId, selectedConnection, isLoading } = useConnectionManager()
 
-  if (!connectionId) {
+  if (isLoading) {
+    return (
+      <div className={styles.root}>
+        <Loader2 size={24} color="#9ca3af" className={styles.spin} />
+        <p className={styles.subtitle}>Loading connections…</p>
+      </div>
+    )
+  }
+
+  // Either no connection or stale connectionId not in the effective user's list
+  if (!connectionId || !selectedConnection) {
     return (
       <div className={styles.root}>
         <div className={styles.iconWrap}><Building2 size={26} color="#9ca3af" /></div>

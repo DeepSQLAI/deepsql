@@ -359,6 +359,44 @@ class AccessControlServiceTest {
         assertFalse(accessControlService.isCurrentUserAdmin());
     }
 
+    /**
+     * An admin viewing as a user who lacks access to a connection sees access denied.
+     *
+     * <p>This is the backend counterpart to the frontend fix: when the admin selects a
+     * connection, then uses "View as" to switch to a user without access to that connection,
+     * the UI should not be able to make API calls against the connection. The UI fix clears
+     * the stale connectionId; this test ensures the backend also correctly denies access.
+     */
+    @Test
+    void impersonatingUserWithoutAccessDeniesConnection() {
+        com.dbaagent.model.User impersonator = new com.dbaagent.model.User();
+        impersonator.setId(1L);
+        impersonator.setUsername("admin");
+        impersonator.setRole("ADMIN");
+        com.dbaagent.model.User target = new com.dbaagent.model.User();
+        target.setId(2L);
+        target.setUsername("mart-viewer");
+        target.setRole("DEVELOPER");
+        com.dbaagent.security.ImpersonationContext.enter(
+            new com.dbaagent.security.ImpersonationContext.State(impersonator, target)
+        );
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken("mart-viewer", null, List.of())
+        );
+
+        // The target user has no grant on conn-1
+        when(connectionAccessService.resolveAccess("conn-1", "mart-viewer", false))
+            .thenReturn(resolved("conn-1", EffectiveConnectionAccess.NONE, null));
+
+        // Verify: admin bypass is disabled during impersonation
+        assertFalse(accessControlService.isCurrentUserAdmin());
+
+        // Verify: attempting to access the connection should throw 403
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+            () -> accessControlService.assertCanUseChatEditor("conn-1"));
+        assertEquals(403, ex.getStatusCode().value());
+    }
+
     private ConnectionAccessService.ResolvedConnectionAccess resolved(
         String connectionId,
         EffectiveConnectionAccess effectiveAccess,
