@@ -1,4 +1,4 @@
-import { FileText } from 'lucide-react'
+import { FileText, Loader2 } from 'lucide-react'
 import { useConnectionManager } from '@/lib/hooks/useConnectionManager'
 import { useSetActiveSection } from '@/lib/stores/useNavStore'
 import { useCompanyKnowledgeStore } from '@/lib/stores/useCompanyKnowledgeStore'
@@ -7,11 +7,21 @@ import styles from './SectionEmpty.module.css'
 import workspaceStyles from './TopLevelSection.module.css'
 
 export default function SchemaDocsSection() {
-  const { connectionId } = useConnectionManager()
+  const { connectionId, selectedConnection, isLoading } = useConnectionManager()
   const setActiveSection = useSetActiveSection()
   const setLinkedFilters = useCompanyKnowledgeStore((state) => state.setLinkedFilters)
 
-  if (!connectionId) {
+  if (isLoading) {
+    return (
+      <div className={styles.root}>
+        <Loader2 size={24} color="#9ca3af" className={styles.spin} />
+        <p className={styles.subtitle}>Loading connections…</p>
+      </div>
+    )
+  }
+
+  // Either no connection or stale connectionId not in the effective user's list
+  if (!connectionId || !selectedConnection) {
     return (
       <div className={styles.root}>
         <div className={styles.iconWrap}><FileText size={26} color="#9ca3af" /></div>

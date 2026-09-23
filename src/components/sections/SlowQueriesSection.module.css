@@ -141,3 +141,14 @@
   border-color: #d1d5db;
   color: #111827;
 }
+
+.spinIcon {
+  animation: spin 1s linear infinite;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

@@ -1,12 +1,22 @@
 import { useConnectionManager } from '@/lib/hooks/useConnectionManager'
 import SqlRunnerTab from '@/components/tabs/Core/SqlRunnerTab'
-import { Code2 } from 'lucide-react'
+import { Code2, Loader2 } from 'lucide-react'
 import styles from './SectionEmpty.module.css'
 
 export default function EditorSection() {
-  const { connectionId } = useConnectionManager()
+  const { connectionId, selectedConnection, isLoading } = useConnectionManager()
 
-  if (!connectionId) {
+  if (isLoading) {
+    return (
+      <div className={styles.root}>
+        <Loader2 size={24} color="#9ca3af" className={styles.spin} />
+        <p className={styles.subtitle}>Loading connections…</p>
+      </div>
+    )
+  }
+
+  // Either no connection selected, or stale connectionId not in the current user's list
+  if (!connectionId || !selectedConnection) {
     return (
       <div className={styles.root}>
         <div className={styles.iconWrap}>

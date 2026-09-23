@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Activity, FileText, LineChart, Settings, Users } from 'lucide-react'
+import { Activity, FileText, LineChart, Loader2, Settings, Users } from 'lucide-react'
 import { useConnectionManager } from '@/lib/hooks/useConnectionManager'
 import { useSlowLogSourceConfig } from '@/lib/hooks/queries'
 import QueryTrendsTab from '@/components/tabs/Performance/QueryTrendsTab'
@@ -31,7 +31,7 @@ const LOG_SOURCE_HELP = {
  * is a single empty state whose CTA opens SlowQuerySourceModal.
  */
 export default function SlowQueriesSection() {
-  const { connectionId, selectedConnection } = useConnectionManager()
+  const { connectionId, selectedConnection, isLoading } = useConnectionManager()
   const [tab, setTab] = useState('trends')
   const tabRefs = useRef({})
 
@@ -59,6 +59,22 @@ export default function SlowQueriesSection() {
   const logSourceQ = useSlowLogSourceConfig(connectionId)
   const hasLogSource = Boolean(logSourceQ.data?.id)
 
+  // Wait for connection list to load before rendering anything
+  if (isLoading) {
+    return (
+      <div className={sectionStyles.page}>
+        <div className={sectionStyles.header}>
+          <div className={sectionStyles.eyebrow}>Performance</div>
+          <h1 className={sectionStyles.title}>Slow queries &amp; workload</h1>
+        </div>
+        <div className={styles.empty}>
+          <Loader2 size={20} className={styles.spinIcon} />
+          Loading connections…
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={sectionStyles.page}>
       <div className={sectionStyles.header}>
@@ -70,7 +86,8 @@ export default function SlowQueriesSection() {
         </p>
       </div>
 
-      {!connectionId ? (
+      {/* Either no connection or stale connectionId not in the effective user's list */}
+      {(!connectionId || !selectedConnection) ? (
         <div className={styles.empty}>
           Select a database connection to see performance analytics.
         </div>

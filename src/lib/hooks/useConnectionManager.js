@@ -56,6 +56,11 @@ export function useConnectionManager() {
   // selected and a pin that only ran on a blank slate would never actually be the
   // default — which is the whole feature. It applies once per page load
   // (`pinAppliedThisLoad`), so switching connections mid-session still sticks.
+  //
+  // Critical: if `connectionId` is set but NOT in the connections list (e.g. after
+  // "View as" switches to a user without access to that connection), clear it and
+  // select a valid one. Otherwise the UI keeps a stale connection the effective user
+  // cannot access, and chat/agent calls 403.
   useEffect(() => {
     if (connections.length === 0) return
 
@@ -69,12 +74,23 @@ export function useConnectionManager() {
       }
     }
 
-    if (connectionId) return
+    // Validate the selected connection is actually in the current user's list.
+    // When impersonation changes, the connection list is for the target user, but
+    // connectionId might still be a connection the admin had selected. Clear it
+    // so the user must pick from their own list (or gets auto-selected below).
+    if (connectionId) {
+      const stillValid = connections.some((c) => c.id === connectionId)
+      if (stillValid) return
+      // The selected connection is not in the list — clear it and fall through
+      // to auto-select from the valid options.
+      localStorage.removeItem('selectedConnectionId')
+      setConnectionId(null)
+    }
 
     const savedId = localStorage.getItem('selectedConnectionId')
     const saved = savedId ? connections.find((c) => c.id === savedId) : null
     selectConnection((pinned || saved || connections[0]).id)
-  }, [connections, connectionId, selectConnection])
+  }, [connections, connectionId, selectConnection, setConnectionId])
 
   const changeConnection = useCallback(
     (connId) => {
