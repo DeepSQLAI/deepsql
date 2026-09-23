@@ -220,7 +220,9 @@ public class DashboardAgentService {
             + "It does not read as a request to build or change a chart/dashboard — it looks like a "
             + "greeting, small talk, or a question about what you can do. Reply briefly and naturally "
             + "in plain text (no HTML, no code block, no tool calls, no grounding, no SQL). If it's a "
-            + "greeting, greet back and invite them to describe a dashboard. Keep it to 1-2 sentences.";
+            + "greeting, greet back and invite them to describe a dashboard.\n\n"
+            + "STYLE: Keep it to 1-2 short sentences. Lead with the answer. No filler phrases like "
+            + "\"Great question!\" or restating what they asked. Just answer directly.";
     }
 
     // ── the task the agent runs ────────────────────────────────────────────
@@ -335,17 +337,25 @@ public class DashboardAgentService {
             outside a fence, no tool calls after the last one.
             Do NOT wrap the whole thing in a single ```html block — the shell and each widget are SEPARATE fences.
 
-            7. END with a ```dashboard-note``` fence: 1-3 sentences to the person who asked, in the same plain
+            7. END with a ```dashboard-note``` fence: a SHORT reply to the person who asked, in the same plain
                business language as the two hard rules above (a note naming a table, a column, SQL, or the
                connection id breaks the same security requirement the dashboard itself is bound by).
-               Say what THIS turn actually changed — not that a dashboard exists. Then, in the same note:
-               - State anything you could NOT do, could not verify, or chose to skip, and why. A build that
-                 partly worked must say so. Never claim a number is correct because a query returned it.
+
+               REPLY STYLE — brevity is mandatory:
+               - Lead with what changed or what you built. No filler, no restating their request.
+               - Keep it to 1-3 short lines. Use markdown bullets when listing multiple items (requirements
+                 met, status updates, or next steps). Never write long paragraphs.
+               - Skip phrases like "I've created...", "Here's what I did...", "As requested...". Just state
+                 the facts: "Added revenue chart. Date range defaults to last 30 days."
+               - Only write more than 3 lines when explaining an error, a limitation you hit, or a breaking
+                 change — and even then stay concise.
+
+               Content requirements (still apply):
+               - State anything you could NOT do, could not verify, or chose to skip, and why.
                - If the user was correcting or disputing something (a wrong figure, a chart that didn't load),
-                 say plainly whether it is now fixed, and what the value/behaviour is now versus what they
-                 reported. If you could not reproduce or resolve their complaint, say THAT — do not answer a
-                 correction with a description of what you built.
-               Write it as you would to a colleague: specific and short. Never open with "Done".""");
+                 say plainly whether it is now fixed. If you could not resolve it, say THAT.
+               - Never claim a number is correct just because a query returned it.
+               - Never open with "Done" or "Great".""");
         return sb.toString();
     }
 
