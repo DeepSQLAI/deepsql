@@ -38,15 +38,12 @@
 }
 .logoBtn:active { transform: scale(0.92); }
 
-.logoMark {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: #534AB7;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.logoIcon {
+  color: #555;
+  flex-shrink: 0;
+  transition: color 120ms ease-out;
 }
+.logoBtn:hover .logoIcon { color: #111; }
 
 .crumbLink {
   border: none;
@@ -305,6 +302,60 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   animation: bubbleIn 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+
+.agentMarkdown {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #26262a;
+}
+.agentMarkdown p { margin: 0 0 8px; }
+.agentMarkdown p:last-child { margin-bottom: 0; }
+.agentMarkdown ul, .agentMarkdown ol {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+.agentMarkdown li {
+  margin: 3px 0;
+}
+.agentMarkdown li::marker {
+  color: #9a97ad;
+}
+.agentMarkdown strong {
+  font-weight: 600;
+  color: #111;
+}
+.agentMarkdown code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  background: #f5f5f7;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.agentMarkdown pre {
+  background: #f5f5f7;
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.agentMarkdown pre code {
+  background: none;
+  padding: 0;
+}
+.agentMarkdown h1, .agentMarkdown h2, .agentMarkdown h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 6px;
+  color: #111;
+}
+.agentMarkdown h1:first-child, .agentMarkdown h2:first-child, .agentMarkdown h3:first-child {
+  margin-top: 0;
+}
+.agentMarkdown a {
+  color: #534AB7;
+  text-decoration: none;
+}
+.agentMarkdown a:hover { text-decoration: underline; }
 
 .bubbleUser {
   align-self: flex-end;

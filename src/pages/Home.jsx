@@ -79,7 +79,7 @@ export default function Home() {
 
       {/* Main content — lazy-mount sections on first visit, then keep alive */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-        {canSwitchProfile && <ProfileSwitch />}
+        {canSwitchProfile && !immersive && <ProfileSwitch />}
         <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
           {visibleSections.map(([key, Section]) => {
             if (!mounted.has(key)) return null
