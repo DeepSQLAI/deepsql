@@ -349,7 +349,11 @@ generate_secret() {
 
 # Check if we can prompt interactively
 can_prompt() {
-  [[ "$NON_INTERACTIVE" -eq 0 ]] && [[ -e /dev/tty ]]
+  # Non-interactive mode disables prompts
+  [[ "$NON_INTERACTIVE" -eq 1 ]] && return 1
+  # Check if /dev/tty is actually accessible (not just exists)
+  # When piped via setsid, /dev/tty exists but cannot be opened
+  [[ -r /dev/tty ]] && [[ -w /dev/tty ]] && : </dev/tty 2>/dev/null
 }
 
 # Prompt for a value, reading from /dev/tty if available
@@ -842,7 +846,8 @@ main() {
       echo
       echo "No LLM key configured. Chat and AI features will be disabled."
       echo "Configure your LLM key during onboarding in the web UI after logging in."
-      if [[ "$NON_INTERACTIVE" -eq 1 ]]; then
+      # Print machine-readable output when non-interactive OR when no TTY available
+      if [[ "$NON_INTERACTIVE" -eq 1 ]] || ! can_prompt; then
         echo "NEEDS_USER_INPUT: DEEPSQL_LLM_API_KEY (optional, can be set during onboarding at http://localhost:${DEEPSQL_FRONTEND_PORT:-3000})"
       fi
     fi
