@@ -60,6 +60,7 @@ class PostgresIntrospectionProviderTest {
             .thenReturn(false)  // No functions
             .thenReturn(false); // No procedures
 
+        when(resultSet.getString("schema_name")).thenReturn("public");
         when(resultSet.getString("name")).thenReturn("users");
         when(resultSet.getString("type")).thenReturn("table");
         when(resultSet.getObject("row_count")).thenReturn(100L);
@@ -70,6 +71,7 @@ class PostgresIntrospectionProviderTest {
         assertEquals(1, objects.size());
         assertEquals("users", objects.get(0).getName());
         assertEquals("table", objects.get(0).getType());
+        assertEquals("public", objects.get(0).getSchema());
     }
 
     @Test
@@ -216,6 +218,7 @@ class PostgresIntrospectionProviderTest {
             .thenReturn(true)
             .thenReturn(false);
 
+        when(resultSet.getString("schemaname")).thenReturn("public");
         when(resultSet.getString("tablename")).thenReturn("users");
         when(resultSet.getString("type")).thenReturn("table");
         when(resultSet.getObject("row_count")).thenReturn(100L);
@@ -228,6 +231,7 @@ class PostgresIntrospectionProviderTest {
         assertNotNull(schema.getTables());
         assertEquals(1, schema.getTables().size());
         assertEquals("users", schema.getTables().get(0).getName());
+        assertEquals("public", schema.getTables().get(0).getSchema());
     }
 
     @Test
@@ -240,8 +244,10 @@ class PostgresIntrospectionProviderTest {
             .thenReturn(false);
 
         when(resultSet.getString("constraint_name")).thenReturn("fk_orders_user");
+        when(resultSet.getString("source_schema")).thenReturn("public");
         when(resultSet.getString("source_table")).thenReturn("orders");
         when(resultSet.getString("source_column")).thenReturn("user_id");
+        when(resultSet.getString("target_schema")).thenReturn("public");
         when(resultSet.getString("target_table")).thenReturn("users");
         when(resultSet.getString("target_column")).thenReturn("id");
 
@@ -250,6 +256,7 @@ class PostgresIntrospectionProviderTest {
         assertNotNull(relationships);
         assertEquals(1, relationships.size());
         assertEquals("fk_orders_user", relationships.get(0).getConstraintName());
+        // qualifyForConsumers returns just the table name for "public" schema
         assertEquals("orders", relationships.get(0).getFromTable());
         assertEquals("user_id", relationships.get(0).getFromColumn());
         assertEquals("users", relationships.get(0).getToTable());
@@ -294,6 +301,7 @@ class PostgresIntrospectionProviderTest {
         when(foreignKeysStatement.executeQuery(anyString())).thenReturn(foreignKeysResultSet);
 
         when(resultSet.next()).thenReturn(true).thenReturn(false);
+        when(resultSet.getString("schemaname")).thenReturn("public");
         when(resultSet.getString("tablename")).thenReturn("dim_route");
         when(resultSet.getString("type")).thenReturn("table");
         when(resultSet.getObject("row_count")).thenReturn(null);
@@ -370,7 +378,7 @@ class PostgresIntrospectionProviderTest {
 
     @Test
     void getTablesAndViews_queryExcludesExtensionViews() throws SQLException {
-        // Capture the SQL query and verify it contains the extension view exclusion
+        // Capture all SQL queries and find the tables/views one
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
         when(connection.createStatement()).thenReturn(statement);
         when(statement.executeQuery(sqlCaptor.capture())).thenReturn(resultSet);
@@ -379,20 +387,25 @@ class PostgresIntrospectionProviderTest {
         // getDatabaseObjects calls getTablesAndViews internally
         List<DatabaseObject> objects = provider.getDatabaseObjects(connection, "test_db");
 
-        // Verify the query was captured
-        String executedQuery = sqlCaptor.getValue();
-        assertNotNull(executedQuery);
+        // Find the tables/views query among all executed queries
+        String tablesViewsQuery = sqlCaptor.getAllValues().stream()
+            .filter(q -> q.contains("pg_tables") || q.contains("pg_views"))
+            .findFirst()
+            .orElse(null);
+        
+        assertNotNull(tablesViewsQuery, "Should have executed a query accessing pg_tables or pg_views");
         
         // The query for views should contain the extension exclusion
-        // (tables + views are in one UNION query, so check the whole thing)
-        assertTrue(executedQuery.contains("pg_views") || executedQuery.contains("pg_tables"),
-            "Query should access PostgreSQL system catalogs");
+        assertTrue(tablesViewsQuery.contains("pg_views"),
+            "Query should access pg_views");
+        assertTrue(tablesViewsQuery.contains("pg_tables"),
+            "Query should access pg_tables");
         
         // Verify schema exclusions are present
-        assertTrue(executedQuery.contains("NOT IN"),
+        assertTrue(tablesViewsQuery.contains("NOT IN"),
             "Query should have NOT IN clause for exclusions");
-        assertTrue(executedQuery.contains("pg_catalog") || executedQuery.contains("pg_stat_statements"),
-            "Query should exclude system schemas or extension views");
+        assertTrue(tablesViewsQuery.contains("pg_stat_statements"),
+            "Query should exclude pg_stat_statements extension views");
     }
 
     @Test
