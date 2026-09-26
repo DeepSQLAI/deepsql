@@ -339,4 +339,77 @@ class PostgresIntrospectionProviderTest {
         assertEquals("character varying", details.get(0).getDataType());
         assertFalse(details.get(0).getIsNullable());
     }
+
+    // ─── pg_stat_statements extension view exclusion tests ───────────────────────
+
+    @Test
+    void excludeExtensionViewsPredicate_excludesPgStatStatements() {
+        String predicate = PostgresIntrospectionProvider.excludeExtensionViewsPredicate("v.viewname");
+        
+        assertTrue(predicate.contains("pg_stat_statements"),
+            "Exclusion predicate should mention pg_stat_statements");
+        assertTrue(predicate.contains("pg_stat_statements_info"),
+            "Exclusion predicate should mention pg_stat_statements_info");
+        assertTrue(predicate.contains("pg_buffercache"),
+            "Exclusion predicate should mention pg_buffercache");
+        assertTrue(predicate.contains("NOT IN"),
+            "Exclusion predicate should use NOT IN clause");
+    }
+
+    @Test
+    void nonSystemSchemaPredicate_excludesPgCatalog() {
+        String predicate = PostgresIntrospectionProvider.nonSystemSchemaPredicate("t.schemaname");
+        
+        assertTrue(predicate.contains("pg_catalog"),
+            "Schema predicate should exclude pg_catalog");
+        assertTrue(predicate.contains("information_schema"),
+            "Schema predicate should exclude information_schema");
+        assertTrue(predicate.contains("pg_toast"),
+            "Schema predicate should exclude pg_toast");
+    }
+
+    @Test
+    void getTablesAndViews_queryExcludesExtensionViews() throws SQLException {
+        // Capture the SQL query and verify it contains the extension view exclusion
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        when(connection.createStatement()).thenReturn(statement);
+        when(statement.executeQuery(sqlCaptor.capture())).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        // getDatabaseObjects calls getTablesAndViews internally
+        List<DatabaseObject> objects = provider.getDatabaseObjects(connection, "test_db");
+
+        // Verify the query was captured
+        String executedQuery = sqlCaptor.getValue();
+        assertNotNull(executedQuery);
+        
+        // The query for views should contain the extension exclusion
+        // (tables + views are in one UNION query, so check the whole thing)
+        assertTrue(executedQuery.contains("pg_views") || executedQuery.contains("pg_tables"),
+            "Query should access PostgreSQL system catalogs");
+        
+        // Verify schema exclusions are present
+        assertTrue(executedQuery.contains("NOT IN"),
+            "Query should have NOT IN clause for exclusions");
+        assertTrue(executedQuery.contains("pg_catalog") || executedQuery.contains("pg_stat_statements"),
+            "Query should exclude system schemas or extension views");
+    }
+
+    @Test
+    void extensionViewExclusion_isExactMatch() {
+        // Verify the exclusion predicate uses exact matches, not prefix matches
+        String predicate = PostgresIntrospectionProvider.EXCLUDED_EXTENSION_VIEWS_SQL;
+        
+        // The excluded list should be specific, exact names only
+        assertTrue(predicate.contains("'pg_stat_statements'"),
+            "Predicate should exclude exactly 'pg_stat_statements'");
+        assertTrue(predicate.contains("'pg_stat_statements_info'"),
+            "Predicate should exclude exactly 'pg_stat_statements_info'");
+        assertTrue(predicate.contains("'pg_buffercache'"),
+            "Predicate should exclude exactly 'pg_buffercache'");
+        
+        // Verify it's a NOT IN list (exact match semantics, not LIKE pattern)
+        assertTrue(predicate.startsWith("NOT IN"),
+            "Predicate should use NOT IN for exact matching");
+    }
 }

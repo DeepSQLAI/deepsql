@@ -29,8 +29,20 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
         + "AND %1$s NOT LIKE 'pg_temp_%%' "
         + "AND %1$s NOT LIKE 'pg_toast_temp_%%'";
 
+    /**
+     * Extension-created system views that should be excluded from Brain even if
+     * they somehow appear in a user schema. pg_stat_statements is in pg_catalog
+     * (so already excluded by schema filter), but this provides defense in depth.
+     */
+    static final String EXCLUDED_EXTENSION_VIEWS_SQL =
+        "NOT IN ('pg_stat_statements', 'pg_stat_statements_info', 'pg_buffercache')";
+
     static String nonSystemSchemaPredicate(String column) {
         return column + " " + String.format(NON_SYSTEM_SCHEMA_SQL, column);
+    }
+
+    static String excludeExtensionViewsPredicate(String column) {
+        return column + " " + EXCLUDED_EXTENSION_VIEWS_SQL;
     }
 
     /** Map / snapshot key that survives duplicate table names across schemas. */
@@ -74,6 +86,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
 
         String schemaPred = nonSystemSchemaPredicate("t.schemaname");
         String viewPred = nonSystemSchemaPredicate("v.schemaname");
+        String extViewPred = excludeExtensionViewsPredicate("v.viewname");
         String query = """
             SELECT t.schemaname as schema_name, t.tablename as name, 'table' as type,
                 CASE
@@ -89,9 +102,9 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             WHERE %s AND c.relkind IN ('r', 'p')
             UNION ALL
             SELECT v.schemaname as schema_name, v.viewname as name, 'view' as type, 0 as row_count
-            FROM pg_views v WHERE %s
+            FROM pg_views v WHERE %s AND %s
             ORDER BY schema_name, type, name
-            """.formatted(schemaPred, viewPred);
+            """.formatted(schemaPred, viewPred, extViewPred);
 
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery(query)) {

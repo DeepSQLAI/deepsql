@@ -11,8 +11,13 @@ CREATE DATABASE demo_shop;
 
 \connect demo_shop
 
--- Enable extensions
-CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+-- Create separate schema for extensions to keep them out of Brain indexing
+CREATE SCHEMA IF NOT EXISTS extensions;
+
+-- Enable extensions in the extensions schema (keeps pg_stat_statements out of public schema)
+-- Note: pg_stat_statements doesn't actually create tables in any schema, but this is good practice
+-- The extension's view is system-wide and accessed via pg_catalog, not the target schema
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA extensions;
 
 -- ============================================================================
 -- SCHEMA: Core E-commerce Tables

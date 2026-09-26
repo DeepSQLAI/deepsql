@@ -268,91 +268,69 @@ echo "Step 4: Running real workload simulation (~${DEEPSQL_SEED_WORKLOAD_DURATIO
 compose exec -T postgres psql -U postgres -d demo_shop -c "SELECT pg_stat_statements_reset();" 2>/dev/null || true
 
 # Run inefficient queries that will be captured by pg_stat_statements
-# These patterns are intentionally suboptimal to trigger recommendations
-# Some queries use pg_sleep to ensure they exceed 100ms threshold
+# These patterns are intentionally suboptimal to trigger index recommendations
+# NO pg_sleep - all slowness comes from real inefficient query patterns
 echo "  Starting workload (this takes about ${DEEPSQL_SEED_WORKLOAD_DURATION} seconds)..."
 compose exec -T postgres psql -U postgres -d demo_shop -v ON_ERROR_STOP=1 <<EOWORK
 -- Workload simulation for pg_stat_statements
 -- Each pattern runs multiple times to accumulate meaningful statistics
--- Deliberately slow queries (>100ms) are marked with pg_sleep
+-- All slowness is REAL from inefficient queries (no pg_sleep)
 
--- First: Run deliberately slow queries that will DEFINITELY show up at 100ms threshold
--- These queries simulate "stuck" or poorly optimized production queries
-
--- Slow Query 1: Full table scan with sleep (simulates missing index)
--- This query would benefit from an index on audit_log(table_name, changed_at)
-SELECT COUNT(*), pg_sleep(0.15)
-FROM audit_log 
-WHERE table_name = 'orders' 
-AND changed_at > NOW() - INTERVAL '7 days';
-
--- Run it multiple times to accumulate calls
-SELECT COUNT(*), pg_sleep(0.12)
-FROM audit_log 
-WHERE table_name = 'orders' 
-AND changed_at > NOW() - INTERVAL '7 days';
-
-SELECT COUNT(*), pg_sleep(0.11)
-FROM audit_log 
-WHERE table_name = 'orders' 
-AND changed_at > NOW() - INTERVAL '7 days';
-
--- Slow Query 2: Cross-join style lookup with LOWER() function (prevents index use)
--- This query would benefit from a functional index on LOWER(status)
-SELECT COUNT(*), pg_sleep(0.14)
-FROM orders 
-WHERE LOWER(status) = 'delivered' AND total_amount > 100;
-
-SELECT COUNT(*), pg_sleep(0.13)
-FROM orders 
-WHERE LOWER(status) = 'delivered' AND total_amount > 100;
-
--- Slow Query 3: Missing composite index on frequently filtered columns
-SELECT COUNT(*), pg_sleep(0.12)
-FROM orders o 
-JOIN customers c ON o.customer_id = c.id 
-WHERE o.status = 'pending' AND o.payment_status = 'paid';
-
--- Now run the loop for additional patterns at faster speeds
 DO \$\$
 DECLARE 
     i int;
+    j int;
     start_time timestamp := clock_timestamp();
     duration_seconds int := ${DEEPSQL_SEED_WORKLOAD_DURATION};
     result_count bigint;
+    dummy_text text;
 BEGIN
     RAISE NOTICE 'Starting workload simulation for % seconds...', duration_seconds;
     
     WHILE (EXTRACT(EPOCH FROM (clock_timestamp() - start_time)) < duration_seconds) LOOP
-        -- Pattern 1: LOWER() on indexed column (prevents index use)
-        SELECT COUNT(*) INTO result_count FROM orders 
-        WHERE LOWER(status) = 'delivered' AND total_amount > 100;
-        
-        -- Pattern 2: Missing composite index on frequently filtered columns
-        SELECT COUNT(*) INTO result_count FROM orders o 
-        JOIN customers c ON o.customer_id = c.id 
-        WHERE o.status = 'pending' AND o.payment_status = 'paid';
-        
-        -- Pattern 3: N+1 style lookups (inefficient join pattern)
-        FOR i IN 1..10 LOOP
-            SELECT COUNT(*) INTO result_count FROM order_items oi
-            JOIN products p ON oi.product_id = p.id
-            WHERE oi.order_id = i * 100;
+        -- Pattern 1: LOWER() on column prevents index use (seq scan)
+        -- Recommendation: CREATE INDEX idx_orders_lower_status ON orders (LOWER(status));
+        FOR j IN 1..5 LOOP
+            SELECT COUNT(*) INTO result_count FROM orders 
+            WHERE LOWER(status) = 'delivered' AND total_amount > 100;
         END LOOP;
         
-        -- Pattern 4: Unanchored LIKE (forces full table scan)
-        SELECT COUNT(*) INTO result_count FROM products 
-        WHERE name ILIKE '%phone%' OR description ILIKE '%wireless%';
+        -- Pattern 2: Missing composite index on frequently filtered columns
+        -- Recommendation: CREATE INDEX idx_orders_status_payment ON orders (status, payment_status);
+        FOR j IN 1..5 LOOP
+            SELECT COUNT(*) INTO result_count FROM orders o 
+            JOIN customers c ON o.customer_id = c.id 
+            WHERE o.status = 'pending' AND o.payment_status = 'paid';
+        END LOOP;
         
-        -- Pattern 5: Large sort without index support
-        SELECT COUNT(*) INTO result_count FROM (
-            SELECT * FROM audit_log 
+        -- Pattern 3: Unanchored LIKE '%...%' forces full table scan
+        -- Recommendation: Consider full-text search or trigram index
+        FOR j IN 1..3 LOOP
+            SELECT COUNT(*) INTO result_count FROM products 
+            WHERE name ILIKE '%phone%' OR description ILIKE '%wireless%';
+        END LOOP;
+        
+        -- Pattern 4: Large audit_log scan without proper index
+        -- Recommendation: CREATE INDEX idx_audit_table_changed ON audit_log (table_name, changed_at);
+        FOR j IN 1..3 LOOP
+            SELECT COUNT(*) INTO result_count FROM audit_log 
             WHERE table_name = 'orders' 
-            ORDER BY changed_at DESC 
-            LIMIT 1000
-        ) sub;
+            AND changed_at > NOW() - INTERVAL '7 days';
+        END LOOP;
         
-        -- Pattern 6: Aggregation across large table (MV candidate)
+        -- Pattern 5: Large sort without index support  
+        -- Recommendation: CREATE INDEX idx_audit_changed_desc ON audit_log (changed_at DESC);
+        FOR j IN 1..2 LOOP
+            SELECT COUNT(*) INTO result_count FROM (
+                SELECT * FROM audit_log 
+                WHERE table_name = 'orders' 
+                ORDER BY changed_at DESC 
+                LIMIT 1000
+            ) sub;
+        END LOOP;
+        
+        -- Pattern 6: Expensive aggregation across large join (MV candidate)
+        -- This naturally takes time due to the join and aggregation
         SELECT COUNT(*) INTO result_count FROM (
             SELECT DATE_TRUNC('month', o.created_at) as month,
                    c.name as category,
@@ -366,14 +344,21 @@ BEGIN
             GROUP BY DATE_TRUNC('month', o.created_at), c.id, c.name
         ) sub;
         
-        -- Pattern 7: Missing index on foreign key (orders.customer_id lookups)
-        SELECT COUNT(*) INTO result_count FROM orders 
-        WHERE customer_id IN (
-            SELECT id FROM customers WHERE tier = 'platinum'
-        );
+        -- Pattern 7: Subquery that could be rewritten as JOIN
+        -- Recommendation: Consider rewriting as JOIN for better performance
+        FOR j IN 1..3 LOOP
+            SELECT COUNT(*) INTO result_count FROM orders 
+            WHERE customer_id IN (
+                SELECT id FROM customers WHERE tier = 'platinum'
+            );
+        END LOOP;
         
-        -- Small delay to spread the load
-        PERFORM pg_sleep(0.1);
+        -- Pattern 8: Multiple separate queries instead of batch (N+1 pattern)
+        FOR i IN 1..20 LOOP
+            SELECT COUNT(*) INTO result_count FROM order_items oi
+            JOIN products p ON oi.product_id = p.id
+            WHERE oi.order_id = (i * 50);
+        END LOOP;
     END LOOP;
     
     RAISE NOTICE 'Workload simulation completed after % seconds', 
@@ -717,6 +702,7 @@ EOSQL
     
     # Trigger a real digest using DigestInsightAssemblerService
     # This generates content from actual demo data (index recommendations, slow queries, etc.)
+    # The trigger runs async, so we wait and verify completion
     echo "  Triggering real digest generation..."
     
     trigger_result="$(curl -sS -b "$cookie_jar" \
@@ -724,25 +710,30 @@ EOSQL
         -X POST "$base/admin/slack/digest/trigger" 2>/dev/null || echo "{}")"
     
     if [[ "$trigger_result" == *"triggered\":true"* ]]; then
-        echo "  Real digest generated successfully."
-        # Wait a moment for the async digest to be written
-        sleep 2
+        echo "  Digest trigger accepted, waiting for async generation (5s)..."
+        sleep 5
     else
         echo "  Note: Digest trigger returned: $trigger_result"
-        echo "  This is expected if Slack is not configured - digest shows in web UI only."
-        
-        # If no Slack, we need to manually call the assembler and save the result
-        # The trigger endpoint requires Slack to be configured for actual delivery
-        # For web-only display, insert a digest based on seeded index recommendations
-        echo "  Generating web-only digest from seeded data..."
+        sleep 2  # Brief wait in case of transient issue
+    fi
+    
+    # Verify digest was created - if not, create a deterministic one from seeded data
+    digest_exists="$(compose exec -T postgres psql -U postgres -d dba_agent -At -c \
+        "SELECT COUNT(*) FROM slack_digest_log WHERE connection_id = '${connection_id}'" 2>/dev/null || echo "0")"
+    
+    if [[ "${digest_exists:-0}" -gt 0 ]]; then
+        echo "  Digest successfully generated from real data (${digest_exists} entries)."
+    else
+        echo "  No digest found - generating deterministic digest from seeded data..."
         
         pref_id="$(compose exec -T postgres psql -U postgres -d dba_agent -At -c \
             "SELECT id FROM user_digest_preference WHERE username = '${DEEPSQL_INITIAL_ADMIN_EMAIL}' AND connection_id = '${connection_id}' LIMIT 1" 2>/dev/null || echo "")"
         
-        # Build digest content from actual seeded data
+        # Build digest content from actual seeded data (index recommendations, slow queries)
+        # This is deterministic content based on what was seeded, not hardcoded prose
         compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 <<EOSQL
--- Generate digest from actual seeded index recommendations
--- This is deterministic content based on what was seeded, not hardcoded prose
+-- Generate deterministic digest from seeded analysis data
+-- Uses actual index recommendations and slow query stats
 
 WITH index_recs AS (
     SELECT table_name, index_name, priority, estimated_impact, reason
@@ -759,6 +750,12 @@ rec_summary AS (
             E'\n'
         ) as rec_list
     FROM index_recs
+),
+slow_summary AS (
+    SELECT COUNT(*) as slow_count
+    FROM slow_query_history 
+    WHERE connection_id = '${connection_id}'
+    AND created_at > NOW() - INTERVAL '1 day'
 )
 INSERT INTO slack_digest_log (
     connection_id, connection_name, channel_id, content, headline,
@@ -770,34 +767,33 @@ SELECT
     '${DEEPSQL_SEED_CONNECTION_NAME}',
     NULL,
     '*🗄️ DB Health Briefing: ${DEEPSQL_SEED_CONNECTION_NAME}*
-_' || TO_CHAR(NOW(), 'FMDay, FMMonth DD') || ' · ' || rec_count || ' Index Recommendations_
+_' || TO_CHAR(NOW(), 'FMDay, FMMonth DD') || ' · ' || r.rec_count || ' Index Recommendations · ' || s.slow_count || ' Slow Queries_
 
 ────────────────────────────────
 
 *🔦 Index Recommendations*
 
-' || COALESCE(rec_list, 'No pending recommendations') || '
+' || COALESCE(r.rec_list, 'No pending recommendations') || '
+
+────────────────────────────────
+
+*🐢 Slow Query Summary*
+
+• ' || s.slow_count || ' slow queries captured from pg_stat_statements
+• Review details in Performance tab
 
 ────────────────────────────────
 
 *🎯 Quick Actions*
 
-• Review slow queries in Performance tab (pg_stat_statements)
+• Review slow queries in Performance tab
 • Apply high-priority indexes from Index Advisor
 • Check Brain notes for table documentation
 
 ────────────────────────────────
 
-*📈 Database Status*
-
-• Connection: ${DEEPSQL_SEED_CONNECTION_NAME}
-• Role: deepsql_demo (read-only + pg_read_all_stats)
-• pg_stat_statements: Enabled and tracking queries
-
-────────────────────────────────
-
 _Powered by DeepSQL · Generated from actual database analysis_',
-    rec_count || ' Index Recommendations',
+    r.rec_count || ' Index Recommendations, ' || s.slow_count || ' Slow Queries',
     NOW(),
     'SENT',
     '${DEEPSQL_INITIAL_ADMIN_EMAIL}',
@@ -806,16 +802,11 @@ _Powered by DeepSQL · Generated from actual database analysis_',
     'SLACK_DM',
     ${pref_id:-NULL},
     true
-FROM rec_summary
-WHERE NOT EXISTS (
-    SELECT 1 FROM slack_digest_log 
-    WHERE connection_id = '${connection_id}' 
-    AND recipient_username = '${DEEPSQL_INITIAL_ADMIN_EMAIL}'
-);
+FROM rec_summary r, slow_summary s;
 
-SELECT 'Digest entry created from seeded data' AS status;
+SELECT 'Deterministic digest created from seeded data' AS status;
 EOSQL
-        echo "  Web-only digest created from actual seeded data."
+        echo "  Deterministic digest created from seeded analysis data."
     fi
 else
     echo "  Skipping digest preferences (no connection ID available)"

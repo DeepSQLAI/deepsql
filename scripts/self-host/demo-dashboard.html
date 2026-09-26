@@ -48,7 +48,18 @@
 </div>
 <script>
 async function query(sql) {
-    return deepsql.query(sql);
+    const result = await deepsql.query(sql);
+    // Transform array rows to objects using column names
+    // API returns: {columns: ["col1", "col2"], rows: [[val1, val2], ...]}
+    // We need: [{col1: val1, col2: val2}, ...]
+    if (result.columns && result.rows) {
+        result.rows = result.rows.map(row => {
+            const obj = {};
+            result.columns.forEach((col, i) => obj[col] = row[i]);
+            return obj;
+        });
+    }
+    return result;
 }
 async function loadDashboard() {
     try {
