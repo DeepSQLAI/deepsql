@@ -1,54 +1,318 @@
 #!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════════════════════
+# DeepSQL Self-Host Installer
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Usage:
+#   ./scripts/self-host/install.sh [options]
+#
+# The installer checks prerequisites, generates secrets, prompts for or accepts
+# LLM credentials, builds the stack from source, and verifies health. After a
+# successful install, it optionally seeds a demo database.
+#
+# Keyless start: The stack starts without an LLM key. Chat and AI features are
+# disabled until a key is configured in Settings → AI Provider.
+#
+# Environment variables override .env placeholders:
+#   DEEPSQL_CHAT_API_KEY       LLM key for chat (optional - can set later in UI)
+#   DEEPSQL_CHAT_PROVIDER      Provider id (default: openai)
+#   DEEPSQL_CHAT_ENDPOINT      API endpoint (default: https://api.openai.com/v1)
+#   DEEPSQL_CHAT_MODEL         Model name (default: gpt-4o)
+#   DEEPSQL_INITIAL_ADMIN_EMAIL    Admin login email (prompted if unset)
+#   DEEPSQL_INITIAL_ADMIN_PASSWORD Admin password (generated if unset)
+#   DEEPSQL_FRONTEND_PORT      Frontend port (default: 3000)
+#   DEEPSQL_PROJECT_NAME       Compose project name (default: deepsql-selfhost)
+#
+# Options:
+#   -h, --help           Show this help message and exit
+#   -V, --version        Show version and exit
+#   --non-interactive    Never prompt; use env vars or defaults
+#   --seed-demo          Seed demo database after install (default)
+#   --no-seed-demo       Skip demo database seeding
+#   --fresh              Remove existing volumes before install
+#   --project-name NAME  Set Compose project name
+#
+# License: Apache-2.0 — https://github.com/DeepSQLAI/deepsql/blob/main/LICENSE
+# ═══════════════════════════════════════════════════════════════════════════════
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 COMPOSE_FILE="${DEEPSQL_COMPOSE_FILE:-$ROOT_DIR/docker-compose.yml}"
 ENV_FILE="${DEEPSQL_ENV_FILE:-$ROOT_DIR/.env}"
-PROJECT_NAME="${DEEPSQL_PROJECT_NAME:-deepsql-selfhost}"
+
+# Defaults
+: "${DEEPSQL_PROJECT_NAME:=deepsql-selfhost}"
+PROJECT_NAME="$DEEPSQL_PROJECT_NAME"
+
+# Parse options first (before any install work)
+NON_INTERACTIVE=0
+SEED_DEMO=1  # Default ON per spec
+FRESH_INSTALL=0
+SHOW_HELP=0
+SHOW_VERSION=0
+
+# Version from git tag or commit
+get_version() {
+  cd "$ROOT_DIR"
+  local tag
+  tag="$(git describe --tags --exact-match 2>/dev/null || true)"
+  if [[ -n "$tag" ]]; then
+    echo "$tag"
+  else
+    local branch commit
+    branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")"
+    commit="$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+    echo "${branch}@${commit}"
+  fi
+}
+
+usage() {
+  cat <<'EOF'
+DeepSQL Self-Host Installer
+
+Usage: install.sh [options]
+
+Options:
+  -h, --help           Show this help message and exit
+  -V, --version        Show version and exit
+  --non-interactive    Never prompt; use env vars or defaults
+  --seed-demo          Seed demo database after install (default)
+  --no-seed-demo       Skip demo database seeding
+  --fresh              Remove existing volumes before install
+  --project-name NAME  Set Compose project name
+
+Environment variables (override .env placeholders):
+  DEEPSQL_CHAT_API_KEY         LLM key (optional - can set later in UI)
+  DEEPSQL_CHAT_PROVIDER        Provider id (default: openai)
+  DEEPSQL_CHAT_ENDPOINT        API endpoint
+  DEEPSQL_CHAT_MODEL           Model name
+  DEEPSQL_INITIAL_ADMIN_EMAIL  Admin login email
+  DEEPSQL_INITIAL_ADMIN_PASSWORD  Admin password (generated if unset)
+  DEEPSQL_FRONTEND_PORT        Frontend port (default: 3000)
+  DEEPSQL_PROJECT_NAME         Compose project name
+
+Examples:
+  # Interactive install (prompts for admin email)
+  ./scripts/self-host/install.sh
+
+  # Non-interactive with LLM key
+  DEEPSQL_CHAT_API_KEY=sk-... DEEPSQL_INITIAL_ADMIN_EMAIL=admin@example.com \
+    ./scripts/self-host/install.sh --non-interactive
+
+  # Keyless install (configure LLM later in UI)
+  DEEPSQL_INITIAL_ADMIN_EMAIL=admin@example.com \
+    ./scripts/self-host/install.sh --non-interactive
+
+  # Fresh install (removes existing data)
+  ./scripts/self-host/install.sh --fresh
+
+For AI agents:
+  DEEPSQL_CHAT_API_KEY=<key> curl -fsSL https://deepsql.ai/install.sh | bash
+
+  After install:
+    Health: curl -fsS http://localhost:8080/api/actuator/health
+    Login:  http://localhost:3000 (credentials in ~/deepsql/.env)
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      SHOW_HELP=1
+      shift
+      ;;
+    -V|--version)
+      SHOW_VERSION=1
+      shift
+      ;;
+    --non-interactive)
+      NON_INTERACTIVE=1
+      shift
+      ;;
+    --seed-demo)
+      SEED_DEMO=1
+      shift
+      ;;
+    --no-seed-demo)
+      SEED_DEMO=0
+      shift
+      ;;
+    --fresh)
+      FRESH_INSTALL=1
+      shift
+      ;;
+    --project-name)
+      PROJECT_NAME="$2"
+      shift 2
+      ;;
+    --project-name=*)
+      PROJECT_NAME="${1#*=}"
+      shift
+      ;;
+    *)
+      echo "Error: Unknown option: $1" >&2
+      echo "Run with --help for usage." >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ "$SHOW_HELP" -eq 1 ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$SHOW_VERSION" -eq 1 ]]; then
+  echo "DeepSQL $(get_version)"
+  exit 0
+fi
+
+# ── Colors (disabled if not a terminal) ───────────────────────────────────────
+if [[ -t 1 ]]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  BLUE='\033[0;34m'
+  BOLD='\033[1m'
+  NC='\033[0m'
+else
+  RED='' GREEN='' YELLOW='' BLUE='' BOLD='' NC=''
+fi
+
+info()    { printf "${BLUE}==>${NC} %s\n" "$*"; }
+warn()    { printf "${YELLOW}Warning:${NC} %s\n" "$*" >&2; }
+error()   { printf "${RED}Error:${NC} %s\n" "$*" >&2; }
+success() { printf "${GREEN}✓${NC} %s\n" "$*"; }
+
+# ── Prerequisite Checks ───────────────────────────────────────────────────────
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "Error: required command '$1' is not installed." >&2
-    exit 1
+    error "Required command '$1' is not installed."
+    return 1
   fi
 }
+
+check_docker_permission() {
+  if ! docker info >/dev/null 2>&1; then
+    # Distinguish between "not running" and "permission denied"
+    local docker_err
+    docker_err="$(docker info 2>&1 || true)"
+    
+    if echo "$docker_err" | grep -qi "permission denied\|connect: permission denied\|Got permission denied"; then
+      error "Docker permission denied."
+      echo
+      echo "Your user is not in the docker group. Fix with:"
+      echo
+      echo "  ${BOLD}sudo usermod -aG docker \$USER${NC}"
+      echo "  ${BOLD}newgrp docker${NC}  # or log out and back in"
+      echo
+      echo "Then re-run this installer."
+      exit 1
+    elif echo "$docker_err" | grep -qi "Is the docker daemon running\|Cannot connect"; then
+      error "Docker daemon is not running."
+      echo
+      echo "Start Docker with:"
+      echo "  sudo systemctl start docker"
+      echo
+      echo "Then re-run this installer."
+      exit 1
+    else
+      error "Docker is not accessible."
+      echo "$docker_err" >&2
+      exit 1
+    fi
+  fi
+}
+
+version_ge() {
+  [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" == "$2" ]]
+}
+
+check_prerequisites() {
+  info "Checking prerequisites..."
+  
+  require_command docker || exit 1
+  require_command curl || exit 1
+  
+  check_docker_permission
+  success "Docker is running"
+  
+  # Check Compose v2
+  if ! docker compose version >/dev/null 2>&1; then
+    error "Docker Compose v2 is not installed."
+    echo
+    echo "Install the Compose plugin:"
+    echo "  apt install docker-compose-plugin   # Debian/Ubuntu"
+    echo "  dnf install docker-compose-plugin   # RHEL/Fedora"
+    exit 1
+  fi
+  
+  local compose_version
+  compose_version="$(docker compose version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+  if [[ -z "$compose_version" ]] || ! version_ge "$compose_version" "2.0.0"; then
+    error "Docker Compose $compose_version is too old (need >= 2.0.0)."
+    exit 1
+  fi
+  success "Docker Compose $compose_version"
+  
+  # Check buildx
+  local buildx_version
+  buildx_version="$(docker buildx version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+  if [[ -z "$buildx_version" ]]; then
+    error "Docker buildx is not installed."
+    echo
+    echo "Install buildx:"
+    echo "  apt install docker-buildx-plugin   # Debian/Ubuntu"
+    exit 1
+  fi
+  if ! version_ge "$buildx_version" "0.17.0"; then
+    error "Docker buildx $buildx_version is too old (need >= 0.17.0)."
+    echo
+    echo "Upgrade buildx or run the bootstrap script:"
+    echo "  curl -fsSL https://raw.githubusercontent.com/DeepSQLAI/deepsql/main/scripts/self-host/bootstrap-server.sh | sudo bash"
+    exit 1
+  fi
+  success "Docker buildx $buildx_version"
+}
+
+# ── Volume / Fresh Install Handling ───────────────────────────────────────────
+
+check_existing_volumes() {
+  local volumes
+  volumes="$(docker volume ls --filter "name=${PROJECT_NAME}" --format '{{.Name}}' 2>/dev/null || true)"
+  
+  if [[ -n "$volumes" ]]; then
+    if [[ "$FRESH_INSTALL" -eq 1 ]]; then
+      warn "Removing existing volumes for project '$PROJECT_NAME'..."
+      # Stop containers first
+      docker compose --project-name "$PROJECT_NAME" -f "$COMPOSE_FILE" down --volumes 2>/dev/null || true
+      success "Existing volumes removed"
+    else
+      warn "Existing volumes found for project '$PROJECT_NAME'."
+      echo "  This install will reuse existing data (admin account, connections, etc.)."
+      echo "  For a fresh install, run with ${BOLD}--fresh${NC} flag."
+      echo
+    fi
+  fi
+}
+
+# ── Environment File Handling ─────────────────────────────────────────────────
 
 is_placeholder() {
   local value="${1:-}"
-  # "postgres" is the historical compose default — treat as unset so install.sh
-  # replaces it with a generated secret (OSS security C4).
   [[ -z "$value" || "$value" == change-me-* || "$value" == replace-with-* || "$value" == your-* || "$value" == "postgres" ]]
 }
 
-require_env_value() {
-  local name="$1"
-  local value="${!name:-}"
-  if is_placeholder "$value"; then
-    echo "Error: '$name' must be set in $ENV_FILE." >&2
-    exit 1
-  fi
-}
-
-# Write NAME='value' into $ENV_FILE, single-quoted with embedded quotes escaped.
-#
-# Every self-host script does `set -a; source .env`, so an unquoted value containing a
-# space is executed as a command: answering the company-name prompt with "Acme Corp"
-# produced `DEEPSQL_COMPANY_NAME=Acme Corp`, and then `line 216: Corp: command not found`
-# from install.sh, status.sh and smoke-test.sh alike — naming neither the variable nor
-# the prompt that set it. Docker Compose strips the surrounding quotes when it reads the
-# same file, so this is safe for both readers.
+# Write NAME='value' into $ENV_FILE with proper quoting
 write_env_value() {
   local name="$1" value="$2" quoted
-  # Close the quote, emit an escaped quote, reopen: ' -> '\''. Built from variables
-  # because writing the replacement inline is easy to get subtly wrong -- the first
-  # attempt produced O\'\\'\'Brien, which made `source .env` die on an unterminated
-  # string, exactly the class of breakage this function exists to prevent.
   local sq="'" esc="'\\''"
   quoted="${sq}${value//${sq}/${esc}}${sq}"
+  
   if grep -q "^${name}=" "$ENV_FILE" 2>/dev/null; then
-    # Literal replacement rather than a sed expression: the value may contain |, & or \,
-    # each of which sed would otherwise interpret.
     NAME="$name" QUOTED="$quoted" python3 - "$ENV_FILE" <<'PY'
 import os, re, sys
 path = sys.argv[1]
@@ -60,8 +324,6 @@ PY
   else
     printf '%s=%s\n' "$name" "$quoted" >> "$ENV_FILE"
   fi
-  # No eval: `eval export NAME=$value` re-parses the value, so a password containing
-  # $(...) or a backtick would execute rather than be stored.
   export "${name}=${value}"
 }
 
@@ -77,75 +339,68 @@ generate_secret() {
   fi
 }
 
-prompt_env_value() {
-  local name="$1"
-  local label="$2"
-  local value="${!name:-}"
-  if is_placeholder "$value"; then
-    printf '%s: ' "$label"
-    # `|| true`: read returns non-zero at EOF, and under `set -e` that aborts the
-    # script instantly — no message, no diagnosis, and .env already half-written with
-    # freshly generated secrets. Let the emptiness check below report it instead.
-    # See prompt_optional_env_value for how this was found.
-    read -r value || true
-    if [[ -z "$value" ]]; then
-      echo "Error: '$name' is required." >&2
-      exit 1
-    fi
-    write_env_value "$name" "$value"
-  fi
+# ── TTY-aware Prompts ─────────────────────────────────────────────────────────
+
+# Check if we can prompt interactively
+can_prompt() {
+  [[ "$NON_INTERACTIVE" -eq 0 ]] && [[ -e /dev/tty ]]
 }
 
-prompt_secret_env_value() {
+# Prompt for a value, reading from /dev/tty if available
+prompt_value() {
   local name="$1"
   local label="$2"
+  local required="$3"  # 1 for required, 0 for optional
+  local secret="$4"    # 1 for password (hidden), 0 for normal
   local value="${!name:-}"
-  if is_placeholder "$value"; then
-    printf '%s: ' "$label"
-    read -rs value || true
-    printf '\n'
-    if [[ -z "$value" ]]; then
-      echo "Error: '$name' is required." >&2
-      exit 1
-    fi
-    write_env_value "$name" "$value"
+  
+  # If already set and not a placeholder, use it
+  if ! is_placeholder "$value"; then
+    return 0
   fi
-}
-
-# Optional prompt — accepts blank Enter without exiting. Used for values
-# the backend can sensibly derive on its own (e.g. company name fallback
-# to admin email domain). If a non-blank value is provided it is persisted
-# to $ENV_FILE and exported; blank leaves the variable unset.
-#
-# The `|| true` is what makes "optional" true. Without it this prompt was the most
-# likely place for the whole installer to die: `read` returns non-zero at EOF, and
-# under `set -euo pipefail` that exits 1 with nothing printed. Any non-interactive
-# run (`install.sh </dev/null`, CI, a piped shell) reached exactly here — after the
-# secrets were generated and written — and stopped, looking like a successful config
-# step followed by silence. Interactively it is no better: this prompt says "press
-# Enter to skip", and Ctrl-D is the other thing people press at a skippable prompt.
-prompt_optional_env_value() {
-  local name="$1"
-  local label="$2"
-  local value="${!name:-}"
-  if [[ -z "$value" || "$value" == *change-me-* || "$value" == *replace-with-* ]]; then
-    printf '%s: ' "$label"
-    read -r value || true
+  
+  # Can we prompt?
+  if can_prompt; then
+    if [[ "$secret" -eq 1 ]]; then
+      printf '%s: ' "$label" >/dev/tty
+      read -rs value </dev/tty
+      printf '\n' >/dev/tty
+    else
+      printf '%s: ' "$label" >/dev/tty
+      read -r value </dev/tty || true
+    fi
+    
     if [[ -n "$value" ]]; then
-      # This is the prompt that first exposed the quoting bug: "Company / organization
-      # name" invites an answer with a space, and almost every real one has one.
       write_env_value "$name" "$value"
+      return 0
     fi
   fi
+  
+  # No value and can't prompt (or user skipped)
+  if [[ "$required" -eq 1 ]]; then
+    if [[ "$NON_INTERACTIVE" -eq 1 ]]; then
+      echo "NEEDS_USER_INPUT: $name (required)"
+      return 1
+    else
+      error "'$name' is required."
+      return 1
+    fi
+  fi
+  
+  return 0
 }
 
-sed_inplace() {
-  if [[ "$(uname)" == "Darwin" ]]; then
-    sed -i '' "$@"
-  else
-    sed -i "$@"
-  fi
+# ── Compose Helper ────────────────────────────────────────────────────────────
+
+compose() {
+  DEEPSQL_RUNTIME_ENV_FILE="$ENV_FILE" docker compose \
+    --project-name "$PROJECT_NAME" \
+    --env-file "$ENV_FILE" \
+    -f "$COMPOSE_FILE" \
+    "$@"
 }
+
+# ── Health Checks ─────────────────────────────────────────────────────────────
 
 wait_for_http() {
   local url="$1"
@@ -159,17 +414,18 @@ wait_for_http() {
     fi
     sleep "$delay"
   done
-  echo "Error: timed out waiting for $label at $url" >&2
+  error "Timed out waiting for $label at $url"
   return 1
 }
+
+# ── Database Setup ────────────────────────────────────────────────────────────
 
 ensure_scheduler_table() {
   local sql_file="$ROOT_DIR/docker/postgres/init/01_create_scheduled_tasks.sql"
   if [[ ! -f "$sql_file" ]]; then
-    echo "Error: missing scheduler bootstrap SQL at $sql_file" >&2
+    error "Missing scheduler bootstrap SQL at $sql_file"
     exit 1
   fi
-
   compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 < "$sql_file" >/dev/null
   echo "Ensured db-scheduler table exists in the vault database."
 }
@@ -186,34 +442,25 @@ ensure_pgvector_store() {
   fi
 
   local expected_dims="${VECTOR_STORE_EMBEDDING_DIMENSIONS:-3072}"
-
   local result
   result="$(compose exec -T postgres psql -U postgres -d dba_agent -At -c "
     SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector');
     SELECT EXISTS(
-      SELECT 1
-      FROM information_schema.tables
+      SELECT 1 FROM information_schema.tables
       WHERE table_schema = 'public' AND table_name = 'rag_documents'
     );
     SELECT COALESCE(
-      (
-        SELECT pg_catalog.format_type(a.atttypid, a.atttypmod)
-        FROM pg_attribute a
-        JOIN pg_class c ON c.oid = a.attrelid
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'public'
-          AND c.relname = 'rag_documents'
-          AND a.attname = 'embedding'
-          AND a.attnum > 0
-          AND NOT a.attisdropped
-      ),
+      (SELECT pg_catalog.format_type(a.atttypid, a.atttypmod)
+       FROM pg_attribute a
+       JOIN pg_class c ON c.oid = a.attrelid
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public' AND c.relname = 'rag_documents'
+         AND a.attname = 'embedding' AND a.attnum > 0 AND NOT a.attisdropped),
       ''
     );
     SELECT EXISTS(
-      SELECT 1
-      FROM pg_indexes
-      WHERE schemaname = 'public'
-        AND tablename = 'rag_documents'
+      SELECT 1 FROM pg_indexes
+      WHERE schemaname = 'public' AND tablename = 'rag_documents'
         AND indexname = 'idx_rag_docs_embedding'
     );
   ")"
@@ -225,35 +472,29 @@ ensure_pgvector_store() {
   has_ann_index="$(printf '%s\n' "$result" | sed -n '4p')"
 
   if [[ "$has_table" != "t" ]]; then
-    echo "Error: local pgvector RAG store was not initialized (rag_documents table missing)." >&2
+    error "Local pgvector RAG store was not initialized (rag_documents table missing)."
     exit 1
   fi
 
   if [[ "$has_vector" != "t" ]]; then
-    echo "Error: VECTOR_STORE_TYPE=pgvector but the PostgreSQL 'vector' extension is not installed." >&2
+    error "VECTOR_STORE_TYPE=pgvector but the PostgreSQL 'vector' extension is not installed."
     exit 1
   fi
 
   if [[ "$embedding_type" != "vector(${expected_dims})" ]]; then
-    echo "Error: rag_documents.embedding is '$embedding_type' instead of 'vector(${expected_dims})'." >&2
+    error "rag_documents.embedding is '$embedding_type' instead of 'vector(${expected_dims})'."
     exit 1
   fi
 
   if [[ "$has_ann_index" != "t" ]]; then
-    echo "Error: local pgvector ANN index idx_rag_docs_embedding is missing." >&2
+    error "Local pgvector ANN index idx_rag_docs_embedding is missing."
     exit 1
   fi
 
   echo "Verified local pgvector RAG store in the vault database."
 }
 
-compose() {
-  DEEPSQL_RUNTIME_ENV_FILE="$ENV_FILE" docker compose \
-    --project-name "$PROJECT_NAME" \
-    --env-file "$ENV_FILE" \
-    -f "$COMPOSE_FILE" \
-    "$@"
-}
+# ── Admin Bootstrap ───────────────────────────────────────────────────────────
 
 bootstrap_admin() {
   if [[ "${SECURITY_ADMIN_BOOTSTRAP_ENABLED:-false}" != "true" ]]; then
@@ -261,43 +502,36 @@ bootstrap_admin() {
   fi
 
   if [[ -z "${ADMIN_BOOTSTRAP_SECRET:-}" || -z "${DEEPSQL_INITIAL_ADMIN_PASSWORD:-}" || -z "${DEEPSQL_INITIAL_ADMIN_EMAIL:-}" ]]; then
-    echo "Admin bootstrap enabled, but DEEPSQL_INITIAL_ADMIN_EMAIL / DEEPSQL_INITIAL_ADMIN_PASSWORD / ADMIN_BOOTSTRAP_SECRET are not all set. Skipping bootstrap."
+    warn "Admin bootstrap enabled, but credentials not all set. Skipping bootstrap."
     return 0
   fi
 
-  local payload
+  local payload response
   payload="$(printf '{\"email\":\"%s\",\"password\":\"%s\"}' \
     "${DEEPSQL_INITIAL_ADMIN_EMAIL}" \
     "${DEEPSQL_INITIAL_ADMIN_PASSWORD}")"
-  local response
+  
   response="$(printf '%s' "$payload" | compose exec -T \
     -e ADMIN_BOOTSTRAP_SECRET="${ADMIN_BOOTSTRAP_SECRET}" \
     backend sh -lc \
     'curl -fsS -H "Content-Type: application/json" -H "X-Admin-Bootstrap-Secret: ${ADMIN_BOOTSTRAP_SECRET}" -X POST http://localhost:8080/api/users/admin/reset --data @-' || true)"
 
   if [[ "$response" == *"Admin reset successfully"* || "$response" == *"Admin created successfully"* ]]; then
-    echo "Admin bootstrap complete. Login username: admin"
+    # Fixed: login is by email, not "username: admin"
+    echo "Admin bootstrap complete. Login email: ${DEEPSQL_INITIAL_ADMIN_EMAIL}"
   else
-    # Previously a warning that the install continued past, so install.sh exited 0 while
-    # leaving no account to log in with. An installer that cannot create the only user
-    # has not succeeded, and saying so here beats an opaque 401 from the next command.
-    echo "Error: admin bootstrap did not return a success message." >&2
+    error "Admin bootstrap did not return a success message."
     echo "$response" >&2
     return 1
   fi
 }
 
-# Poll until the credentials just created actually authenticate.
-#
-# Health being UP is not the same as being able to log in: install.sh flips
-# SECURITY_ADMIN_BOOTSTRAP_ENABLED back to false and restarts the backend afterwards, and
-# a login issued in the seconds after that restart returns 401. That is what made
-# smoke-test.sh -- the very next command install.sh recommends -- fail on a good install.
 wait_for_login() {
   local url="http://localhost:${DEEPSQL_BACKEND_PORT:-8080}/api/auth/login"
   local payload deadline=$((SECONDS + 120))
   payload="$(printf '{"email":"%s","password":"%s"}' \
     "${DEEPSQL_INITIAL_ADMIN_EMAIL}" "${DEEPSQL_INITIAL_ADMIN_PASSWORD}")"
+  
   while (( SECONDS < deadline )); do
     if curl -fsS -o /dev/null -H 'Content-Type: application/json' \
          -X POST "$url" --data "$payload" 2>/dev/null; then
@@ -306,10 +540,20 @@ wait_for_login() {
     fi
     sleep 5
   done
-  echo "Error: the admin account was created but could not log in within 120s." >&2
+  error "The admin account was created but could not log in within 120s."
   echo "Check 'docker compose logs backend' before running smoke-test.sh." >&2
   return 1
 }
+
+sed_inplace() {
+  if [[ "$(uname)" == "Darwin" ]]; then
+    sed -i '' "$@"
+  else
+    sed -i "$@"
+  fi
+}
+
+# ── Build ─────────────────────────────────────────────────────────────────────
 
 build_application_images() {
   echo "Building the DeepSQL backend, frontend, and DeepSQL Agent from source..."
@@ -319,190 +563,8 @@ build_application_images() {
   compose build backend frontend deepsql-agent
 }
 
-require_command docker
-require_command curl
+# ── CLI Setup ─────────────────────────────────────────────────────────────────
 
-docker compose version >/dev/null 2>&1 || {
-  echo "Error: docker compose is required." >&2
-  exit 1
-}
-
-if [[ ! -f "$ENV_FILE" ]]; then
-  cp "$ROOT_DIR/.env.example" "$ENV_FILE"
-  echo "Created $ENV_FILE from .env.example. Fill in the required values and rerun this script."
-  exit 1
-fi
-
-# shellcheck disable=SC1090
-set -a
-source "$ENV_FILE"
-set +a
-
-# Auto-generate security secrets if still placeholders
-generate_secret SECURITY_JWT_SECRET "openssl rand -base64 64 | tr -d '\n'"
-generate_secret ENCRYPTION_KEY "openssl rand -base64 32 | tr -d '\n'"
-generate_secret DB_PASSWORD "openssl rand -base64 16 | tr -d '\n'"
-generate_secret DEEPSQL_VALKEY_PASSWORD "openssl rand -base64 24 | tr -d '\n'"
-generate_secret ADMIN_BOOTSTRAP_SECRET "openssl rand -base64 32 | tr -d '\n'"
-generate_secret AGENT_PROVISION_SECRET "openssl rand -base64 32 | tr -d '\n'"
-
-# Prompt for the chat LLM key if still a placeholder. DeepSQL brings no model
-# credentials of its own, and AZURE_OPENAI_* no longer configures chat — chat is
-# resolved by LlmConfigResolver from DEEPSQL_CHAT_*.
-prompt_secret_env_value DEEPSQL_CHAT_API_KEY "LLM API key for chat (e.g. an OpenAI sk-... key)"
-# Only when an embedding provider is actually selected — otherwise the operator has
-# opted into keyword-only retrieval and should not be forced to supply a key.
-if [[ -n "${DEEPSQL_EMBEDDING_PROVIDER:-}" ]]; then
-  prompt_secret_env_value DEEPSQL_EMBEDDING_API_KEY "LLM API key for embeddings (may be the same key)"
-fi
-prompt_env_value DEEPSQL_INITIAL_ADMIN_EMAIL "Initial admin email"
-prompt_secret_env_value DEEPSQL_INITIAL_ADMIN_PASSWORD "Initial admin password"
-
-# Optional — labels this install for analytics + support. If blank the
-# backend will derive from the admin email domain on first boot. Either
-# can be overridden later by editing this value in $ENV_FILE and restarting.
-prompt_optional_env_value DEEPSQL_COMPANY_NAME "Company / organization name (optional, press Enter to skip)"
-
-: "${SPRING_PROFILES_ACTIVE:=prod}"
-: "${DEEPSQL_FRONTEND_PORT:=3000}"
-: "${DEEPSQL_BACKEND_PORT:=8080}"
-: "${DEEPSQL_POSTGRES_PORT:=5432}"
-: "${DEEPSQL_VALKEY_PORT:=6379}"
-: "${CORS_ALLOWED_ORIGINS:=http://localhost:${DEEPSQL_FRONTEND_PORT}}"
-
-if [[ "${VECTOR_STORE_TYPE:-pgvector}" == "pgvector" && -z "${SPRING_AUTOCONFIGURE_EXCLUDE:-}" ]]; then
-  SPRING_AUTOCONFIGURE_EXCLUDE="org.springframework.ai.vectorstore.azure.autoconfigure.AzureVectorStoreAutoConfiguration"
-fi
-
-export SPRING_PROFILES_ACTIVE
-export DEEPSQL_FRONTEND_PORT
-export DEEPSQL_BACKEND_PORT
-export DEEPSQL_POSTGRES_PORT
-export DEEPSQL_VALKEY_PORT
-export CORS_ALLOWED_ORIGINS
-export SPRING_AUTOCONFIGURE_EXCLUDE
-export SECURITY_ADMIN_BOOTSTRAP_ENABLED=true
-
-sed_inplace "s|^SECURITY_ADMIN_BOOTSTRAP_ENABLED=.*|SECURITY_ADMIN_BOOTSTRAP_ENABLED=true|" "$ENV_FILE"
-
-require_env_value SECURITY_JWT_SECRET
-require_env_value ENCRYPTION_KEY
-require_env_value ENCRYPTION_KEY_ID
-require_env_value DB_PASSWORD
-require_env_value DEEPSQL_VALKEY_PASSWORD
-# Chat is resolved by LlmConfigResolver from DEEPSQL_CHAT_*. AZURE_OPENAI_KEY /
-# _ENDPOINT / _CHAT_DEPLOYMENT used to be required here; they no longer configure chat.
-# _CHAT_DEPLOYMENT is read by nothing at all, and _KEY/_ENDPOINT now feed only the
-# optional /api/llm/v1 gateway used by the DeepSQL CLI agent — so requiring them
-# rejected a perfectly good plain-OpenAI install.
-#
-# PROVIDER and ENDPOINT are required alongside the key: the resolver ignores every
-# other DEEPSQL_CHAT_* value unless PROVIDER is set, and OpenAiCompatibleChatProvider
-# reads the endpoint with an empty-string fallback rather than a working default.
-require_env_value DEEPSQL_CHAT_PROVIDER
-require_env_value DEEPSQL_CHAT_API_KEY
-require_env_value DEEPSQL_CHAT_ENDPOINT
-
-# Embeddings are NOT configured by AZURE_OPENAI_EMBEDDING_DEPLOYMENT, which this script
-# used to require. LlmConfigResolver.resolveEmbedding() reads DEEPSQL_EMBEDDING_*, and
-# nothing reads that Azure variable any more — so requiring it passed the install while
-# validating nothing real, and the brain-init diagnostic then pointed the operator back
-# at it.
-#
-# Absence is a degraded mode, not a hard error: the app runs with keyword-only retrieval.
-# Do not point the operator at the onboarding wizard here — it writes a different, older
-# set of config keys that LlmConfigResolver does not read, so it cannot configure this.
-if [[ -n "${DEEPSQL_EMBEDDING_PROVIDER:-}" ]]; then
-  require_env_value DEEPSQL_EMBEDDING_PROVIDER
-  # Only the key is required: the provider defaults the model (text-embedding-3-large) and
-  # the endpoint (api.openai.com). Requiring those too would reject a valid plain-OpenAI
-  # setup that relies on the defaults.
-  require_env_value DEEPSQL_EMBEDDING_API_KEY
-else
-  echo "Note: DEEPSQL_EMBEDDING_PROVIDER is not set, so no embedding provider is configured."
-  echo "      RAG retrieval stays keyword-only until one is."
-  echo "      To configure it, set DEEPSQL_EMBEDDING_PROVIDER and DEEPSQL_EMBEDDING_API_KEY"
-  echo "      (optionally _MODEL and _ENDPOINT) in $ENV_FILE and re-run this script."
-fi
-
-if [[ "${VECTOR_STORE_TYPE:-pgvector}" == "azure" || "${AZURE_SEARCH_ENABLED:-false}" == "true" ]]; then
-  require_env_value AZURE_SEARCH_ENDPOINT
-  require_env_value AZURE_SEARCH_API_KEY
-  require_env_value AZURE_SEARCH_INDEX_NAME
-fi
-
-echo "Starting DeepSQL self-hosted stack with project '$PROJECT_NAME'..."
-build_application_images
-compose up -d
-
-ensure_scheduler_table
-ensure_pg_stat_statements
-wait_for_http "http://localhost:${DEEPSQL_BACKEND_PORT}/api/actuator/health" "Backend"
-wait_for_http "http://localhost:${DEEPSQL_FRONTEND_PORT}" "Frontend"
-ensure_pgvector_store
-
-bootstrap_admin
-
-sed_inplace "s|^SECURITY_ADMIN_BOOTSTRAP_ENABLED=.*|SECURITY_ADMIN_BOOTSTRAP_ENABLED=false|" "$ENV_FILE"
-export SECURITY_ADMIN_BOOTSTRAP_ENABLED=false
-compose up -d backend >/dev/null
-wait_for_http "http://localhost:${DEEPSQL_BACKEND_PORT}/api/actuator/health" "Backend"
-
-# The restart above is why this exists: health returns UP before logins are served, so
-# without it the installer declares success on a stack that rejects the credentials it
-# just printed.
-wait_for_login
-
-echo
-
-echo "DeepSQL self-hosted stack is ready."
-echo "Frontend: http://localhost:${DEEPSQL_FRONTEND_PORT}"
-echo "Backend:  http://localhost:${DEEPSQL_BACKEND_PORT}/api"
-echo "Agent:    http://localhost:${DEEPSQL_AGENT_PORT:-8787} (DeepSQL Agent)"
-echo "Project:  $PROJECT_NAME"
-echo "Images:   built from source in this checkout"
-echo "          (backend/Dockerfile, ./Dockerfile, agent/Dockerfile)."
-echo "          After pulling new code, re-run this script to rebuild."
-echo
-
-# Wait for the DeepSQL Agent container (Agent tab + AI dashboards).
-# Host-side setup-agent.sh is only for native (non-Compose) development.
-if wait_for_http "http://localhost:${DEEPSQL_AGENT_PROVISIONER_PORT:-8788}/health" "DeepSQL Agent" 60 2; then
-  echo "DeepSQL Agent is healthy."
-else
-  echo "Warning: DeepSQL Agent did not become healthy in time." >&2
-  echo "         The core UI still works. Check: docker compose logs deepsql-agent" >&2
-fi
-echo
-
-# Optional host-side agent for native (non-Compose) development only.
-# Compose already runs deepsql-agent; skip unless DEEPSQL_HOST_AGENT_SETUP=1.
-if [[ "${DEEPSQL_HOST_AGENT_SETUP:-0}" == "1" ]]; then
-  if [[ -x "$SCRIPT_DIR/setup-agent.sh" ]]; then
-    echo "Starting host-side DeepSQL Agent (DEEPSQL_HOST_AGENT_SETUP=1)…"
-    if "$SCRIPT_DIR/setup-agent.sh"; then
-      echo "Host agent setup complete."
-    else
-      echo "Warning: host agent setup failed." >&2
-    fi
-    echo
-  fi
-fi
-
-# ── DeepSQL CLI (@deepsql/mcp) ───────────────────────────────────────────────
-# Nothing in this repo installed, updated, or logged in the CLI, so a reader
-# who followed the README end to end finished with a running stack and no
-# `deepsql` command at all — and anyone who installed it once drifted silently
-# (a machine here sat on 0.16.0 while npm was on 0.26.0). The CLI is an
-# agent-facing surface, so a stale one misreports which tools and subcommands
-# exist.
-#
-# Install and log in automatically when npm is available. `npm i -g` is tried
-# first without privilege escalation, then retried once with `sudo -n` (never
-# an interactive `sudo` — a password prompt buried in an otherwise unattended
-# installer is exactly the kind of silent hang this script avoids elsewhere).
-# Every step here is non-fatal: install or login failure only prints the
-# manual command and falls through, it never aborts the installer.
 install_deepsql_cli() {
   if npm i -g @deepsql/mcp >/dev/null 2>&1; then
     return 0
@@ -534,16 +596,13 @@ setup_deepsql_cli() {
     else
       echo "DeepSQL CLI: install failed (npm i -g @deepsql/mcp may need elevated"
       echo "  permissions on this system). Install it yourself, then:"
-      echo "  deepsql login --url http://localhost:${DEEPSQL_BACKEND_PORT}"
+      echo "  deepsql login --url http://localhost:${DEEPSQL_BACKEND_PORT:-8080}"
       echo
       return 0
     fi
   else
-    # `npm view` reaches the network; never let it stall or fail the install.
     latest="$(npm view @deepsql/mcp version 2>/dev/null | tr -d '[:space:]' || true)"
     if [[ -z "$latest" ]]; then
-      # Don't claim "up to date" on a check that never completed — that is the
-      # same false-green that let a stale CLI sit unnoticed in the first place.
       echo "DeepSQL CLI: ${installed} installed (could not reach npm to check for updates)."
     elif [[ "$installed" != "$latest" ]]; then
       echo "DeepSQL CLI: ${installed} installed, ${latest} available."
@@ -559,59 +618,302 @@ setup_deepsql_cli() {
   fi
 
   if [[ -z "${DEEPSQL_INITIAL_ADMIN_EMAIL:-}" || -z "${DEEPSQL_INITIAL_ADMIN_PASSWORD:-}" ]]; then
-    echo "  Point it at this stack:  deepsql login --url http://localhost:${DEEPSQL_BACKEND_PORT}"
+    echo "  Point it at this stack:  deepsql login --url http://localhost:${DEEPSQL_BACKEND_PORT:-8080}"
     echo
     return 0
   fi
 
-  # Skip login if a token already exists for this exact stack — install.sh is
-  # meant to be re-run (upgrades, credential rotation), and login mints a new
-  # long-lived token every time, so re-running it would otherwise pile up
-  # tokens the operator never asked for under `deepsql whoami`.
-  if deepsql whoami --url "http://localhost:${DEEPSQL_BACKEND_PORT}" >/dev/null 2>&1; then
+  if deepsql whoami --url "http://localhost:${DEEPSQL_BACKEND_PORT:-8080}" >/dev/null 2>&1; then
     echo "DeepSQL CLI: already logged in as ${DEEPSQL_INITIAL_ADMIN_EMAIL}."
   else
     echo "Logging in the DeepSQL CLI as ${DEEPSQL_INITIAL_ADMIN_EMAIL}…"
     if printf '%s' "${DEEPSQL_INITIAL_ADMIN_PASSWORD}" | deepsql login \
-         --url "http://localhost:${DEEPSQL_BACKEND_PORT}" --password \
-         --email "${DEEPSQL_INITIAL_ADMIN_EMAIL}" --password-stdin --label install; then
+         --url "http://localhost:${DEEPSQL_BACKEND_PORT:-8080}" --password \
+         --email "${DEEPSQL_INITIAL_ADMIN_EMAIL}" --password-stdin --label install 2>/dev/null; then
       :
     else
       echo "DeepSQL CLI: login failed. Run manually:"
-      echo "  deepsql login --url http://localhost:${DEEPSQL_BACKEND_PORT}"
+      echo "  deepsql login --url http://localhost:${DEEPSQL_BACKEND_PORT:-8080}"
     fi
   fi
   echo
 }
 
-setup_deepsql_cli
+# ── Demo Seeding ──────────────────────────────────────────────────────────────
 
-# ── Demo Data Seeding ─────────────────────────────────────────────────────────
-# Optional: seed a demo database with sample e-commerce data, users, saved queries,
-# and performance recommendations. Gives new users an end-to-end view of all features.
-# Enable with DEEPSQL_SEED_DEMO_DATA=1 in .env or environment.
-if [[ "${DEEPSQL_SEED_DEMO_DATA:-0}" == "1" ]]; then
+run_demo_seed() {
+  if [[ "$SEED_DEMO" -eq 0 ]]; then
+    echo "Demo data seeding skipped (--no-seed-demo)."
+    echo "  Run ./scripts/self-host/seed-demo-data.sh for a ready-to-explore demo database."
+    echo
+    return 0
+  fi
+
   if [[ -x "$SCRIPT_DIR/seed-demo-data.sh" ]]; then
-    echo "Seeding demo data (DEEPSQL_SEED_DEMO_DATA=1)…"
+    echo "Seeding demo data..."
+    # Seed failure is a warning, not an install failure
     if "$SCRIPT_DIR/seed-demo-data.sh"; then
       echo "Demo data seeding complete."
     else
-      echo "Warning: demo data seeding failed. The stack still works, but the demo" >&2
-      echo "         database and sample data were not created. Run manually:" >&2
-      echo "         ./scripts/self-host/seed-demo-data.sh" >&2
+      warn "Demo data seeding had issues. The stack still works."
+      echo "  Run manually: ./scripts/self-host/seed-demo-data.sh"
     fi
     echo
+  else
+    warn "seed-demo-data.sh not found. Skipping demo seeding."
   fi
-else
-  echo "Demo data seeding skipped (set DEEPSQL_SEED_DEMO_DATA=1 to enable)."
-  echo "  Run ./scripts/self-host/seed-demo-data.sh for a ready-to-explore demo database."
-  echo
-fi
+}
 
-echo "Useful commands:"
-echo "  ./scripts/self-host/status.sh"
-echo "  ./scripts/self-host/smoke-test.sh"
-echo "  ./scripts/self-host/seed-demo-data.sh       # Seed demo e-commerce database"
-echo "  python3 scripts/self-host/e2e-agent-check.py <connectionId>  # live Agent+dashboard turn"
-echo "  docker compose logs deepsql-agent          # DeepSQL Agent logs"
-echo "  ./scripts/self-host/uninstall.sh"
+# ── Print Final Summary ───────────────────────────────────────────────────────
+
+print_summary() {
+  local frontend_port="${DEEPSQL_FRONTEND_PORT:-3000}"
+  local backend_port="${DEEPSQL_BACKEND_PORT:-8080}"
+  local has_llm_key=0
+  [[ -n "${DEEPSQL_CHAT_API_KEY:-}" ]] && ! is_placeholder "${DEEPSQL_CHAT_API_KEY:-}" && has_llm_key=1
+  
+  echo
+  echo "${BOLD}═══════════════════════════════════════════════════════════════════════════${NC}"
+  echo "${GREEN}${BOLD}  DeepSQL is running!${NC}"
+  echo "${BOLD}═══════════════════════════════════════════════════════════════════════════${NC}"
+  echo
+  echo "  ${BOLD}Login URL:${NC}       http://localhost:${frontend_port}"
+  echo "  ${BOLD}Login email:${NC}     ${DEEPSQL_INITIAL_ADMIN_EMAIL}"
+  echo "  ${BOLD}Password:${NC}        stored in ${ENV_FILE}"
+  echo "  ${BOLD}Health URL:${NC}      http://localhost:${backend_port}/api/actuator/health"
+  echo
+  
+  if [[ "$has_llm_key" -eq 0 ]]; then
+    echo "${YELLOW}  Note: No LLM key configured. Chat and AI features are disabled.${NC}"
+    echo "  Configure your LLM key in Settings → AI Provider after logging in."
+    echo
+  fi
+  
+  echo "Project:  $PROJECT_NAME"
+  echo "Images:   built from source in this checkout"
+  echo
+  echo "Useful commands:"
+  echo "  ./scripts/self-host/status.sh"
+  echo "  ./scripts/self-host/smoke-test.sh"
+  echo "  ./scripts/self-host/seed-demo-data.sh       # Seed demo e-commerce database"
+  echo "  docker compose logs -f backend              # Backend logs"
+  echo "  ./scripts/self-host/uninstall.sh"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════════════════════════
+
+main() {
+  echo
+  echo "${BOLD}═══════════════════════════════════════════════════════════════════════════${NC}"
+  echo "${BOLD}  DeepSQL Self-Host Installer${NC}"
+  echo "${BOLD}═══════════════════════════════════════════════════════════════════════════${NC}"
+  echo
+  
+  check_prerequisites
+  
+  # ── Create .env if needed ───────────────────────────────────────────────────
+  if [[ ! -f "$ENV_FILE" ]]; then
+    if [[ -f "$ROOT_DIR/.env.example" ]]; then
+      cp "$ROOT_DIR/.env.example" "$ENV_FILE"
+      info "Created $ENV_FILE from .env.example"
+    else
+      error ".env.example not found in checkout."
+      exit 1
+    fi
+  fi
+  
+  # ── Load .env but let env vars take precedence ──────────────────────────────
+  # Store current env vars that should override .env
+  declare -A override_vars
+  for var in DEEPSQL_CHAT_API_KEY DEEPSQL_CHAT_PROVIDER DEEPSQL_CHAT_ENDPOINT DEEPSQL_CHAT_MODEL \
+             DEEPSQL_EMBEDDING_PROVIDER DEEPSQL_EMBEDDING_API_KEY DEEPSQL_EMBEDDING_ENDPOINT DEEPSQL_EMBEDDING_MODEL \
+             DEEPSQL_INITIAL_ADMIN_EMAIL DEEPSQL_INITIAL_ADMIN_PASSWORD \
+             DEEPSQL_FRONTEND_PORT DEEPSQL_BACKEND_PORT DEEPSQL_POSTGRES_PORT DEEPSQL_VALKEY_PORT \
+             SECURITY_JWT_SECRET ENCRYPTION_KEY DB_PASSWORD DEEPSQL_VALKEY_PASSWORD \
+             ADMIN_BOOTSTRAP_SECRET AGENT_PROVISION_SECRET DEEPSQL_COMPANY_NAME; do
+    if [[ -n "${!var:-}" ]]; then
+      override_vars[$var]="${!var}"
+    fi
+  done
+  
+  # Source .env (path determined at runtime)
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+  
+  # Restore overrides (env vars take precedence over .env placeholders)
+  for var in "${!override_vars[@]}"; do
+    export "$var=${override_vars[$var]}"
+  done
+  
+  # ── Check for existing volumes ──────────────────────────────────────────────
+  check_existing_volumes
+  
+  # ── Auto-generate security secrets if still placeholders ────────────────────
+  generate_secret SECURITY_JWT_SECRET "openssl rand -base64 64 | tr -d '\n'"
+  generate_secret ENCRYPTION_KEY "openssl rand -base64 32 | tr -d '\n'"
+  generate_secret DB_PASSWORD "openssl rand -base64 16 | tr -d '\n'"
+  generate_secret DEEPSQL_VALKEY_PASSWORD "openssl rand -base64 24 | tr -d '\n'"
+  generate_secret ADMIN_BOOTSTRAP_SECRET "openssl rand -base64 32 | tr -d '\n'"
+  generate_secret AGENT_PROVISION_SECRET "openssl rand -base64 32 | tr -d '\n'"
+  
+  # ── LLM Configuration (optional - keyless start allowed) ────────────────────
+  # Set defaults for provider/endpoint/model if key is provided
+  if [[ -n "${DEEPSQL_CHAT_API_KEY:-}" ]] && ! is_placeholder "${DEEPSQL_CHAT_API_KEY:-}"; then
+    # Key is set, ensure provider and endpoint have defaults
+    if is_placeholder "${DEEPSQL_CHAT_PROVIDER:-}"; then
+      write_env_value DEEPSQL_CHAT_PROVIDER "openai"
+    fi
+    if is_placeholder "${DEEPSQL_CHAT_ENDPOINT:-}"; then
+      write_env_value DEEPSQL_CHAT_ENDPOINT "https://api.openai.com/v1"
+    fi
+    if is_placeholder "${DEEPSQL_CHAT_MODEL:-}"; then
+      write_env_value DEEPSQL_CHAT_MODEL "gpt-4o"
+    fi
+  else
+    # No key - prompt if interactive, otherwise allow keyless start
+    if can_prompt; then
+      echo
+      echo "LLM API key (e.g., OpenAI sk-... key)."
+      echo "Press Enter to skip and configure later in Settings → AI Provider."
+      prompt_value DEEPSQL_CHAT_API_KEY "LLM API key" 0 1
+    fi
+    
+    if [[ -n "${DEEPSQL_CHAT_API_KEY:-}" ]] && ! is_placeholder "${DEEPSQL_CHAT_API_KEY:-}"; then
+      # User provided key - set defaults
+      if is_placeholder "${DEEPSQL_CHAT_PROVIDER:-}"; then
+        write_env_value DEEPSQL_CHAT_PROVIDER "openai"
+      fi
+      if is_placeholder "${DEEPSQL_CHAT_ENDPOINT:-}"; then
+        write_env_value DEEPSQL_CHAT_ENDPOINT "https://api.openai.com/v1"
+      fi
+      if is_placeholder "${DEEPSQL_CHAT_MODEL:-}"; then
+        write_env_value DEEPSQL_CHAT_MODEL "gpt-4o"
+      fi
+    else
+      # Keyless start - clear placeholders so backend doesn't reject them
+      if is_placeholder "${DEEPSQL_CHAT_API_KEY:-}"; then
+        write_env_value DEEPSQL_CHAT_API_KEY ""
+      fi
+      if is_placeholder "${DEEPSQL_CHAT_PROVIDER:-}"; then
+        write_env_value DEEPSQL_CHAT_PROVIDER ""
+      fi
+      echo
+      echo "No LLM key configured. Chat and AI features will be disabled."
+      echo "Configure your LLM key in Settings → AI Provider after logging in."
+      if [[ "$NON_INTERACTIVE" -eq 1 ]]; then
+        echo "NEEDS_USER_INPUT: DEEPSQL_CHAT_API_KEY (optional, can be set in UI at http://localhost:${DEEPSQL_FRONTEND_PORT:-3000})"
+      fi
+    fi
+  fi
+  
+  # ── Admin account ───────────────────────────────────────────────────────────
+  prompt_value DEEPSQL_INITIAL_ADMIN_EMAIL "Initial admin email" 1 0 || {
+    if [[ "$NON_INTERACTIVE" -eq 1 ]]; then
+      error "DEEPSQL_INITIAL_ADMIN_EMAIL is required for non-interactive install."
+      echo "Set it via environment variable: DEEPSQL_INITIAL_ADMIN_EMAIL=admin@example.com"
+    fi
+    exit 1
+  }
+  
+  # Generate password if not provided
+  if is_placeholder "${DEEPSQL_INITIAL_ADMIN_PASSWORD:-}"; then
+    local gen_password
+    gen_password="$(openssl rand -base64 16 | tr -d '\n')"
+    write_env_value DEEPSQL_INITIAL_ADMIN_PASSWORD "$gen_password"
+    echo "Auto-generated admin password (saved to .env)."
+  fi
+  
+  # Optional company name
+  if can_prompt && is_placeholder "${DEEPSQL_COMPANY_NAME:-}"; then
+    prompt_value DEEPSQL_COMPANY_NAME "Company / organization name (optional, press Enter to skip)" 0 0
+  fi
+  
+  # ── Export required variables ───────────────────────────────────────────────
+  : "${SPRING_PROFILES_ACTIVE:=prod}"
+  : "${DEEPSQL_FRONTEND_PORT:=3000}"
+  : "${DEEPSQL_BACKEND_PORT:=8080}"
+  : "${DEEPSQL_POSTGRES_PORT:=5432}"
+  : "${DEEPSQL_VALKEY_PORT:=6379}"
+  : "${CORS_ALLOWED_ORIGINS:=http://localhost:${DEEPSQL_FRONTEND_PORT}}"
+
+  if [[ "${VECTOR_STORE_TYPE:-pgvector}" == "pgvector" && -z "${SPRING_AUTOCONFIGURE_EXCLUDE:-}" ]]; then
+    SPRING_AUTOCONFIGURE_EXCLUDE="org.springframework.ai.vectorstore.azure.autoconfigure.AzureVectorStoreAutoConfiguration"
+  fi
+
+  export SPRING_PROFILES_ACTIVE DEEPSQL_FRONTEND_PORT DEEPSQL_BACKEND_PORT
+  export DEEPSQL_POSTGRES_PORT DEEPSQL_VALKEY_PORT CORS_ALLOWED_ORIGINS
+  export SPRING_AUTOCONFIGURE_EXCLUDE
+  export SECURITY_ADMIN_BOOTSTRAP_ENABLED=true
+  
+  sed_inplace "s|^SECURITY_ADMIN_BOOTSTRAP_ENABLED=.*|SECURITY_ADMIN_BOOTSTRAP_ENABLED=true|" "$ENV_FILE"
+  
+  # ── Validate required secrets ───────────────────────────────────────────────
+  local missing_secrets=0
+  for var in SECURITY_JWT_SECRET ENCRYPTION_KEY ENCRYPTION_KEY_ID DB_PASSWORD DEEPSQL_VALKEY_PASSWORD; do
+    if is_placeholder "${!var:-}"; then
+      error "'$var' must be set."
+      missing_secrets=1
+    fi
+  done
+  [[ "$missing_secrets" -eq 1 ]] && exit 1
+
+  # ── Build and start ─────────────────────────────────────────────────────────
+  echo
+  info "Starting DeepSQL self-hosted stack with project '$PROJECT_NAME'..."
+  build_application_images
+  compose up -d
+  
+  ensure_scheduler_table
+  ensure_pg_stat_statements
+  wait_for_http "http://localhost:${DEEPSQL_BACKEND_PORT}/api/actuator/health" "Backend"
+  wait_for_http "http://localhost:${DEEPSQL_FRONTEND_PORT}" "Frontend"
+  ensure_pgvector_store
+  
+  bootstrap_admin
+  
+  # Disable bootstrap and restart backend
+  sed_inplace "s|^SECURITY_ADMIN_BOOTSTRAP_ENABLED=.*|SECURITY_ADMIN_BOOTSTRAP_ENABLED=false|" "$ENV_FILE"
+  export SECURITY_ADMIN_BOOTSTRAP_ENABLED=false
+  compose up -d backend >/dev/null
+  wait_for_http "http://localhost:${DEEPSQL_BACKEND_PORT}/api/actuator/health" "Backend"
+  wait_for_login
+  
+  echo
+  
+  # Wait for agent
+  if wait_for_http "http://localhost:${DEEPSQL_AGENT_PROVISIONER_PORT:-8788}/health" "DeepSQL Agent" 60 2; then
+    echo "DeepSQL Agent is healthy."
+  else
+    warn "DeepSQL Agent did not become healthy in time."
+    echo "  The core UI still works. Check: docker compose logs deepsql-agent"
+  fi
+  echo
+  
+  # Host-side agent (only for native development)
+  if [[ "${DEEPSQL_HOST_AGENT_SETUP:-0}" == "1" ]]; then
+    if [[ -x "$SCRIPT_DIR/setup-agent.sh" ]]; then
+      echo "Starting host-side DeepSQL Agent (DEEPSQL_HOST_AGENT_SETUP=1)…"
+      if "$SCRIPT_DIR/setup-agent.sh"; then
+        echo "Host agent setup complete."
+      else
+        warn "Host agent setup failed."
+      fi
+      echo
+    fi
+  fi
+  
+  # CLI setup
+  setup_deepsql_cli
+  
+  # Demo seeding
+  run_demo_seed
+  
+  # Final summary
+  print_summary
+}
+
+main
