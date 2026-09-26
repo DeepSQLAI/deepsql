@@ -794,26 +794,26 @@ fi
 echo ""
 echo "Step 8: Seeding digest preferences..."
 
-if [[ -n "${connection_id:-}" && -n "${admin_id:-}" ]]; then
+if [[ -n "${connection_id:-}" ]]; then
     compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 <<EOSQL
 -- Create digest preference for the admin user on the demo connection
-INSERT INTO digest_preferences (
-    id, user_id, connection_id, delivery_method, enabled, 
-    persona_tag, cron_expression, created_at, updated_at
+INSERT INTO user_digest_preference (
+    username, connection_id, delivery_method, enabled, 
+    persona_tag, cron_expression, timezone, created_at, updated_at
 )
 SELECT 
-    gen_random_uuid(),
-    ${admin_id},
+    '${DEEPSQL_INITIAL_ADMIN_EMAIL}',
     '${connection_id}',
     'SLACK_DM',
     true,
-    'dba',
+    'DBA',
     '0 0 9 * * *',
+    'UTC',
     NOW(),
     NOW()
 WHERE NOT EXISTS (
-    SELECT 1 FROM digest_preferences 
-    WHERE user_id = ${admin_id} AND connection_id = '${connection_id}'
+    SELECT 1 FROM user_digest_preference 
+    WHERE username = '${DEEPSQL_INITIAL_ADMIN_EMAIL}' AND connection_id = '${connection_id}'
 );
 
 SELECT 'Digest preferences seeded' AS status;
@@ -842,7 +842,7 @@ EOSQL
         echo "  Generating web-only digest from seeded data..."
         
         pref_id="$(compose exec -T postgres psql -U postgres -d dba_agent -At -c \
-            "SELECT id FROM digest_preferences WHERE user_id = ${admin_id} AND connection_id = '${connection_id}' LIMIT 1" 2>/dev/null || echo "")"
+            "SELECT id FROM user_digest_preference WHERE username = '${DEEPSQL_INITIAL_ADMIN_EMAIL}' AND connection_id = '${connection_id}' LIMIT 1" 2>/dev/null || echo "")"
         
         # Build digest content from actual seeded data
         compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 <<EOSQL
@@ -923,7 +923,7 @@ EOSQL
         echo "  Web-only digest created from actual seeded data."
     fi
 else
-    echo "  Skipping digest preferences (missing connection or admin ID)"
+    echo "  Skipping digest preferences (no connection ID available)"
 fi
 
 # ============================================================================
@@ -948,7 +948,7 @@ AND (
 -- Add curated business context notes
 INSERT INTO schema_documentation (
     id, connection_id, object_type, object_name, parent_object, 
-    documentation, source, reviewed, created_at, updated_at
+    description, source, created_at, updated_at
 ) VALUES
 (
     gen_random_uuid()::text,
@@ -958,7 +958,6 @@ INSERT INTO schema_documentation (
     NULL,
     'Core transaction table tracking all customer orders. Status transitions: pending → confirmed → processing → shipped → delivered (or cancelled/refunded). Foreign key to customers via customer_id. Contains denormalized totals (subtotal, tax_amount, shipping_amount, discount_amount, total_amount) for query performance.',
     'USER',
-    true,
     NOW(),
     NOW()
 ),
@@ -970,7 +969,6 @@ INSERT INTO schema_documentation (
     NULL,
     'Customer master table with profile and loyalty data. The tier column (bronze/silver/gold/platinum) drives discount eligibility and marketing segmentation. loyalty_points accumulate from orders and can be redeemed.',
     'USER',
-    true,
     NOW(),
     NOW()
 ),
@@ -982,7 +980,6 @@ INSERT INTO schema_documentation (
     NULL,
     'Product catalog with inventory tracking. stock_quantity is decremented on order creation and incremented on returns/cancellations. low_stock_threshold triggers inventory alerts. Products can be soft-deleted via is_active=false.',
     'USER',
-    true,
     NOW(),
     NOW()
 ),
@@ -994,7 +991,6 @@ INSERT INTO schema_documentation (
     NULL,
     'High-volume audit trail capturing all INSERT/UPDATE/DELETE operations. old_values and new_values store JSONB diffs. This table grows rapidly and is a candidate for partitioning by changed_at. Currently missing index on (table_name, changed_at) which causes slow queries.',
     'USER',
-    true,
     NOW(),
     NOW()
 ),
@@ -1006,7 +1002,6 @@ INSERT INTO schema_documentation (
     'orders',
     'Order lifecycle status. Valid values: pending, confirmed, processing, shipped, delivered, cancelled, refunded. Queries filtering on status should avoid LOWER() as it prevents index usage.',
     'USER',
-    true,
     NOW(),
     NOW()
 )
