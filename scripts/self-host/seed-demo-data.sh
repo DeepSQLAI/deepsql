@@ -400,162 +400,45 @@ if [[ -n "${connection_id:-}" ]]; then
         "SELECT id FROM users WHERE email = '${DEEPSQL_INITIAL_ADMIN_EMAIL}' LIMIT 1" 2>/dev/null || echo "")"
     
     if [[ -n "$admin_id" ]]; then
-        # Create the sample dashboard HTML artifact
-        dashboard_html='<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif; background: #f8f9fa; padding: 24px; }
-        .dashboard { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; max-width: 1400px; margin: 0 auto; }
-        .widget { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        .widget-full { grid-column: span 2; }
-        .widget h3 { font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
-        .metric { font-size: 32px; font-weight: 700; color: #111827; }
-        .metric-label { font-size: 12px; color: #6b7280; margin-top: 4px; }
-        .metric-row { display: flex; gap: 40px; }
-        .metric-item { flex: 1; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        th { text-align: left; padding: 10px 12px; background: #f9fafb; color: #6b7280; font-weight: 500; border-bottom: 1px solid #e5e7eb; }
-        td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; color: #374151; }
-        tr:hover { background: #f9fafb; }
-        .status-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; }
-        .status-delivered { background: #d1fae5; color: #065f46; }
-        .status-shipped { background: #dbeafe; color: #1e40af; }
-        .status-processing { background: #fef3c7; color: #92400e; }
-        .status-pending { background: #f3f4f6; color: #4b5563; }
-        .bar-chart { display: flex; flex-direction: column; gap: 8px; }
-        .bar-row { display: flex; align-items: center; gap: 12px; }
-        .bar-label { width: 100px; font-size: 12px; color: #6b7280; text-align: right; }
-        .bar-container { flex: 1; height: 24px; background: #f3f4f6; border-radius: 4px; overflow: hidden; }
-        .bar { height: 100%; background: linear-gradient(90deg, #3b82f6 0%, #1d4ed8 100%); border-radius: 4px; transition: width 0.3s; }
-        .bar-value { width: 80px; font-size: 12px; color: #374151; font-weight: 500; }
-        .loading { color: #9ca3af; font-style: italic; }
-        .error { color: #ef4444; font-size: 12px; }
-    </style>
-</head>
-<body>
-<div class="dashboard">
-    <div class="widget">
-        <h3>📊 Key Metrics</h3>
-        <div id="metrics" class="metric-row"><span class="loading">Loading...</span></div>
-    </div>
-    <div class="widget">
-        <h3>📈 Orders by Status</h3>
-        <div id="status-chart" class="bar-chart"><span class="loading">Loading...</span></div>
-    </div>
-    <div class="widget widget-full">
-        <h3>💰 Daily Revenue (Last 14 Days)</h3>
-        <div id="revenue-table"><span class="loading">Loading...</span></div>
-    </div>
-    <div class="widget widget-full">
-        <h3>🏆 Top 10 Products by Revenue</h3>
-        <div id="products-table"><span class="loading">Loading...</span></div>
-    </div>
-</div>
-<script>
-async function query(sql) {
-    return deepsql.query(sql);
-}
-async function loadDashboard() {
-    try {
-        // Key Metrics
-        const metrics = await query(\`
-            SELECT 
-                (SELECT COUNT(*) FROM orders) as total_orders,
-                (SELECT SUM(total_amount) FROM orders WHERE status != '"'"'cancelled'"'"') as total_revenue,
-                (SELECT COUNT(*) FROM customers) as total_customers,
-                (SELECT COUNT(*) FROM products WHERE is_active = true) as active_products
-        \`);
-        if (metrics.rows && metrics.rows[0]) {
-            const m = metrics.rows[0];
-            document.getElementById("metrics").innerHTML = \`
-                <div class="metric-item"><div class="metric">\${Number(m.total_orders || 0).toLocaleString()}</div><div class="metric-label">Total Orders</div></div>
-                <div class="metric-item"><div class="metric">$\${Number(m.total_revenue || 0).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div><div class="metric-label">Total Revenue</div></div>
-                <div class="metric-item"><div class="metric">\${Number(m.total_customers || 0).toLocaleString()}</div><div class="metric-label">Customers</div></div>
-                <div class="metric-item"><div class="metric">\${Number(m.active_products || 0).toLocaleString()}</div><div class="metric-label">Active Products</div></div>
-            \`;
-        }
-        
-        // Orders by Status
-        const statusData = await query(\`
-            SELECT status, COUNT(*) as count 
-            FROM orders 
-            GROUP BY status 
-            ORDER BY count DESC
-        \`);
-        if (statusData.rows && statusData.rows.length > 0) {
-            const maxCount = Math.max(...statusData.rows.map(r => Number(r.count)));
-            document.getElementById("status-chart").innerHTML = statusData.rows.map(row => \`
-                <div class="bar-row">
-                    <div class="bar-label">\${row.status}</div>
-                    <div class="bar-container"><div class="bar" style="width: \${(Number(row.count) / maxCount * 100)}%"></div></div>
-                    <div class="bar-value">\${Number(row.count).toLocaleString()}</div>
-                </div>
-            \`).join("");
-        }
-        
-        // Daily Revenue
-        const revenue = await query(\`
-            SELECT DATE(created_at) as day, COUNT(*) as orders, SUM(total_amount) as revenue
-            FROM orders WHERE status NOT IN ('"'"'cancelled'"'"', '"'"'refunded'"'"')
-            AND created_at >= CURRENT_DATE - INTERVAL '"'"'14 days'"'"'
-            GROUP BY DATE(created_at) ORDER BY day DESC
-        \`);
-        if (revenue.rows && revenue.rows.length > 0) {
-            document.getElementById("revenue-table").innerHTML = \`<table>
-                <thead><tr><th>Date</th><th>Orders</th><th>Revenue</th></tr></thead>
-                <tbody>\${revenue.rows.map(r => \`<tr><td>\${r.day}</td><td>\${Number(r.orders).toLocaleString()}</td><td>$\${Number(r.revenue || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>\`).join("")}</tbody>
-            </table>\`;
-        }
-        
-        // Top Products
-        const products = await query(\`
-            SELECT p.name, p.sku, SUM(oi.quantity) as units, SUM(oi.subtotal) as revenue
-            FROM products p JOIN order_items oi ON p.id = oi.product_id
-            JOIN orders o ON oi.order_id = o.id WHERE o.status NOT IN ('"'"'cancelled'"'"', '"'"'refunded'"'"')
-            GROUP BY p.id, p.name, p.sku ORDER BY revenue DESC LIMIT 10
-        \`);
-        if (products.rows && products.rows.length > 0) {
-            document.getElementById("products-table").innerHTML = \`<table>
-                <thead><tr><th>Product</th><th>SKU</th><th>Units Sold</th><th>Revenue</th></tr></thead>
-                <tbody>\${products.rows.map(r => \`<tr><td>\${r.name}</td><td>\${r.sku}</td><td>\${Number(r.units).toLocaleString()}</td><td>$\${Number(r.revenue || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>\`).join("")}</tbody>
-            </table>\`;
-        }
-    } catch (err) {
-        console.error("Dashboard error:", err);
-        document.querySelectorAll(".loading").forEach(el => el.innerHTML = \`<span class="error">Failed to load: \${err.message || "Unknown error"}</span>\`);
-    }
-}
-loadDashboard();
-</script>
-</body>
-</html>'
+        # Read dashboard HTML from separate file and create dashboard via temp SQL file
+        # This approach avoids all shell/psql escaping issues with JSON containing JS template literals
+        dashboard_html_file="$SCRIPT_DIR/demo-dashboard.html"
+        if [[ -f "$dashboard_html_file" ]]; then
+            # Create SQL file with Python (handles all escaping correctly)
+            sql_file="$(mktemp)"
+            python3 - "$dashboard_html_file" "$connection_id" "$admin_id" > "$sql_file" <<'PYEOF'
+import json
+import sys
 
-        # Escape for SQL
-        dashboard_html_escaped="${dashboard_html//\'/\'\'}"
-        
-        dashboard_config=$(cat <<JSON
-{
-  "version": 3,
-  "renderMode": "artifact",
-  "title": "Demo Shop Overview",
-  "html": "${dashboard_html_escaped}",
-  "summary": "A sample dashboard showing key metrics, orders by status, daily revenue, and top products from the Demo Shop database. This dashboard works without an LLM key."
-}
-JSON
-)
-        # Escape the JSON for SQL
-        dashboard_config_escaped="${dashboard_config//\'/\'\'}"
+html_file = sys.argv[1]
+connection_id = sys.argv[2]
+admin_id = sys.argv[3]
 
-        compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 <<EOSQL
--- Check if sample dashboard already exists
-DO \$\$
+# Read HTML from file
+with open(html_file, 'r') as f:
+    html = f.read()
+
+# Build JSON config
+config = {
+    'version': 3,
+    'renderMode': 'artifact',
+    'title': 'Demo Shop Overview',
+    'html': html,
+    'summary': 'A sample dashboard showing key metrics, orders by status, daily revenue, and top products from the Demo Shop database. This dashboard works without an LLM key.'
+}
+
+# For PostgreSQL dollar-quoting, we only need to escape $dashboard$ if it appears in the JSON
+# (it won't, but this is safe). No backslash escaping needed with dollar-quoting.
+json_str = json.dumps(config)
+
+# Generate SQL using dollar-quoting for the JSON to avoid all escaping issues
+# The $dashcfg$...$dashcfg$ delimiter won't appear in the JSON
+sql = f"""-- Check if sample dashboard already exists
+DO $do$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM saved_dashboards 
-        WHERE connection_id = '${connection_id}' 
+        WHERE connection_id = '{connection_id}' 
         AND name = 'Demo Shop Overview'
     ) THEN
         INSERT INTO saved_dashboards (
@@ -563,11 +446,11 @@ BEGIN
             tags, is_favorite, is_public, generation_status, created_at, updated_at, version
         ) VALUES (
             gen_random_uuid(),
-            '${connection_id}',
-            ${admin_id},
+            '{connection_id}',
+            {admin_id},
             'Demo Shop Overview',
             'Sample dashboard showing key e-commerce metrics. Works without an LLM key.',
-            '${dashboard_config_escaped}'::text,
+            $dashcfg${json_str}$dashcfg$::text,
             'demo,sample,overview',
             true,
             false,
@@ -580,8 +463,20 @@ BEGIN
     ELSE
         RAISE NOTICE 'Sample dashboard already exists';
     END IF;
-END \$\$;
-EOSQL
+END $do$;
+"""
+print(sql)
+PYEOF
+            
+            # Copy the SQL file into the container and run it
+            # This avoids psql interpreting backslashes in stdin mode
+            compose cp "$sql_file" postgres:/tmp/dashboard.sql
+            compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 -f /tmp/dashboard.sql
+            compose exec -T postgres rm -f /tmp/dashboard.sql
+            rm -f "$sql_file"
+        else
+            echo "  Warning: demo-dashboard.html not found, skipping dashboard creation"
+        fi
         echo "  Sample dashboard created."
     else
         echo "  Skipping dashboard (admin user not found)"
