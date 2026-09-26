@@ -258,11 +258,98 @@ EOSQL
 fi
 
 # ============================================================================
-# Step 4: Run real workload to populate pg_stat_statements
+# Step 4: Scale up data volume for realistic slow queries
 # ============================================================================
 
 echo ""
-echo "Step 4: Running real workload simulation (~${DEEPSQL_SEED_WORKLOAD_DURATION}s)..."
+echo "Step 4: Scaling up data volume for realistic slow queries..."
+
+# The base demo_shop has ~50K audit_log and ~20K order_items rows.
+# That's too small for queries to exceed the 100ms threshold.
+# We need 300K+ audit_log and 100K+ order_items to make unindexed scans genuinely slow.
+
+compose exec -T postgres psql -U postgres -d demo_shop -v ON_ERROR_STOP=1 <<'EOSCALE'
+-- Scale up audit_log to 300K+ rows (currently ~50K)
+-- This makes unindexed scans on audit_log genuinely slow
+DO $$
+DECLARE
+    current_count bigint;
+    target_count bigint := 300000;
+    batch_size int := 50000;
+    iterations int;
+BEGIN
+    SELECT COUNT(*) INTO current_count FROM audit_log;
+    RAISE NOTICE 'Current audit_log rows: %, target: %', current_count, target_count;
+    
+    IF current_count < target_count THEN
+        iterations := CEIL((target_count - current_count)::float / batch_size);
+        FOR i IN 1..iterations LOOP
+            INSERT INTO audit_log (table_name, record_id, action, old_values, new_values, changed_by, changed_at)
+            SELECT 
+                (ARRAY['orders', 'customers', 'products', 'order_items', 'inventory_movements'])[1 + (random() * 4)::int],
+                (random() * 100000)::int,
+                (ARRAY['INSERT', 'UPDATE', 'DELETE'])[1 + (random() * 2)::int],
+                CASE WHEN random() > 0.5 THEN jsonb_build_object('status', 'old_value_' || g) ELSE NULL END,
+                jsonb_build_object('status', 'new_value_' || g, 'updated_at', NOW() - (random() * INTERVAL '90 days')),
+                'system_batch_' || (g % 10),
+                NOW() - (random() * INTERVAL '90 days')
+            FROM generate_series(1, batch_size) AS g;
+            RAISE NOTICE 'Added batch % of % to audit_log', i, iterations;
+        END LOOP;
+    END IF;
+END $$;
+
+-- Scale up order_items to 100K+ rows (currently ~20K)  
+-- This makes joins involving order_items genuinely slow
+DO $$
+DECLARE
+    current_count bigint;
+    target_count bigint := 100000;
+    batch_size int := 20000;
+    iterations int;
+    max_order_id int;
+    max_product_id int;
+BEGIN
+    SELECT COUNT(*) INTO current_count FROM order_items;
+    SELECT MAX(id) INTO max_order_id FROM orders;
+    SELECT MAX(id) INTO max_product_id FROM products;
+    RAISE NOTICE 'Current order_items rows: %, target: %', current_count, target_count;
+    
+    IF current_count < target_count THEN
+        iterations := CEIL((target_count - current_count)::float / batch_size);
+        FOR i IN 1..iterations LOOP
+            INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal)
+            SELECT 
+                1 + (random() * (max_order_id - 1))::int,
+                1 + (random() * (max_product_id - 1))::int,
+                1 + (random() * 4)::int,
+                (10 + random() * 490)::numeric(10,2),
+                (10 + random() * 490)::numeric(10,2) * (1 + (random() * 4)::int)
+            FROM generate_series(1, batch_size) AS g;
+            RAISE NOTICE 'Added batch % of % to order_items', i, iterations;
+        END LOOP;
+    END IF;
+END $$;
+
+-- Analyze tables after bulk inserts for accurate stats
+ANALYZE audit_log;
+ANALYZE order_items;
+
+SELECT 
+    'audit_log' as table_name, COUNT(*) as row_count FROM audit_log
+UNION ALL
+SELECT 
+    'order_items', COUNT(*) FROM order_items;
+EOSCALE
+
+echo "  Data volume scaled up."
+
+# ============================================================================
+# Step 5: Run real workload to populate pg_stat_statements
+# ============================================================================
+
+echo ""
+echo "Step 5: Running real workload simulation..."
 
 # Reset pg_stat_statements to get clean data
 compose exec -T postgres psql -U postgres -d demo_shop -c "SELECT pg_stat_statements_reset();" 2>/dev/null || true
@@ -270,100 +357,103 @@ compose exec -T postgres psql -U postgres -d demo_shop -c "SELECT pg_stat_statem
 # Run inefficient queries that will be captured by pg_stat_statements
 # These patterns are intentionally suboptimal to trigger index recommendations
 # NO pg_sleep - all slowness comes from real inefficient query patterns
-echo "  Starting workload (this takes about ${DEEPSQL_SEED_WORKLOAD_DURATION} seconds)..."
-compose exec -T postgres psql -U postgres -d demo_shop -v ON_ERROR_STOP=1 <<EOWORK
+echo "  Starting workload (this takes about 30-60 seconds)..."
+compose exec -T postgres psql -U postgres -d demo_shop -v ON_ERROR_STOP=1 <<'EOWORK'
 -- Workload simulation for pg_stat_statements
--- Each pattern runs multiple times to accumulate meaningful statistics
+-- With 300K+ audit_log and 100K+ order_items, these patterns will genuinely exceed 100ms
 -- All slowness is REAL from inefficient queries (no pg_sleep)
 
-DO \$\$
+DO $$
 DECLARE 
     i int;
-    j int;
-    start_time timestamp := clock_timestamp();
-    duration_seconds int := ${DEEPSQL_SEED_WORKLOAD_DURATION};
     result_count bigint;
-    dummy_text text;
+    dummy_row record;
 BEGIN
-    RAISE NOTICE 'Starting workload simulation for % seconds...', duration_seconds;
+    RAISE NOTICE 'Starting workload simulation with realistic slow patterns...';
     
-    WHILE (EXTRACT(EPOCH FROM (clock_timestamp() - start_time)) < duration_seconds) LOOP
-        -- Pattern 1: LOWER() on column prevents index use (seq scan)
-        -- Recommendation: CREATE INDEX idx_orders_lower_status ON orders (LOWER(status));
-        FOR j IN 1..5 LOOP
-            SELECT COUNT(*) INTO result_count FROM orders 
-            WHERE LOWER(status) = 'delivered' AND total_amount > 100;
-        END LOOP;
-        
-        -- Pattern 2: Missing composite index on frequently filtered columns
-        -- Recommendation: CREATE INDEX idx_orders_status_payment ON orders (status, payment_status);
-        FOR j IN 1..5 LOOP
-            SELECT COUNT(*) INTO result_count FROM orders o 
-            JOIN customers c ON o.customer_id = c.id 
-            WHERE o.status = 'pending' AND o.payment_status = 'paid';
-        END LOOP;
-        
-        -- Pattern 3: Unanchored LIKE '%...%' forces full table scan
-        -- Recommendation: Consider full-text search or trigram index
-        FOR j IN 1..3 LOOP
-            SELECT COUNT(*) INTO result_count FROM products 
-            WHERE name ILIKE '%phone%' OR description ILIKE '%wireless%';
-        END LOOP;
-        
-        -- Pattern 4: Large audit_log scan without proper index
-        -- Recommendation: CREATE INDEX idx_audit_table_changed ON audit_log (table_name, changed_at);
-        FOR j IN 1..3 LOOP
-            SELECT COUNT(*) INTO result_count FROM audit_log 
-            WHERE table_name = 'orders' 
-            AND changed_at > NOW() - INTERVAL '7 days';
-        END LOOP;
-        
-        -- Pattern 5: Large sort without index support  
-        -- Recommendation: CREATE INDEX idx_audit_changed_desc ON audit_log (changed_at DESC);
-        FOR j IN 1..2 LOOP
-            SELECT COUNT(*) INTO result_count FROM (
-                SELECT * FROM audit_log 
-                WHERE table_name = 'orders' 
-                ORDER BY changed_at DESC 
-                LIMIT 1000
-            ) sub;
-        END LOOP;
-        
-        -- Pattern 6: Expensive aggregation across large join (MV candidate)
-        -- This naturally takes time due to the join and aggregation
+    -- Pattern 1: LOWER() on orders.status column prevents index use
+    -- This scans all 5000 orders and applies LOWER() to each row
+    -- Run 50 times to accumulate enough calls for the advisor
+    RAISE NOTICE 'Running LOWER(status) pattern...';
+    FOR i IN 1..50 LOOP
+        SELECT COUNT(*) INTO result_count FROM orders 
+        WHERE LOWER(status) = 'delivered' AND total_amount > 100;
+    END LOOP;
+    
+    -- Pattern 2: Full table scan on audit_log (300K+ rows) without index
+    -- This genuinely takes time due to the large table size
+    RAISE NOTICE 'Running audit_log full scan pattern...';
+    FOR i IN 1..20 LOOP
+        SELECT COUNT(*) INTO result_count FROM audit_log 
+        WHERE table_name = 'orders' 
+        AND changed_at > NOW() - INTERVAL '90 days';
+    END LOOP;
+    
+    -- Pattern 3: Sort on audit_log without index support (300K rows)
+    -- Sorting 300K rows without index is genuinely slow
+    RAISE NOTICE 'Running audit_log sort pattern...';
+    FOR i IN 1..15 LOOP
+        SELECT * INTO dummy_row FROM audit_log 
+        WHERE table_name IN ('orders', 'customers', 'products')
+        ORDER BY changed_at DESC 
+        LIMIT 1000;
+    END LOOP;
+    
+    -- Pattern 4: ILIKE with leading wildcard on products (forces seq scan)
+    RAISE NOTICE 'Running ILIKE pattern...';
+    FOR i IN 1..30 LOOP
+        SELECT COUNT(*) INTO result_count FROM products 
+        WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
+    END LOOP;
+    
+    -- Pattern 5: Large join between order_items (100K) and orders (5K)
+    -- Missing index on the join column makes this slow
+    RAISE NOTICE 'Running large join pattern...';
+    FOR i IN 1..15 LOOP
+        SELECT COUNT(*), SUM(oi.subtotal) INTO result_count, result_count FROM order_items oi
+        JOIN orders o ON oi.order_id = o.id
+        WHERE o.status = 'delivered';
+    END LOOP;
+    
+    -- Pattern 6: Expensive aggregation across 100K+ order_items
+    RAISE NOTICE 'Running expensive aggregation pattern...';
+    FOR i IN 1..10 LOOP
         SELECT COUNT(*) INTO result_count FROM (
             SELECT DATE_TRUNC('month', o.created_at) as month,
-                   c.name as category,
-                   COUNT(DISTINCT o.id) as order_count,
+                   p.name as product_name,
+                   COUNT(*) as order_count,
                    SUM(oi.subtotal) as revenue
             FROM orders o
             JOIN order_items oi ON o.id = oi.order_id
             JOIN products p ON oi.product_id = p.id
-            JOIN categories c ON p.category_id = c.id
             WHERE o.status NOT IN ('cancelled', 'refunded')
-            GROUP BY DATE_TRUNC('month', o.created_at), c.id, c.name
+            GROUP BY DATE_TRUNC('month', o.created_at), p.id, p.name
+            ORDER BY revenue DESC
         ) sub;
-        
-        -- Pattern 7: Subquery that could be rewritten as JOIN
-        -- Recommendation: Consider rewriting as JOIN for better performance
-        FOR j IN 1..3 LOOP
-            SELECT COUNT(*) INTO result_count FROM orders 
-            WHERE customer_id IN (
-                SELECT id FROM customers WHERE tier = 'platinum'
-            );
-        END LOOP;
-        
-        -- Pattern 8: Multiple separate queries instead of batch (N+1 pattern)
-        FOR i IN 1..20 LOOP
-            SELECT COUNT(*) INTO result_count FROM order_items oi
-            JOIN products p ON oi.product_id = p.id
-            WHERE oi.order_id = (i * 50);
-        END LOOP;
     END LOOP;
     
-    RAISE NOTICE 'Workload simulation completed after % seconds', 
-        EXTRACT(EPOCH FROM (clock_timestamp() - start_time))::int;
-END \$\$;
+    -- Pattern 7: Missing composite index - status + payment_status filter
+    RAISE NOTICE 'Running missing composite index pattern...';
+    FOR i IN 1..40 LOOP
+        SELECT COUNT(*) INTO result_count FROM orders 
+        WHERE status = 'pending' AND payment_status = 'paid'
+        AND created_at > NOW() - INTERVAL '30 days';
+    END LOOP;
+    
+    -- Pattern 8: Correlated subquery (inefficient N+1 style)
+    RAISE NOTICE 'Running correlated subquery pattern...';
+    FOR i IN 1..20 LOOP
+        SELECT COUNT(*) INTO result_count FROM orders o
+        WHERE EXISTS (
+            SELECT 1 FROM audit_log a 
+            WHERE a.record_id = o.id 
+            AND a.table_name = 'orders'
+            AND a.action = 'UPDATE'
+        );
+    END LOOP;
+    
+    RAISE NOTICE 'Workload simulation completed.';
+END $$;
 EOWORK
 
 echo "  Workload simulation completed."
@@ -373,11 +463,11 @@ slow_count="$(compose exec -T postgres psql -U postgres -d demo_shop -At -c \
 echo "  Found ${slow_count:-0} queries with mean_exec_time > 1ms in pg_stat_statements."
 
 # ============================================================================
-# Step 5: Create sample dashboard (plain SQL, no LLM needed)
+# Step 6: Create sample dashboard (plain SQL, no LLM needed)
 # ============================================================================
 
 echo ""
-echo "Step 5: Creating sample dashboard..."
+echo "Step 6: Creating sample dashboard..."
 
 if [[ -n "${connection_id:-}" ]]; then
     # Get admin user ID
@@ -471,11 +561,11 @@ else
 fi
 
 # ============================================================================
-# Step 6: Create saved queries
+# Step 7: Create saved queries
 # ============================================================================
 
 echo ""
-echo "Step 6: Creating saved queries..."
+echo "Step 7: Creating saved queries..."
 
 if [[ -n "${connection_id:-}" ]]; then
     create_saved_query() {
@@ -546,20 +636,20 @@ else
 fi
 
 # ============================================================================
-# Step 7: Index recommendations (rely on real advisor output, not fabricated data)
+# Step 8: Index recommendations (rely on real advisor output, not fabricated data)
 # ============================================================================
 
 echo ""
-echo "Step 7: Skipping fabricated index recommendations..."
+echo "Step 8: Skipping fabricated index recommendations..."
 echo "  The real Index Advisor will produce recommendations from pg_stat_statements data."
 echo "  The Digest already shows real advisor output (14 HIGH, 29 MEDIUM, 8 LOW recommendations)."
 
 # ============================================================================
-# Step 8: Seed digest preferences (fixes "Legacy mode")
+# Step 9: Seed digest preferences (fixes "Legacy mode")
 # ============================================================================
 
 echo ""
-echo "Step 8: Seeding digest preferences..."
+echo "Step 9: Seeding digest preferences..."
 
 if [[ -n "${connection_id:-}" ]]; then
     compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 <<EOSQL
@@ -700,11 +790,11 @@ else
 fi
 
 # ============================================================================
-# Step 9: Seed curated Brain notes (instead of 90 noisy items)
+# Step 10: Seed curated Brain notes (instead of 90 noisy items)
 # ============================================================================
 
 echo ""
-echo "Step 9: Seeding curated Brain notes..."
+echo "Step 10: Seeding curated Brain notes..."
 
 if [[ -n "${connection_id:-}" ]]; then
     compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 <<EOSQL
@@ -788,11 +878,11 @@ else
 fi
 
 # ============================================================================
-# Step 10: Trigger initial slow query analysis from pg_stat_statements
+# Step 11: Trigger initial slow query analysis from pg_stat_statements
 # ============================================================================
 
 echo ""
-echo "Step 10: Triggering initial slow query analysis..."
+echo "Step 11: Triggering initial slow query analysis..."
 
 if [[ -n "${connection_id:-}" ]]; then
     analysis_result="$(curl -sS -b "$cookie_jar" \
@@ -811,6 +901,54 @@ else
 fi
 
 # ============================================================================
+# Step 12: Validate slow queries endpoint has data
+# ============================================================================
+
+echo ""
+echo "Step 12: Validating slow queries..."
+
+if [[ -n "${connection_id:-}" ]]; then
+    # Query the slow-queries endpoint to verify it returns data
+    slow_query_check="$(curl -sS -b "$cookie_jar" \
+        "$base/slow-query-analytics/${connection_id}/queries?limit=5" 2>/dev/null || echo "[]")"
+    
+    # Count how many slow queries were returned
+    slow_count="$(echo "$slow_query_check" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    if isinstance(data, list):
+        print(len(data))
+    elif isinstance(data, dict) and 'content' in data:
+        print(len(data['content']))
+    else:
+        print(0)
+except:
+    print(0)
+" 2>/dev/null || echo "0")"
+    
+    if [[ "$slow_count" -gt 0 ]]; then
+        echo "  ✓ Slow queries endpoint returned $slow_count queries."
+    else
+        echo ""
+        echo "  ⚠️  WARNING: Slow queries endpoint returned 0 rows!"
+        echo "  The Performance tab will show 'No Slow Queries Found'."
+        echo "  This defeats the purpose of the demo."
+        echo ""
+        echo "  Possible causes:"
+        echo "  - Data volume too small (need 300K+ audit_log, 100K+ order_items)"
+        echo "  - Workload queries too fast (need mean_exec_time > 100ms)"
+        echo "  - pg_stat_statements was reset after workload ran"
+        echo ""
+        echo "  Check pg_stat_statements directly:"
+        echo "  psql -U postgres -d dba_agent -c \"SELECT LEFT(query,60), calls, mean_exec_time::numeric(10,2) FROM pg_stat_statements WHERE dbid = (SELECT oid FROM pg_database WHERE datname = 'demo_shop') ORDER BY mean_exec_time DESC LIMIT 10;\""
+        echo ""
+    fi
+else
+    echo "  Skipping validation (no connection ID available)"
+fi
+
+# ============================================================================
 # Summary
 # ============================================================================
 
@@ -820,7 +958,8 @@ echo "Demo Data Seeding Complete!"
 echo "=========================================="
 echo ""
 echo "What was created:"
-echo "  - demo_shop database with e-commerce schema (5000+ orders)"
+echo "  - demo_shop database with e-commerce schema"
+echo "    - 5,000 orders, 100K+ order_items, 300K+ audit_log rows"
 echo "  - Demo connection: ${DEEPSQL_SEED_CONNECTION_NAME}"
 echo "    Using read-only role: ${DEMO_ROLE_USER}"
 if [[ -n "${connection_id:-}" ]]; then
