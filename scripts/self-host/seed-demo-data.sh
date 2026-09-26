@@ -358,103 +358,70 @@ compose exec -T postgres psql -U postgres -d demo_shop -c "SELECT pg_stat_statem
 # These patterns are intentionally suboptimal to trigger index recommendations
 # NO pg_sleep - all slowness comes from real inefficient query patterns
 echo "  Starting workload (this takes about 30-60 seconds)..."
-compose exec -T postgres psql -U postgres -d demo_shop -v ON_ERROR_STOP=1 <<'EOWORK'
--- Workload simulation for pg_stat_statements
--- With 300K+ audit_log and 100K+ order_items, these patterns will genuinely exceed 100ms
--- All slowness is REAL from inefficient queries (no pg_sleep)
+# Generate SQL file with individual statements.
+# Queries inside PL/pgSQL DO blocks are NOT tracked separately by pg_stat_statements.
+# Each SELECT must be a standalone statement to be tracked individually.
+# Using generate_series() to repeat each pattern multiple times within a single query,
+# which pg_stat_statements will track and report the cumulative execution time.
 
-DO $$
-DECLARE 
-    i int;
-    result_count bigint;
-    dummy_row record;
-BEGIN
-    RAISE NOTICE 'Starting workload simulation with realistic slow patterns...';
-    
-    -- Pattern 1: LOWER() on orders.status column prevents index use
-    -- This scans all 5000 orders and applies LOWER() to each row
-    -- Run 50 times to accumulate enough calls for the advisor
-    RAISE NOTICE 'Running LOWER(status) pattern...';
-    FOR i IN 1..50 LOOP
-        SELECT COUNT(*) INTO result_count FROM orders 
-        WHERE LOWER(status) = 'delivered' AND total_amount > 100;
-    END LOOP;
-    
-    -- Pattern 2: Full table scan on audit_log (300K+ rows) without index
-    -- This genuinely takes time due to the large table size
-    RAISE NOTICE 'Running audit_log full scan pattern...';
-    FOR i IN 1..20 LOOP
-        SELECT COUNT(*) INTO result_count FROM audit_log 
-        WHERE table_name = 'orders' 
-        AND changed_at > NOW() - INTERVAL '90 days';
-    END LOOP;
-    
-    -- Pattern 3: Sort on audit_log without index support (300K rows)
-    -- Sorting 300K rows without index is genuinely slow
-    RAISE NOTICE 'Running audit_log sort pattern...';
-    FOR i IN 1..15 LOOP
-        SELECT * INTO dummy_row FROM audit_log 
-        WHERE table_name IN ('orders', 'customers', 'products')
-        ORDER BY changed_at DESC 
-        LIMIT 1000;
-    END LOOP;
-    
-    -- Pattern 4: ILIKE with leading wildcard on products (forces seq scan)
-    RAISE NOTICE 'Running ILIKE pattern...';
-    FOR i IN 1..30 LOOP
-        SELECT COUNT(*) INTO result_count FROM products 
-        WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
-    END LOOP;
-    
-    -- Pattern 5: Large join between order_items (100K) and orders (5K)
-    -- Missing index on the join column makes this slow
-    RAISE NOTICE 'Running large join pattern...';
-    FOR i IN 1..15 LOOP
-        SELECT COUNT(*), SUM(oi.subtotal) INTO result_count, result_count FROM order_items oi
-        JOIN orders o ON oi.order_id = o.id
-        WHERE o.status = 'delivered';
-    END LOOP;
-    
-    -- Pattern 6: Expensive aggregation across 100K+ order_items
-    RAISE NOTICE 'Running expensive aggregation pattern...';
-    FOR i IN 1..10 LOOP
-        SELECT COUNT(*) INTO result_count FROM (
-            SELECT DATE_TRUNC('month', o.created_at) as month,
-                   p.name as product_name,
-                   COUNT(*) as order_count,
-                   SUM(oi.subtotal) as revenue
-            FROM orders o
-            JOIN order_items oi ON o.id = oi.order_id
-            JOIN products p ON oi.product_id = p.id
-            WHERE o.status NOT IN ('cancelled', 'refunded')
-            GROUP BY DATE_TRUNC('month', o.created_at), p.id, p.name
-            ORDER BY revenue DESC
-        ) sub;
-    END LOOP;
-    
-    -- Pattern 7: Missing composite index - status + payment_status filter
-    RAISE NOTICE 'Running missing composite index pattern...';
-    FOR i IN 1..40 LOOP
-        SELECT COUNT(*) INTO result_count FROM orders 
-        WHERE status = 'pending' AND payment_status = 'paid'
-        AND created_at > NOW() - INTERVAL '30 days';
-    END LOOP;
-    
-    -- Pattern 8: Correlated subquery (inefficient N+1 style)
-    RAISE NOTICE 'Running correlated subquery pattern...';
-    FOR i IN 1..20 LOOP
-        SELECT COUNT(*) INTO result_count FROM orders o
-        WHERE EXISTS (
-            SELECT 1 FROM audit_log a 
-            WHERE a.record_id = o.id 
-            AND a.table_name = 'orders'
-            AND a.action = 'UPDATE'
-        );
-    END LOOP;
-    
-    RAISE NOTICE 'Workload simulation completed.';
-END $$;
+compose exec -T postgres psql -U postgres -d demo_shop -v ON_ERROR_STOP=1 <<'EOWORK'
+-- Pattern 1: LOWER() on status column defeats index (50 calls)
+-- Each row of generate_series triggers a separate evaluation via LATERAL join
+SELECT 'LOWER(status) pattern' as pattern, COUNT(*)
+FROM generate_series(1, 50) g,
+LATERAL (SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100) sub;
+
+-- Pattern 2: Full table scan on audit_log 300K rows (20 calls)
+SELECT 'audit_log scan pattern' as pattern, COUNT(*)
+FROM generate_series(1, 20) g,
+LATERAL (SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days') sub;
+
+-- Pattern 3: Sort on audit_log without index (15 calls)
+SELECT 'audit_log sort pattern' as pattern, COUNT(*)
+FROM generate_series(1, 15) g,
+LATERAL (SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000) sub;
+
+-- Pattern 4: ILIKE with leading wildcard (30 calls)
+SELECT 'ILIKE pattern' as pattern, COUNT(*)
+FROM generate_series(1, 30) g,
+LATERAL (SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%') sub;
+
+-- Pattern 5: Large join order_items (100K) to orders (5K) (15 calls)
+SELECT 'large join pattern' as pattern, COUNT(*), SUM(total)
+FROM generate_series(1, 15) g,
+LATERAL (SELECT COUNT(*) as cnt, SUM(oi.subtotal) as total FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered') sub;
+
+-- Pattern 6: Expensive aggregation with GROUP BY (10 calls)
+SELECT 'expensive aggregation pattern' as pattern, COUNT(*)
+FROM generate_series(1, 10) g,
+LATERAL (
+    SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal)
+    FROM orders o
+    JOIN order_items oi ON o.id = oi.order_id
+    JOIN products p ON oi.product_id = p.id
+    WHERE o.status NOT IN ('cancelled', 'refunded')
+    GROUP BY 1, p.id, p.name
+    ORDER BY 4 DESC
+    LIMIT 100
+) sub;
+
+-- Pattern 7: Missing composite index on (status, payment_status) (40 calls)
+SELECT 'composite index pattern' as pattern, COUNT(*)
+FROM generate_series(1, 40) g,
+LATERAL (SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days') sub;
+
+-- Pattern 8: Correlated subquery - inefficient EXISTS (20 calls)
+SELECT 'correlated subquery pattern' as pattern, COUNT(*)
+FROM generate_series(1, 20) g,
+LATERAL (
+    SELECT COUNT(*) FROM orders o
+    WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE')
+) sub;
+
+SELECT 'Workload patterns completed' as status;
 EOWORK
+
+echo "  Workload patterns completed."
 
 echo "  Workload simulation completed."
 echo "  Verifying pg_stat_statements data..."
