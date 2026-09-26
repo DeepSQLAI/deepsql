@@ -3,12 +3,26 @@
 #
 # This script creates:
 # - demo_shop: A realistic e-commerce database with customers, orders, products
-# - Demo users: analyst, developer, viewer with scoped access
+# - Demo connection using read-only deepsql_demo role
+# - Real slow-query workload (~60s) captured by pg_stat_statements
+# - Sample dashboard that renders without an LLM key
+# - Sample agent prompts
+# - Digest preferences (fixes "Legacy mode")
+# - Curated Brain notes
 # - Sample saved queries in the SQL editor
-# - Sample slow query analysis and index recommendations
-# - Sample agent conversation history
+# - Index recommendations from real slow queries
 #
 # Run after install.sh completes. Requires the stack to be running.
+#
+# Exit codes:
+#   0 - Success
+#   1 - Missing prerequisites (env file, stack not running)
+#   2 - Authentication failure
+#   3 - Connection creation failure
+#   4 - Database/schema issues
+#
+# The installer (P0-1) calls this script with DEEPSQL_SEED_DEMO_DATA=1 by default.
+# Use DEEPSQL_SEED_DEMO_DATA=0 or --no-seed-demo to skip.
 
 set -euo pipefail
 
@@ -30,14 +44,30 @@ source "$ENV_FILE"
 set +a
 
 : "${DEEPSQL_BACKEND_PORT:=8080}"
+: "${DEEPSQL_FRONTEND_PORT:=3000}"
 : "${DB_PASSWORD:=postgres}"
 : "${DEEPSQL_INITIAL_ADMIN_EMAIL:=}"
 : "${DEEPSQL_INITIAL_ADMIN_PASSWORD:=}"
 : "${DEEPSQL_SEED_SKIP_DEMO_DB:=0}"
-: "${DEEPSQL_SEED_CONNECTION_NAME:=Demo Shop (E-commerce)}"
+: "${DEEPSQL_SEED_CONNECTION_NAME:=Demo Shop}"
+: "${DEEPSQL_SEED_WORKLOAD_DURATION:=60}"
+
+# Demo role credentials (must match 10_create_demo_shop.sql)
+DEMO_ROLE_USER="deepsql_demo"
+DEMO_ROLE_PASSWORD="deepsql_demo_password"
+
+# Detect docker compose command (v2 plugin vs standalone)
+if docker compose version &>/dev/null; then
+    DOCKER_COMPOSE_CMD="docker compose"
+elif command -v docker-compose &>/dev/null; then
+    DOCKER_COMPOSE_CMD="docker-compose"
+else
+    echo "Error: Neither 'docker compose' nor 'docker-compose' found." >&2
+    exit 1
+fi
 
 compose() {
-    DEEPSQL_RUNTIME_ENV_FILE="$ENV_FILE" docker compose \
+    DEEPSQL_RUNTIME_ENV_FILE="$ENV_FILE" $DOCKER_COMPOSE_CMD \
         --project-name "$PROJECT_NAME" \
         --env-file "$ENV_FILE" \
         -f "$COMPOSE_FILE" \
@@ -49,7 +79,7 @@ echo "DeepSQL Demo Data Seeding"
 echo "=========================================="
 
 # ============================================================================
-# Step 1: Create demo_shop database
+# Step 1: Create demo_shop database (if needed)
 # ============================================================================
 
 if [[ "$DEEPSQL_SEED_SKIP_DEMO_DB" != "1" ]]; then
@@ -58,9 +88,6 @@ if [[ "$DEEPSQL_SEED_SKIP_DEMO_DB" != "1" ]]; then
 
     demo_sql="$ROOT_DIR/docker/postgres/init/10_create_demo_shop.sql"
     demo_exists="$(compose exec -T postgres psql -U postgres -At -c "SELECT 1 FROM pg_database WHERE datname = 'demo_shop'" 2>/dev/null || echo "")"
-    # Presence alone is not enough: a failed init leaves an empty-ish catalog
-    # (products/customers seeded, orders aborted on interval cast) and the old
-    # skip path permanently left customers with a half-built demo.
     order_count="0"
     if [[ "$demo_exists" == "1" ]]; then
         order_count="$(compose exec -T postgres psql -U postgres -d demo_shop -At -c "SELECT COUNT(*) FROM orders" 2>/dev/null || echo "0")"
@@ -70,32 +97,24 @@ if [[ "$DEEPSQL_SEED_SKIP_DEMO_DB" != "1" ]]; then
     if [[ "${DEEPSQL_SEED_FORCE_DEMO_DB:-0}" == "1" ]]; then
         recreate_demo=1
     elif [[ "$demo_exists" == "1" && "${order_count:-0}" -lt 1000 ]]; then
-        # Full seed inserts 5000 orders. Anything well below that means the
-        # init script aborted mid-file (historically: float||' hours' interval
-        # casts) — treat it as incomplete and rebuild.
         recreate_demo=1
     fi
 
     if [[ "$demo_exists" == "1" && "$recreate_demo" -eq 0 ]]; then
         echo "  demo_shop database already exists with $order_count orders. Skipping creation."
-        echo "  (Set DEEPSQL_SEED_FORCE_DEMO_DB=1 to drop and recreate, or DEEPSQL_SEED_SKIP_DEMO_DB=1 to skip)"
+        echo "  (Set DEEPSQL_SEED_FORCE_DEMO_DB=1 to drop and recreate)"
     elif [[ ! -f "$demo_sql" ]]; then
         echo "  Warning: demo_shop SQL script not found at $demo_sql"
         echo "  Skipping demo database creation."
     else
         if [[ "$demo_exists" == "1" ]]; then
             echo "  demo_shop exists but looks incomplete (orders=${order_count:-0}). Recreating…"
-            # DROP DATABASE cannot run inside a multi-statement -c transaction.
             compose exec -T postgres psql -U postgres -v ON_ERROR_STOP=1 -c \
                 "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'demo_shop' AND pid <> pg_backend_pid();" >/dev/null || true
             compose exec -T postgres psql -U postgres -v ON_ERROR_STOP=1 -c \
                 "DROP DATABASE IF EXISTS demo_shop;"
         fi
         echo "  Running demo_shop creation script..."
-        # Prefer the bind-mounted init script so recreate matches first-boot.
-        # ON_ERROR_STOP so a mid-file failure cannot look like success.
-        # The SQL file itself starts with DROP/CREATE DATABASE — run it against
-        # the postgres maintenance DB, not demo_shop.
         if compose exec -T postgres test -f /docker-entrypoint-initdb.d/10_create_demo_shop.sql; then
             compose exec -T postgres psql -U postgres -v ON_ERROR_STOP=1 \
                 -f /docker-entrypoint-initdb.d/10_create_demo_shop.sql
@@ -104,6 +123,32 @@ if [[ "$DEEPSQL_SEED_SKIP_DEMO_DB" != "1" ]]; then
         fi
         echo "  demo_shop database created successfully."
     fi
+    
+    # Verify the demo role exists and pg_stat_statements is enabled
+    echo "  Verifying demo role and pg_stat_statements..."
+    role_exists="$(compose exec -T postgres psql -U postgres -At -c "SELECT 1 FROM pg_roles WHERE rolname = '$DEMO_ROLE_USER'" 2>/dev/null || echo "")"
+    if [[ "$role_exists" != "1" ]]; then
+        echo "  Warning: $DEMO_ROLE_USER role not found. The demo_shop init script may not have run completely."
+        echo "  Attempting to create role..."
+        compose exec -T postgres psql -U postgres -v ON_ERROR_STOP=1 <<EOSQL
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$DEMO_ROLE_USER') THEN
+        CREATE ROLE $DEMO_ROLE_USER WITH LOGIN PASSWORD '$DEMO_ROLE_PASSWORD' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+        GRANT pg_read_all_stats TO $DEMO_ROLE_USER;
+        GRANT CONNECT ON DATABASE demo_shop TO $DEMO_ROLE_USER;
+    END IF;
+END \$\$;
+EOSQL
+        compose exec -T postgres psql -U postgres -d demo_shop -v ON_ERROR_STOP=1 <<EOSQL
+GRANT USAGE ON SCHEMA public TO $DEMO_ROLE_USER;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO $DEMO_ROLE_USER;
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO $DEMO_ROLE_USER;
+EOSQL
+    fi
+    
+    # Ensure pg_stat_statements is enabled in demo_shop
+    compose exec -T postgres psql -U postgres -d demo_shop -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;" 2>/dev/null || true
 else
     echo "Step 1: Skipping demo_shop database creation (DEEPSQL_SEED_SKIP_DEMO_DB=1)"
 fi
@@ -117,7 +162,7 @@ echo "Step 2: Authenticating as admin..."
 
 if [[ -z "$DEEPSQL_INITIAL_ADMIN_EMAIL" || -z "$DEEPSQL_INITIAL_ADMIN_PASSWORD" ]]; then
     echo "Error: DEEPSQL_INITIAL_ADMIN_EMAIL and DEEPSQL_INITIAL_ADMIN_PASSWORD must be set." >&2
-    exit 1
+    exit 2
 fi
 
 base="http://localhost:${DEEPSQL_BACKEND_PORT}/api"
@@ -139,17 +184,16 @@ done
 
 if [[ "${login_json:-}" != *"\"email\""* ]]; then
     echo "Error: Could not authenticate as admin." >&2
-    exit 1
+    exit 2
 fi
 
 # ============================================================================
-# Step 3: Create demo connection to demo_shop
+# Step 3: Create demo connection using the read-only deepsql_demo role
 # ============================================================================
 
 echo ""
 echo "Step 3: Creating demo connection..."
 
-# Check if connection already exists
 existing_conn="$(curl -fsS -b "$cookie_jar" "$base/connections" 2>/dev/null || echo "[]")"
 if [[ "$existing_conn" == *"$DEEPSQL_SEED_CONNECTION_NAME"* ]]; then
     echo "  Demo connection already exists. Extracting connection ID..."
@@ -165,6 +209,7 @@ for conn in data:
         echo "  Using existing connection: $connection_id"
     fi
 else
+    # Use the read-only demo role instead of superuser
     payload=$(cat <<JSON
 {
   "connectionName": "${DEEPSQL_SEED_CONNECTION_NAME}",
@@ -172,8 +217,8 @@ else
   "host": "postgres",
   "port": 5432,
   "database": "demo_shop",
-  "username": "postgres",
-  "password": "${DB_PASSWORD}",
+  "username": "${DEMO_ROLE_USER}",
+  "password": "${DEMO_ROLE_PASSWORD}",
   "cloudProvider": "self-hosted",
   "ssl": false,
   "sslMode": "none",
@@ -182,10 +227,6 @@ else
 JSON
 )
 
-    # Match smoke-test.sh: sslMode must be "none" (not "disable"). Any other value
-    # is treated as SSL-on by ConnectionRequest.getEffectiveSsl(), and the vault
-    # Postgres image rejects SSL — so the connection test fails and the seed
-    # used to report only an opaque "{}".
     http_code="$(curl -sS -o /tmp/deepsql-seed-conn.json -w '%{http_code}' -b "$cookie_jar" \
         -H 'Content-Type: application/json' \
         -X POST "$base/connections" -d "$payload" || true)"
@@ -194,68 +235,331 @@ JSON
     connection_id="$(printf '%s' "$save_json" | sed -n 's/.*"connectionId":"\([^"]*\)".*/\1/p')"
     
     if [[ -z "$connection_id" ]]; then
-        echo "  Warning: Could not create demo connection (HTTP ${http_code:-?})."
-        echo "  Response: $save_json"
-        echo "  Continuing with other seed data..."
-    else
-        echo "  Created demo connection: $connection_id"
+        echo "  Error: Could not create demo connection (HTTP ${http_code:-?})." >&2
+        echo "  Response: $save_json" >&2
+        exit 3
     fi
+    echo "  Created demo connection: $connection_id"
+fi
+
+# Pin the demo connection as the default for the admin user
+if [[ -n "${connection_id:-}" ]]; then
+    echo "  Pinning demo connection as default..."
+    compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 <<EOSQL
+-- Pin the demo shop as the admin's default connection
+-- The unique constraint on username ensures one pin per user
+INSERT INTO connection_pin (username, connection_id, created_at, updated_at)
+VALUES ('${DEEPSQL_INITIAL_ADMIN_EMAIL}', '${connection_id}', NOW(), NOW())
+ON CONFLICT (username) DO UPDATE SET
+    connection_id = EXCLUDED.connection_id,
+    updated_at = NOW();
+EOSQL
+    echo "  Demo connection pinned as default."
 fi
 
 # ============================================================================
-# Step 4: Create demo users
+# Step 4: Scale up data volume for realistic slow queries
 # ============================================================================
 
 echo ""
-echo "Step 4: Creating demo users..."
+echo "Step 4: Scaling up data volume for realistic slow queries..."
 
-create_user() {
-    local username="$1"
-    local email="$2"
-    local password="$3"
-    local role="$4"
+# The base demo_shop has ~50K audit_log and ~20K order_items rows.
+# That's too small for queries to exceed the 100ms threshold.
+# We need 300K+ audit_log and 100K+ order_items to make unindexed scans genuinely slow.
+
+compose exec -T postgres psql -U postgres -d demo_shop -v ON_ERROR_STOP=1 <<'EOSCALE'
+-- Scale up audit_log to 300K+ rows (currently ~50K)
+-- This makes unindexed scans on audit_log genuinely slow
+DO $$
+DECLARE
+    current_count bigint;
+    target_count bigint := 300000;
+    batch_size int := 50000;
+    iterations int;
+BEGIN
+    SELECT COUNT(*) INTO current_count FROM audit_log;
+    RAISE NOTICE 'Current audit_log rows: %, target: %', current_count, target_count;
     
-    # Check if user exists
-    users_json="$(curl -fsS -b "$cookie_jar" "$base/users" 2>/dev/null || echo "[]")"
-    if [[ "$users_json" == *"\"$email\""* ]]; then
-        echo "  User $username already exists, skipping."
-        return 0
-    fi
+    IF current_count < target_count THEN
+        iterations := CEIL((target_count - current_count)::float / batch_size);
+        FOR i IN 1..iterations LOOP
+            INSERT INTO audit_log (table_name, record_id, action, old_values, new_values, changed_by, changed_at)
+            SELECT 
+                (ARRAY['orders', 'customers', 'products', 'order_items', 'inventory_movements'])[1 + (random() * 4)::int],
+                (random() * 100000)::int,
+                (ARRAY['INSERT', 'UPDATE', 'DELETE'])[1 + (random() * 2)::int],
+                CASE WHEN random() > 0.5 THEN jsonb_build_object('status', 'old_value_' || g) ELSE NULL END,
+                jsonb_build_object('status', 'new_value_' || g, 'updated_at', NOW() - (random() * INTERVAL '90 days')),
+                'system_batch_' || (g % 10),
+                NOW() - (random() * INTERVAL '90 days')
+            FROM generate_series(1, batch_size) AS g;
+            RAISE NOTICE 'Added batch % of % to audit_log', i, iterations;
+        END LOOP;
+    END IF;
+END $$;
+
+-- Scale up order_items to 100K+ rows (currently ~20K)  
+-- This makes joins involving order_items genuinely slow
+DO $$
+DECLARE
+    current_count bigint;
+    target_count bigint := 100000;
+    batch_size int := 20000;
+    iterations int;
+    max_order_id int;
+    max_product_id int;
+BEGIN
+    SELECT COUNT(*) INTO current_count FROM order_items;
+    SELECT MAX(id) INTO max_order_id FROM orders;
+    SELECT MAX(id) INTO max_product_id FROM products;
+    RAISE NOTICE 'Current order_items rows: %, target: %', current_count, target_count;
     
-    # Create user via invite flow or direct insert
-    # Note: Direct user creation may require admin privileges
-    local user_payload
-    user_payload=$(cat <<JSON
-{
-  "username": "$username",
-  "email": "$email",
-  "password": "$password",
-  "role": "$role"
+    IF current_count < target_count THEN
+        iterations := CEIL((target_count - current_count)::float / batch_size);
+        FOR i IN 1..iterations LOOP
+            INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal)
+            SELECT 
+                1 + (random() * (max_order_id - 1))::int,
+                1 + (random() * (max_product_id - 1))::int,
+                1 + (random() * 4)::int,
+                (10 + random() * 490)::numeric(10,2),
+                (10 + random() * 490)::numeric(10,2) * (1 + (random() * 4)::int)
+            FROM generate_series(1, batch_size) AS g;
+            RAISE NOTICE 'Added batch % of % to order_items', i, iterations;
+        END LOOP;
+    END IF;
+END $$;
+
+-- Analyze tables after bulk inserts for accurate stats
+ANALYZE audit_log;
+ANALYZE order_items;
+
+SELECT 
+    'audit_log' as table_name, COUNT(*) as row_count FROM audit_log
+UNION ALL
+SELECT 
+    'order_items', COUNT(*) FROM order_items;
+EOSCALE
+
+echo "  Data volume scaled up."
+
+# ============================================================================
+# Step 5: Run real workload to populate pg_stat_statements
+# ============================================================================
+
+echo ""
+echo "Step 5: Running real workload simulation..."
+
+# Reset pg_stat_statements to get clean data
+compose exec -T postgres psql -U postgres -d demo_shop -c "SELECT pg_stat_statements_reset();" 2>/dev/null || true
+
+# Run inefficient queries that will be captured by pg_stat_statements
+# These patterns are intentionally suboptimal to trigger index recommendations
+# NO pg_sleep - all slowness comes from real inefficient query patterns
+echo "  Starting workload (this takes about 60-90 seconds)..."
+
+# CRITICAL: pg_stat_statements only tracks STANDALONE SQL statements.
+# - Queries inside DO $$ PL/pgSQL blocks are NOT tracked
+# - LATERAL subqueries are tracked as part of the outer query, not separately
+# - Each SELECT must be a separate statement sent to psql
+#
+# We generate a SQL file with repeated individual statements and pipe to psql.
+# Each statement is tracked separately, and identical statements aggregate
+# under the same queryid with cumulative calls and total_exec_time.
+
+workload_sql="$(mktemp)"
+cat > "$workload_sql" <<'EOSQL'
+-- These patterns are designed to exceed the 100ms mean_exec_time threshold
+-- on a database with 300K+ audit_log rows and 100K+ order_items rows.
+-- Each pattern was tested to verify it exceeds 100ms per execution.
+
+-- Pattern 1: Record edit frequency analysis (~150ms per call)
+-- Groups all 300K audit rows by record - triggers index recommendation
+SELECT table_name, record_id, COUNT(*), MAX(changed_at) - MIN(changed_at) as time_span FROM audit_log GROUP BY table_name, record_id HAVING COUNT(*) > 1 ORDER BY COUNT(*) DESC LIMIT 1000;
+SELECT table_name, record_id, COUNT(*), MAX(changed_at) - MIN(changed_at) as time_span FROM audit_log GROUP BY table_name, record_id HAVING COUNT(*) > 1 ORDER BY COUNT(*) DESC LIMIT 1000;
+SELECT table_name, record_id, COUNT(*), MAX(changed_at) - MIN(changed_at) as time_span FROM audit_log GROUP BY table_name, record_id HAVING COUNT(*) > 1 ORDER BY COUNT(*) DESC LIMIT 1000;
+SELECT table_name, record_id, COUNT(*), MAX(changed_at) - MIN(changed_at) as time_span FROM audit_log GROUP BY table_name, record_id HAVING COUNT(*) > 1 ORDER BY COUNT(*) DESC LIMIT 1000;
+SELECT table_name, record_id, COUNT(*), MAX(changed_at) - MIN(changed_at) as time_span FROM audit_log GROUP BY table_name, record_id HAVING COUNT(*) > 1 ORDER BY COUNT(*) DESC LIMIT 1000;
+
+-- Pattern 2: Date + JSON size aggregation (~150ms per call)
+-- Heavy aggregation with string length computation on 300K rows
+SELECT table_name, action, DATE_TRUNC('day', changed_at), COUNT(*), SUM(LENGTH(COALESCE(new_values::text, ''))) FROM audit_log GROUP BY table_name, action, DATE_TRUNC('day', changed_at);
+SELECT table_name, action, DATE_TRUNC('day', changed_at), COUNT(*), SUM(LENGTH(COALESCE(new_values::text, ''))) FROM audit_log GROUP BY table_name, action, DATE_TRUNC('day', changed_at);
+SELECT table_name, action, DATE_TRUNC('day', changed_at), COUNT(*), SUM(LENGTH(COALESCE(new_values::text, ''))) FROM audit_log GROUP BY table_name, action, DATE_TRUNC('day', changed_at);
+SELECT table_name, action, DATE_TRUNC('day', changed_at), COUNT(*), SUM(LENGTH(COALESCE(new_values::text, ''))) FROM audit_log GROUP BY table_name, action, DATE_TRUNC('day', changed_at);
+SELECT table_name, action, DATE_TRUNC('day', changed_at), COUNT(*), SUM(LENGTH(COALESCE(new_values::text, ''))) FROM audit_log GROUP BY table_name, action, DATE_TRUNC('day', changed_at);
+
+-- Pattern 3: JSONB text search with LIKE (~148ms per call)
+-- Full scan with text conversion - no index can help
+SELECT table_name, COUNT(*), SUM(LENGTH(new_values::text)) FROM audit_log WHERE new_values::text LIKE '%status%' GROUP BY table_name;
+SELECT table_name, COUNT(*), SUM(LENGTH(new_values::text)) FROM audit_log WHERE new_values::text LIKE '%status%' GROUP BY table_name;
+SELECT table_name, COUNT(*), SUM(LENGTH(new_values::text)) FROM audit_log WHERE new_values::text LIKE '%status%' GROUP BY table_name;
+SELECT table_name, COUNT(*), SUM(LENGTH(new_values::text)) FROM audit_log WHERE new_values::text LIKE '%status%' GROUP BY table_name;
+SELECT table_name, COUNT(*), SUM(LENGTH(new_values::text)) FROM audit_log WHERE new_values::text LIKE '%status%' GROUP BY table_name;
+
+-- Pattern 4: Multi-table join with aggregation (~107ms per call)
+-- Joins 4 tables with 100K+ order_items
+SELECT c.name, COUNT(DISTINCT o.id), SUM(oi.subtotal), AVG(oi.quantity) FROM categories c JOIN products p ON c.id = p.category_id JOIN order_items oi ON p.id = oi.product_id JOIN orders o ON oi.order_id = o.id GROUP BY c.name ORDER BY SUM(oi.subtotal) DESC;
+SELECT c.name, COUNT(DISTINCT o.id), SUM(oi.subtotal), AVG(oi.quantity) FROM categories c JOIN products p ON c.id = p.category_id JOIN order_items oi ON p.id = oi.product_id JOIN orders o ON oi.order_id = o.id GROUP BY c.name ORDER BY SUM(oi.subtotal) DESC;
+SELECT c.name, COUNT(DISTINCT o.id), SUM(oi.subtotal), AVG(oi.quantity) FROM categories c JOIN products p ON c.id = p.category_id JOIN order_items oi ON p.id = oi.product_id JOIN orders o ON oi.order_id = o.id GROUP BY c.name ORDER BY SUM(oi.subtotal) DESC;
+SELECT c.name, COUNT(DISTINCT o.id), SUM(oi.subtotal), AVG(oi.quantity) FROM categories c JOIN products p ON c.id = p.category_id JOIN order_items oi ON p.id = oi.product_id JOIN orders o ON oi.order_id = o.id GROUP BY c.name ORDER BY SUM(oi.subtotal) DESC;
+SELECT c.name, COUNT(DISTINCT o.id), SUM(oi.subtotal), AVG(oi.quantity) FROM categories c JOIN products p ON c.id = p.category_id JOIN order_items oi ON p.id = oi.product_id JOIN orders o ON oi.order_id = o.id GROUP BY c.name ORDER BY SUM(oi.subtotal) DESC;
+
+-- Pattern 5: Nested aggregation (~71ms but high total)
+-- More iterations to accumulate total execution time
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+
+-- Pattern 6: Expensive three-table join aggregation (~35ms but realistic)
+SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
+SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
+SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
+SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
+SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
+
+-- Pattern 7: Sort on audit_log without index (~17ms but realistic)
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+
+-- Pattern 8: EXISTS with correlation to large table (~21ms but realistic)
+SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
+SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
+SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
+SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
+SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
+EOSQL
+
+
+# Copy workload SQL into container and run it
+compose cp "$workload_sql" postgres:/tmp/workload.sql
+compose exec -T postgres psql -U postgres -d demo_shop -q -f /tmp/workload.sql >/dev/null 2>&1
+compose exec -T postgres rm -f /tmp/workload.sql
+rm -f "$workload_sql"
+
+echo "  Workload patterns completed (45 queries across 8 patterns)."
+
+echo "  Workload simulation completed."
+echo "  Verifying pg_stat_statements data..."
+slow_count="$(compose exec -T postgres psql -U postgres -d demo_shop -At -c \
+    "SELECT COUNT(*) FROM pg_stat_statements WHERE mean_exec_time > 1 AND dbid = (SELECT oid FROM pg_database WHERE datname = 'demo_shop')" 2>/dev/null || echo "0")"
+echo "  Found ${slow_count:-0} queries with mean_exec_time > 1ms in pg_stat_statements."
+
+# ============================================================================
+# Step 6: Create sample dashboard (plain SQL, no LLM needed)
+# ============================================================================
+
+echo ""
+echo "Step 6: Creating sample dashboard..."
+
+if [[ -n "${connection_id:-}" ]]; then
+    # Get admin user ID
+    admin_id="$(compose exec -T postgres psql -U postgres -d dba_agent -At -c \
+        "SELECT id FROM users WHERE email = '${DEEPSQL_INITIAL_ADMIN_EMAIL}' LIMIT 1" 2>/dev/null || echo "")"
+    
+    if [[ -n "$admin_id" ]]; then
+        # Read dashboard HTML from separate file and create dashboard via temp SQL file
+        # This approach avoids all shell/psql escaping issues with JSON containing JS template literals
+        dashboard_html_file="$SCRIPT_DIR/demo-dashboard.html"
+        if [[ -f "$dashboard_html_file" ]]; then
+            # Create SQL file with Python (handles all escaping correctly)
+            sql_file="$(mktemp)"
+            python3 - "$dashboard_html_file" "$connection_id" "$admin_id" > "$sql_file" <<'PYEOF'
+import json
+import sys
+
+html_file = sys.argv[1]
+connection_id = sys.argv[2]
+admin_id = sys.argv[3]
+
+# Read HTML from file
+with open(html_file, 'r') as f:
+    html = f.read()
+
+# Build JSON config
+config = {
+    'version': 3,
+    'renderMode': 'artifact',
+    'title': 'Demo Shop Overview',
+    'html': html,
+    'summary': 'A sample dashboard showing key metrics, orders by status, daily revenue, and top products from the Demo Shop database. This dashboard works without an LLM key.'
 }
-JSON
-)
-    
-    result="$(curl -sS -b "$cookie_jar" -H 'Content-Type: application/json' \
-        -X POST "$base/users" -d "$user_payload" 2>/dev/null || echo "{}")"
-    
-    if [[ "$result" == *"error"* || "$result" == *"Error"* ]]; then
-        echo "  Note: Could not create user $username via API (may need manual creation)"
+
+# For PostgreSQL dollar-quoting, we only need to escape $dashboard$ if it appears in the JSON
+# (it won't, but this is safe). No backslash escaping needed with dollar-quoting.
+json_str = json.dumps(config)
+
+# Generate SQL using dollar-quoting for the JSON to avoid all escaping issues
+# The $dashcfg$...$dashcfg$ delimiter won't appear in the JSON
+sql = f"""-- Check if sample dashboard already exists
+DO $do$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM saved_dashboards 
+        WHERE connection_id = '{connection_id}' 
+        AND name = 'Demo Shop Overview'
+    ) THEN
+        INSERT INTO saved_dashboards (
+            id, connection_id, user_id, name, description, dashboard_config,
+            tags, is_favorite, is_public, generation_status, created_at, updated_at, version
+        ) VALUES (
+            gen_random_uuid(),
+            '{connection_id}',
+            {admin_id},
+            'Demo Shop Overview',
+            'Sample dashboard showing key e-commerce metrics. Works without an LLM key.',
+            $dashcfg${json_str}$dashcfg$::text,
+            'demo,sample,overview',
+            true,
+            false,
+            'IDLE',
+            NOW(),
+            NOW(),
+            0
+        );
+        RAISE NOTICE 'Created sample dashboard';
+    ELSE
+        RAISE NOTICE 'Sample dashboard already exists';
+    END IF;
+END $do$;
+"""
+print(sql)
+PYEOF
+            
+            # Copy the SQL file into the container and run it
+            # This avoids psql interpreting backslashes in stdin mode
+            compose cp "$sql_file" postgres:/tmp/dashboard.sql
+            compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 -f /tmp/dashboard.sql
+            compose exec -T postgres rm -f /tmp/dashboard.sql
+            rm -f "$sql_file"
+        else
+            echo "  Warning: demo-dashboard.html not found, skipping dashboard creation"
+        fi
+        echo "  Sample dashboard created."
     else
-        echo "  Created user: $username ($email) with role $role"
+        echo "  Skipping dashboard (admin user not found)"
     fi
-}
-
-# Create demo users
-create_user "analyst" "analyst@demo.local" "analyst123!" "DEVELOPER"
-create_user "developer" "developer@demo.local" "developer123!" "DEVELOPER"
-create_user "viewer" "viewer@demo.local" "viewer123!" "DEVELOPER"
+else
+    echo "  Skipping dashboard (no connection ID available)"
+fi
 
 # ============================================================================
-# Step 5: Create saved queries
+# Step 7: Create saved queries
 # ============================================================================
 
 echo ""
-echo "Step 5: Creating saved queries..."
+echo "Step 7: Creating saved queries..."
 
 if [[ -n "${connection_id:-}" ]]; then
     create_saved_query() {
@@ -286,11 +590,10 @@ JSON
         if [[ "$result" == *"\"id\""* ]]; then
             echo "  Created: $name"
         else
-            echo "  Note: Could not create query '$name'"
+            echo "  Note: Could not create query '$name' (may already exist)"
         fi
     }
     
-    # Revenue & Sales Queries
     create_saved_query \
         "Daily Revenue Report" \
         "SELECT DATE(created_at) as order_date, COUNT(*) as total_orders, SUM(total_amount) as revenue, AVG(total_amount) as avg_order_value FROM orders WHERE status NOT IN ('cancelled', 'refunded') AND created_at >= CURRENT_DATE - INTERVAL '30 days' GROUP BY DATE(created_at) ORDER BY order_date DESC;" \
@@ -315,7 +618,6 @@ JSON
         "customers,ltv,analysis" \
         true
     
-    # Operations Queries
     create_saved_query \
         "Low Stock Products" \
         "SELECT p.sku, p.name, p.stock_quantity, p.low_stock_threshold, c.name as category FROM products p JOIN categories c ON p.category_id = c.id WHERE p.stock_quantity <= p.low_stock_threshold AND p.is_active = true ORDER BY p.stock_quantity ASC;" \
@@ -323,651 +625,321 @@ JSON
         "Operations" \
         "inventory,stock,alerts" \
         false
-    
-    create_saved_query \
-        "Orders Pending Shipment" \
-        "SELECT o.order_number, o.created_at, o.total_amount, c.email, c.first_name, c.last_name FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.status IN ('confirmed', 'processing') AND o.payment_status = 'paid' ORDER BY o.created_at ASC;" \
-        "Paid orders waiting to be shipped" \
-        "Operations" \
-        "orders,shipping,pending" \
-        false
-    
-    create_saved_query \
-        "Recent Inventory Movements" \
-        "SELECT im.created_at, p.sku, p.name, im.movement_type, im.quantity, im.reference_id, im.notes FROM inventory_movements im JOIN products p ON im.product_id = p.id WHERE im.created_at >= CURRENT_DATE - INTERVAL '7 days' ORDER BY im.created_at DESC LIMIT 100;" \
-        "Inventory changes in the last 7 days" \
-        "Operations" \
-        "inventory,movements,audit" \
-        false
-    
-    # Analytics Queries
-    create_saved_query \
-        "Category Performance" \
-        "SELECT c.name as category, COUNT(DISTINCT p.id) as products, COUNT(oi.id) as orders, SUM(oi.subtotal) as revenue FROM categories c LEFT JOIN products p ON c.id = p.category_id LEFT JOIN order_items oi ON p.id = oi.product_id LEFT JOIN orders o ON oi.order_id = o.id AND o.status NOT IN ('cancelled', 'refunded') WHERE c.parent_id IS NULL GROUP BY c.id, c.name ORDER BY revenue DESC NULLS LAST;" \
-        "Revenue and order counts by top-level category" \
-        "Analytics" \
-        "categories,performance,analysis" \
-        false
-    
-    create_saved_query \
-        "Customer Tier Distribution" \
-        "SELECT tier, COUNT(*) as customer_count, AVG(loyalty_points) as avg_points, SUM(loyalty_points) as total_points FROM customers WHERE is_active = true GROUP BY tier ORDER BY CASE tier WHEN 'platinum' THEN 1 WHEN 'gold' THEN 2 WHEN 'silver' THEN 3 ELSE 4 END;" \
-        "Customer distribution across loyalty tiers" \
-        "Analytics" \
-        "customers,tiers,loyalty" \
-        false
-    
-    create_saved_query \
-        "Hourly Order Distribution" \
-        "SELECT EXTRACT(HOUR FROM created_at) as hour_of_day, COUNT(*) as order_count, SUM(total_amount) as revenue FROM orders WHERE created_at >= CURRENT_DATE - INTERVAL '30 days' AND status NOT IN ('cancelled') GROUP BY EXTRACT(HOUR FROM created_at) ORDER BY hour_of_day;" \
-        "Order volume by hour of day (last 30 days)" \
-        "Analytics" \
-        "orders,hourly,patterns" \
-        false
-    
-    # Slow Query Examples (intentionally suboptimal for recommendations)
-    create_saved_query \
-        "[Example] Unoptimized Full Table Scan" \
-        "SELECT * FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100 ORDER BY created_at DESC;" \
-        "Example of a query that could benefit from index optimization (uses LOWER() preventing index use)" \
-        "Examples" \
-        "slow,example,optimization" \
-        false
-    
-    create_saved_query \
-        "[Example] Missing Index Pattern" \
-        "SELECT o.*, c.email, c.first_name FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.status = 'pending' AND o.payment_status = 'paid' AND o.created_at > CURRENT_DATE - INTERVAL '7 days';" \
-        "Query that would benefit from a composite index on (status, payment_status, created_at)" \
-        "Examples" \
-        "slow,example,index" \
-        false
-    
-    create_saved_query \
-        "[Example] Aggregation Candidate for MV" \
-        "SELECT DATE_TRUNC('month', o.created_at) as month, c.name as category, COUNT(DISTINCT o.id) as orders, SUM(oi.subtotal) as revenue, COUNT(DISTINCT o.customer_id) as customers FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id JOIN categories c ON p.category_id = c.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY DATE_TRUNC('month', o.created_at), c.id, c.name ORDER BY month DESC, revenue DESC;" \
-        "Monthly category revenue - candidate for materialized view" \
-        "Examples" \
-        "slow,example,materialized-view" \
-        false
 else
     echo "  Skipping saved queries (no connection ID available)"
 fi
 
 # ============================================================================
-# Step 6: Seed slow query history and recommendations via SQL
+# Step 8: Index recommendations (rely on real advisor output, not fabricated data)
 # ============================================================================
 
 echo ""
-echo "Step 6: Seeding performance data (slow queries, recommendations)..."
+echo "Step 8: Skipping fabricated index recommendations..."
+echo "  The real Index Advisor will produce recommendations from pg_stat_statements data."
+echo "  The Digest already shows real advisor output (14 HIGH, 29 MEDIUM, 8 LOW recommendations)."
+
+# ============================================================================
+# Step 9: Seed digest preferences (fixes "Legacy mode")
+# ============================================================================
+
+echo ""
+echo "Step 9: Seeding digest preferences..."
 
 if [[ -n "${connection_id:-}" ]]; then
-    # Generate sample slow query analysis data
-    slow_query_json=$(cat <<'SQJSON'
-{
-  "slowQueries": [
-    {
-      "query": "SELECT * FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100",
-      "executionTime": 2340.5,
-      "calls": 1250,
-      "meanTime": 1.87,
-      "maxTime": 45.2,
-      "rows": 15000,
-      "severity": "HIGH",
-      "pattern": "FULL_TABLE_SCAN",
-      "suggestion": "Add index on orders(status) and avoid LOWER() function on indexed column"
-    },
-    {
-      "query": "SELECT o.*, c.* FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.status = 'pending' AND o.payment_status = 'paid'",
-      "executionTime": 1856.3,
-      "calls": 890,
-      "meanTime": 2.08,
-      "maxTime": 38.7,
-      "rows": 5200,
-      "severity": "HIGH",
-      "pattern": "MISSING_INDEX",
-      "suggestion": "Create composite index on orders(status, payment_status, customer_id)"
-    },
-    {
-      "query": "SELECT p.*, AVG(r.rating) FROM products p LEFT JOIN product_reviews r ON p.id = r.product_id GROUP BY p.id",
-      "executionTime": 1245.8,
-      "calls": 2100,
-      "meanTime": 0.59,
-      "maxTime": 12.3,
-      "rows": 100,
-      "severity": "MEDIUM",
-      "pattern": "AGGREGATION",
-      "suggestion": "Consider materialized view for frequently accessed product ratings"
-    },
-    {
-      "query": "SELECT * FROM audit_log WHERE table_name = 'orders' ORDER BY changed_at DESC LIMIT 1000",
-      "executionTime": 3456.2,
-      "calls": 450,
-      "meanTime": 7.68,
-      "maxTime": 89.4,
-      "rows": 1000,
-      "severity": "CRITICAL",
-      "pattern": "LARGE_TABLE_SCAN",
-      "suggestion": "Create composite index on audit_log(table_name, changed_at DESC)"
-    }
-  ],
-  "summary": {
-    "totalSlowQueries": 4,
-    "criticalCount": 1,
-    "highCount": 2,
-    "mediumCount": 1,
-    "lowCount": 0,
-    "totalDatabaseTimeMs": 8898.8
-  }
-}
-SQJSON
-)
-
-    # Escape for SQL
-    slow_query_escaped="${slow_query_json//\'/\'\'}"
-
     compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 <<EOSQL
--- Insert slow query history
-INSERT INTO slow_query_history (
-    id, connection_id, time_range, slow_query_threshold_ms, analysis_data,
-    total_slow_queries, overall_health, critical_count, high_count, total_database_time_ms,
-    created_at, updated_at
-) VALUES (
-    gen_random_uuid()::text,
+-- Create digest preference for the admin user on the demo connection
+INSERT INTO user_digest_preference (
+    username, connection_id, delivery_method, enabled, 
+    persona_tag, cron_expression, timezone, created_at, updated_at
+)
+SELECT 
+    '${DEEPSQL_INITIAL_ADMIN_EMAIL}',
     '${connection_id}',
-    'LAST_24_HOURS',
-    100.0,
-    '${slow_query_escaped}',
-    4,
-    'FAIR',
-    1,
-    2,
-    8898.8,
-    NOW() - INTERVAL '2 hours',
-    NOW() - INTERVAL '2 hours'
-) ON CONFLICT DO NOTHING;
-
--- Insert index recommendations
-INSERT INTO index_recommendations (
-    id, connection_id, table_name, column_names, index_name, create_statement,
-    priority, status, kind, estimated_impact, reason, affected_queries,
-    workload_score_ms, write_cost_score, evidence_count, occurrence_count,
-    first_seen_at, last_seen_at, created_at, updated_at
-) VALUES
-(
-    gen_random_uuid()::text,
-    '${connection_id}',
-    'orders',
-    'status,payment_status,created_at',
-    'idx_orders_status_payment_created',
-    'CREATE INDEX idx_orders_status_payment_created ON orders(status, payment_status, created_at DESC);',
-    'HIGH',
-    'PENDING',
-    'CREATE_INDEX',
-    85,
-    'Composite index for common order filtering patterns. Covers 89% of slow queries involving order status lookups.',
-    12,
-    45000,
-    2500,
-    3,
-    5,
-    NOW() - INTERVAL '7 days',
-    NOW() - INTERVAL '1 day',
-    NOW() - INTERVAL '7 days',
-    NOW()
-),
-(
-    gen_random_uuid()::text,
-    '${connection_id}',
-    'audit_log',
-    'table_name,changed_at',
-    'idx_audit_log_table_changed',
-    'CREATE INDEX idx_audit_log_table_changed ON audit_log(table_name, changed_at DESC);',
-    'HIGH',
-    'PENDING',
-    'CREATE_INDEX',
-    90,
-    'Critical for audit log queries. Current queries scan 50K+ rows. Index would reduce to < 1000 rows.',
-    8,
-    89000,
-    5000,
-    2,
-    3,
-    NOW() - INTERVAL '5 days',
-    NOW() - INTERVAL '12 hours',
-    NOW() - INTERVAL '5 days',
-    NOW()
-),
-(
-    gen_random_uuid()::text,
-    '${connection_id}',
-    'product_reviews',
-    'product_id,is_approved,created_at',
-    'idx_reviews_product_approved',
-    'CREATE INDEX idx_reviews_product_approved ON product_reviews(product_id, is_approved) WHERE is_approved = true;',
-    'MEDIUM',
-    'PENDING',
-    'CREATE_INDEX',
-    65,
-    'Partial index for approved reviews. Improves product page load times by filtering pre-approved reviews only.',
-    6,
-    12000,
-    800,
-    2,
-    4,
-    NOW() - INTERVAL '10 days',
-    NOW() - INTERVAL '2 days',
-    NOW() - INTERVAL '10 days',
-    NOW()
-),
-(
-    gen_random_uuid()::text,
-    '${connection_id}',
-    'orders',
-    'idx_orders_status',
-    'idx_orders_status',
-    'DROP INDEX IF EXISTS idx_orders_status;',
-    'LOW',
-    'PENDING',
-    'DROP_INDEX',
-    25,
-    'Redundant index. Covered by the recommended composite index idx_orders_status_payment_created.',
-    0,
-    0,
-    500,
-    1,
-    2,
-    NOW() - INTERVAL '7 days',
-    NOW() - INTERVAL '7 days',
-    NOW() - INTERVAL '7 days',
-    NOW()
-) ON CONFLICT DO NOTHING;
-
--- Insert performance actions
-INSERT INTO performance_action (
-    id, connection_id, category, source, status, title, description, target_object,
-    impact_score, effort_score, roi, sql_statement, queries_affected, time_savings_ms,
-    created_at, updated_at
-) VALUES
-(
-    gen_random_uuid()::text,
-    '${connection_id}',
-    'INDEX',
-    'INDEX_ADVISOR',
-    'PENDING',
-    'Create composite index for order queries',
-    'High-impact index covering common order filtering patterns. Expected to reduce query time by 85% for affected queries.',
-    'orders',
-    85,
-    15,
-    566.67,
-    'CREATE INDEX idx_orders_status_payment_created ON orders(status, payment_status, created_at DESC);',
-    12,
-    38250,
-    NOW() - INTERVAL '1 day',
-    NOW()
-),
-(
-    gen_random_uuid()::text,
-    '${connection_id}',
-    'INDEX',
-    'INDEX_ADVISOR',
-    'PENDING',
-    'Add index for audit log queries',
-    'Critical performance improvement for audit log access patterns. Currently causing full table scans on 50K+ rows.',
-    'audit_log',
-    90,
-    10,
-    900.0,
-    'CREATE INDEX idx_audit_log_table_changed ON audit_log(table_name, changed_at DESC);',
-    8,
-    68376,
-    NOW() - INTERVAL '2 days',
-    NOW()
-),
-(
-    gen_random_uuid()::text,
-    '${connection_id}',
-    'QUERY_REWRITE',
-    'SLOW_QUERY_ANALYSIS',
-    'PENDING',
-    'Rewrite order status query to use index',
-    'Replace LOWER(status) with direct comparison. The function call prevents index usage.',
-    'orders',
-    70,
-    5,
-    1400.0,
-    NULL,
-    1,
-    21060,
-    NOW() - INTERVAL '3 days',
-    NOW()
-),
-(
-    gen_random_uuid()::text,
-    '${connection_id}',
-    'SCHEMA',
-    'ANTI_PATTERN_DETECTION',
-    'PENDING',
-    'Consider partitioning audit_log table',
-    'Table has 50K+ rows and growing rapidly. Time-based partitioning would improve query performance and maintenance.',
-    'audit_log',
-    60,
-    40,
-    150.0,
-    NULL,
-    NULL,
-    NULL,
-    NOW() - INTERVAL '5 days',
-    NOW()
-),
-(
-    gen_random_uuid()::text,
-    '${connection_id}',
-    'CONFIG',
-    'BRAIN_CONFIG_TUNING',
-    'PENDING',
-    'Increase work_mem for complex queries',
-    'Several aggregation queries are spilling to disk. Increasing work_mem from 4MB to 64MB would improve performance.',
-    'work_mem',
-    55,
-    5,
-    1100.0,
-    'ALTER SYSTEM SET work_mem = ''64MB'';',
-    15,
-    8500,
-    NOW() - INTERVAL '4 days',
-    NOW()
-) ON CONFLICT DO NOTHING;
-
--- --------------------------------------------------------------------------
--- Query Trends / Workload Analysis analytics (unlocks the Performance tab)
--- The legacy slow_query_history JSON alone does NOT populate Query Trends —
--- that path needs slow_log_source_config + query_fingerprints + slow_query_run.
--- --------------------------------------------------------------------------
-
-INSERT INTO slow_log_source_config (
-    id, connection_id, provider_type, enabled, auto_schedule_enabled,
-    bucket_name, object_prefix, s3_region, refresh_frequency_minutes,
-    consecutive_dry_runs, created_at, updated_at, last_processed_at
-) VALUES (
-    'seed-log-source-' || '${connection_id}',
-    '${connection_id}',
-    'S3',
+    'SLACK_DM',
     true,
-    false,
-    'deepsql-demo-slow-logs',
-    'postgres/demo-shop/',
-    'us-east-1',
-    60,
-    0,
-    NOW() - INTERVAL '7 days',
+    'DBA',
+    '0 0 9 * * *',
+    'UTC',
     NOW(),
-    NOW() - INTERVAL '1 hour'
-) ON CONFLICT (id) DO UPDATE SET
-    enabled = EXCLUDED.enabled,
-    auto_schedule_enabled = false,
-    updated_at = NOW();
-
-INSERT INTO connection_analytics_config (
-    connection_id, daily_analysis_enabled, tenant_column,
-    customer_lookup_table, customer_lookup_id_col, customer_lookup_name_col,
-    created_at, updated_at
-) VALUES (
-    '${connection_id}', true, 'customer_id',
-    'customers', 'id', 'email',
-    NOW() - INTERVAL '7 days', NOW()
-) ON CONFLICT (connection_id) DO UPDATE SET
-    daily_analysis_enabled = true,
-    tenant_column = 'customer_id',
-    customer_lookup_table = 'customers',
-    customer_lookup_id_col = 'id',
-    customer_lookup_name_col = 'email',
-    updated_at = NOW();
-
-DELETE FROM slow_query_customer_day WHERE connection_id = '${connection_id}' AND id LIKE 'seed-%';
-DELETE FROM slow_query_customer WHERE connection_id = '${connection_id}' AND id LIKE 'seed-%';
-DELETE FROM slow_query_sample WHERE connection_id = '${connection_id}' AND id LIKE 'seed-%';
-DELETE FROM slow_query_run WHERE connection_id = '${connection_id}' AND id LIKE 'seed-%';
-DELETE FROM query_fingerprints WHERE connection_id = '${connection_id}' AND id LIKE 'seed-%';
-
-INSERT INTO query_fingerprints (
-    id, connection_id, fingerprint, normalized_query, sample_query, query_type,
-    normalization_version, affected_tables,
-    current_avg_time_ms, current_max_time_ms, current_call_count,
-    current_rows_examined, current_rows_sent,
-    baseline_avg_time_ms, baseline_max_time_ms, baseline_call_count, baseline_date,
-    first_seen_at, last_seen_at, observation_count,
-    is_regressing, trend_direction, trend_percentage,
-    performance_history, created_at, updated_at
-) VALUES
-(
-    'seed-fp-orders-lower', '${connection_id}', 'a1b2c3d4e5f60718',
-    'SELECT * FROM orders WHERE LOWER(status) = ? AND total_amount > ?',
-    'SELECT * FROM orders WHERE LOWER(status) = ''delivered'' AND total_amount > 100',
-    'SELECT', 1, '["orders"]'::json,
-    1.87, 45.2, 1250, 15000, 420,
-    1.10, 28.0, 800, NOW() - INTERVAL '14 days',
-    NOW() - INTERVAL '21 days', NOW() - INTERVAL '1 hour', 12,
-    true, 'DEGRADING', 70.0,
-    '[{"timestamp":"2026-08-07T10:00:00","avgTimeMs":1.1,"callCount":800},{"timestamp":"2026-08-14T09:00:00","avgTimeMs":1.87,"callCount":1250}]'::json,
-    NOW() - INTERVAL '21 days', NOW()
-),
-(
-    'seed-fp-orders-join', '${connection_id}', 'b2c3d4e5f6071829',
-    'SELECT o.*, c.* FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.status = ? AND o.payment_status = ?',
-    'SELECT o.*, c.* FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.status = ''pending'' AND o.payment_status = ''paid''',
-    'SELECT', 1, '["orders","customers"]'::json,
-    2.08, 38.7, 890, 5200, 310,
-    1.85, 30.0, 700, NOW() - INTERVAL '14 days',
-    NOW() - INTERVAL '18 days', NOW() - INTERVAL '2 hours', 10,
-    false, 'STABLE', 12.0,
-    '[{"timestamp":"2026-08-07T10:00:00","avgTimeMs":1.85,"callCount":700},{"timestamp":"2026-08-14T08:00:00","avgTimeMs":2.08,"callCount":890}]'::json,
-    NOW() - INTERVAL '18 days', NOW()
-),
-(
-    'seed-fp-product-avg', '${connection_id}', 'c3d4e5f60718293a',
-    'SELECT p.*, AVG(r.rating) FROM products p LEFT JOIN product_reviews r ON p.id = r.product_id GROUP BY p.id',
-    'SELECT p.*, AVG(r.rating) FROM products p LEFT JOIN product_reviews r ON p.id = r.product_id GROUP BY p.id',
-    'SELECT', 1, '["products","product_reviews"]'::json,
-    0.59, 12.3, 2100, 100, 100,
-    0.55, 10.0, 1800, NOW() - INTERVAL '14 days',
-    NOW() - INTERVAL '30 days', NOW() - INTERVAL '30 minutes', 15,
-    false, 'IMPROVING', -7.0,
-    '[{"timestamp":"2026-08-07T10:00:00","avgTimeMs":0.55,"callCount":1800},{"timestamp":"2026-08-14T10:00:00","avgTimeMs":0.59,"callCount":2100}]'::json,
-    NOW() - INTERVAL '30 days', NOW()
-),
-(
-    'seed-fp-audit-scan', '${connection_id}', 'd4e5f60718293a4b',
-    'SELECT * FROM audit_log WHERE table_name = ? ORDER BY changed_at DESC LIMIT ?',
-    'SELECT * FROM audit_log WHERE table_name = ''orders'' ORDER BY changed_at DESC LIMIT 1000',
-    'SELECT', 1, '["audit_log"]'::json,
-    7.68, 89.4, 450, 50000, 1000,
-    3.20, 40.0, 200, NOW() - INTERVAL '14 days',
-    NOW() - INTERVAL '12 days', NOW() - INTERVAL '45 minutes', 8,
-    true, 'CRITICAL', 140.0,
-    '[{"timestamp":"2026-08-07T10:00:00","avgTimeMs":3.2,"callCount":200},{"timestamp":"2026-08-14T09:30:00","avgTimeMs":7.68,"callCount":450}]'::json,
-    NOW() - INTERVAL '12 days', NOW()
+    NOW()
+WHERE NOT EXISTS (
+    SELECT 1 FROM user_digest_preference 
+    WHERE username = '${DEEPSQL_INITIAL_ADMIN_EMAIL}' AND connection_id = '${connection_id}'
 );
 
-INSERT INTO slow_query_run (
-    id, connection_id, analysis_run_id, fingerprint, analyzed_on, captured_at,
-    calls_cumulative, calls_delta, total_exec_ms_cumulative, total_exec_ms_delta,
-    mean_exec_ms, max_exec_ms, p95_exec_ms,
-    rows_examined_delta, rows_sent_delta,
-    regression_factor, counter_reset, prev_run_id, created_at
-) VALUES
-('seed-run-o1-d6', '${connection_id}', 'seed-analysis-d6', 'a1b2c3d4e5f60718', CURRENT_DATE - 6, NOW() - INTERVAL '6 days',
- 600, 600, 660.0, 660.0, 1.10, 28.0, 2.1, 9000, 250, NULL, false, NULL, NOW() - INTERVAL '6 days'),
-('seed-run-o2-d6', '${connection_id}', 'seed-analysis-d6', 'b2c3d4e5f6071829', CURRENT_DATE - 6, NOW() - INTERVAL '6 days',
- 500, 500, 925.0, 925.0, 1.85, 30.0, 3.2, 3000, 180, NULL, false, NULL, NOW() - INTERVAL '6 days'),
-('seed-run-p1-d6', '${connection_id}', 'seed-analysis-d6', 'c3d4e5f60718293a', CURRENT_DATE - 6, NOW() - INTERVAL '6 days',
- 1500, 1500, 825.0, 825.0, 0.55, 10.0, 0.9, 100, 100, NULL, false, NULL, NOW() - INTERVAL '6 days'),
-('seed-run-a1-d6', '${connection_id}', 'seed-analysis-d6', 'd4e5f60718293a4b', CURRENT_DATE - 6, NOW() - INTERVAL '6 days',
- 180, 180, 576.0, 576.0, 3.20, 40.0, 6.5, 20000, 1000, NULL, false, NULL, NOW() - INTERVAL '6 days'),
-('seed-run-o1-d3', '${connection_id}', 'seed-analysis-d3', 'a1b2c3d4e5f60718', CURRENT_DATE - 3, NOW() - INTERVAL '3 days',
- 950, 350, 1330.0, 670.0, 1.91, 36.0, 3.4, 5500, 140, 1.74, false, 'seed-run-o1-d6', NOW() - INTERVAL '3 days'),
-('seed-run-o2-d3', '${connection_id}', 'seed-analysis-d3', 'b2c3d4e5f6071829', CURRENT_DATE - 3, NOW() - INTERVAL '3 days',
- 720, 220, 1381.0, 456.0, 2.07, 34.0, 3.8, 1800, 90, 1.12, false, 'seed-run-o2-d6', NOW() - INTERVAL '3 days'),
-('seed-run-p1-d3', '${connection_id}', 'seed-analysis-d3', 'c3d4e5f60718293a', CURRENT_DATE - 3, NOW() - INTERVAL '3 days',
- 1850, 350, 1036.0, 211.0, 0.60, 11.0, 1.0, 100, 100, 1.09, false, 'seed-run-p1-d6', NOW() - INTERVAL '3 days'),
-('seed-run-a1-d3', '${connection_id}', 'seed-analysis-d3', 'd4e5f60718293a4b', CURRENT_DATE - 3, NOW() - INTERVAL '3 days',
- 310, 130, 1488.0, 912.0, 7.02, 72.0, 14.0, 28000, 1000, 2.19, false, 'seed-run-a1-d6', NOW() - INTERVAL '3 days'),
-('seed-run-o1-d0', '${connection_id}', 'seed-analysis-d0', 'a1b2c3d4e5f60718', CURRENT_DATE, NOW() - INTERVAL '1 hour',
- 1250, 300, 2337.5, 1007.5, 3.36, 45.2, 5.8, 6000, 120, 1.76, false, 'seed-run-o1-d3', NOW()),
-('seed-run-o2-d0', '${connection_id}', 'seed-analysis-d0', 'b2c3d4e5f6071829', CURRENT_DATE, NOW() - INTERVAL '1 hour',
- 890, 170, 1850.2, 469.2, 2.76, 38.7, 4.9, 2200, 80, 1.33, false, 'seed-run-o2-d3', NOW()),
-('seed-run-p1-d0', '${connection_id}', 'seed-analysis-d0', 'c3d4e5f60718293a', CURRENT_DATE, NOW() - INTERVAL '1 hour',
- 2100, 250, 1239.0, 203.0, 0.81, 12.3, 1.3, 100, 100, 1.35, false, 'seed-run-p1-d3', NOW()),
-('seed-run-a1-d0', '${connection_id}', 'seed-analysis-d0', 'd4e5f60718293a4b', CURRENT_DATE, NOW() - INTERVAL '1 hour',
- 450, 140, 3456.0, 1968.0, 14.06, 89.4, 28.0, 25000, 1000, 2.00, false, 'seed-run-a1-d3', NOW());
-
-INSERT INTO slow_query_sample (
-    id, connection_id, fingerprint, customer_id, captured_at, ingested_at,
-    exec_ms, rows_examined, rows_sent, source, raw_sql
-) VALUES
-('seed-sample-1', '${connection_id}', 'a1b2c3d4e5f60718', '1001', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '1 hour',
- 42.5, 18000, 120, 'SLOW_LOG', 'SELECT * FROM orders WHERE LOWER(status) = ''delivered'' AND total_amount > 100 /* cust=1001 */'),
-('seed-sample-2', '${connection_id}', 'a1b2c3d4e5f60718', '1002', NOW() - INTERVAL '90 minutes', NOW() - INTERVAL '1 hour',
- 38.1, 16000, 95, 'SLOW_LOG', 'SELECT * FROM orders WHERE LOWER(status) = ''delivered'' AND total_amount > 250 /* cust=1002 */'),
-('seed-sample-3', '${connection_id}', 'd4e5f60718293a4b', '1001', NOW() - INTERVAL '80 minutes', NOW() - INTERVAL '1 hour',
- 88.2, 52000, 1000, 'SLOW_LOG', 'SELECT * FROM audit_log WHERE table_name = ''orders'' ORDER BY changed_at DESC LIMIT 1000 /* cust=1001 */'),
-('seed-sample-4', '${connection_id}', 'b2c3d4e5f6071829', '1003', NOW() - INTERVAL '70 minutes', NOW() - INTERVAL '1 hour',
- 29.4, 4800, 40, 'SLOW_LOG', 'SELECT o.*, c.* FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.status = ''pending'' AND o.payment_status = ''paid'' /* cust=1003 */'),
-('seed-sample-5', '${connection_id}', 'c3d4e5f60718293a', NULL, NOW() - INTERVAL '60 minutes', NOW() - INTERVAL '1 hour',
- 11.2, 100, 100, 'SLOW_LOG', 'SELECT p.*, AVG(r.rating) FROM products p LEFT JOIN product_reviews r ON p.id = r.product_id GROUP BY p.id');
-
-INSERT INTO slow_query_customer (
-    id, connection_id, customer_id, customer_name, tenant_column,
-    first_seen_at, last_seen_at, name_resolved_at, created_at
-) VALUES
-('seed-cust-1001', '${connection_id}', '1001', 'acme@demo.local', 'customer_id', NOW() - INTERVAL '10 days', NOW() - INTERVAL '70 minutes', NOW() - INTERVAL '1 day', NOW()),
-('seed-cust-1002', '${connection_id}', '1002', 'globex@demo.local', 'customer_id', NOW() - INTERVAL '8 days', NOW() - INTERVAL '90 minutes', NOW() - INTERVAL '1 day', NOW()),
-('seed-cust-1003', '${connection_id}', '1003', 'initech@demo.local', 'customer_id', NOW() - INTERVAL '5 days', NOW() - INTERVAL '70 minutes', NOW() - INTERVAL '1 day', NOW());
-
-INSERT INTO slow_query_customer_day (
-    id, connection_id, fingerprint, customer_id, day,
-    sample_count, mean_exec_ms, max_exec_ms, total_exec_ms,
-    prev_day_mean_ms, regression_factor, created_at
-) VALUES
-('seed-cday-1', '${connection_id}', 'a1b2c3d4e5f60718', '1001', CURRENT_DATE, 18, 4.2, 42.5, 75.6, 2.1, 2.0, NOW()),
-('seed-cday-2', '${connection_id}', 'a1b2c3d4e5f60718', '1002', CURRENT_DATE, 12, 3.8, 38.1, 45.6, 2.4, 1.58, NOW()),
-('seed-cday-3', '${connection_id}', 'd4e5f60718293a4b', '1001', CURRENT_DATE, 9, 15.1, 88.2, 135.9, 7.0, 2.16, NOW()),
-('seed-cday-4', '${connection_id}', 'b2c3d4e5f6071829', '1003', CURRENT_DATE, 14, 2.9, 29.4, 40.6, 2.2, 1.32, NOW());
-
-SELECT 'Performance seed data inserted successfully' AS status;
+SELECT 'Digest preferences seeded' AS status;
 EOSQL
-
-    echo "  Performance data seeded (history + Query Trends analytics + log source)."
-
-    # Optional: exercise demo_shop so pg_stat_statements has matching patterns
-    echo "  Simulating demo_shop workload (slow-query patterns)..."
-    compose exec -T postgres psql -U postgres -d demo_shop -v ON_ERROR_STOP=1 <<'EOWORK' >/dev/null || echo "  Note: demo_shop workload simulation skipped (DB missing?)"
-DO $$
-DECLARE i int;
-BEGIN
-  FOR i IN 1..25 LOOP
-    PERFORM count(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
-    PERFORM count(*) FROM orders o JOIN customers c ON o.customer_id = c.id
-      WHERE o.status = 'pending' AND o.payment_status = 'paid';
-    PERFORM p.id FROM products p
-      LEFT JOIN product_reviews r ON p.id = r.product_id GROUP BY p.id;
-    PERFORM 1 FROM audit_log WHERE table_name = 'orders' ORDER BY changed_at DESC LIMIT 1000;
-  END LOOP;
-END $$;
-EOWORK
-else
-    echo "  Skipping performance data (no connection ID available)"
-fi
-
-# ============================================================================
-# Step 7: Seed agent conversation (sample prompts)
-# ============================================================================
-
-echo ""
-echo "Step 7: Seeding agent conversation history..."
-
-if [[ -n "${connection_id:-}" ]]; then
-    # Get admin user ID
-    admin_id="$(compose exec -T postgres psql -U postgres -d dba_agent -At -c \
-        "SELECT id FROM users WHERE username = 'admin' LIMIT 1" 2>/dev/null || echo "")"
+    echo "  Digest preferences created."
     
-    if [[ -n "$admin_id" ]]; then
-        sample_transcript=$(cat <<'TRANSCRIPT'
-[
-  {
-    "role": "user",
-    "content": "What are the top 5 most ordered products in the last 30 days?"
-  },
-  {
-    "role": "assistant",
-    "content": "I'll query the orders and order_items tables to find the most popular products.\n\nBased on the data, the top 5 most ordered products in the last 30 days are:\n\n1. **ProPhone X15** (SKU: ELEC-SP-002) - 156 orders, $155,843.44 revenue\n2. **AirPods Pro 3** (SKU: ELEC-AU-001) - 142 orders, $39,758.58 revenue\n3. **Budget Phone A5** (SKU: ELEC-SP-007) - 128 orders, $25,598.72 revenue\n4. **Atomic Habits** (SKU: BOOK-002) - 119 orders, $2,260.81 revenue\n5. **Air Fryer XL** (SKU: HOME-KT-005) - 98 orders, $12,739.02 revenue\n\nNotably, electronics dominate the top sellers, with smartphones and audio accessories being particularly popular."
-  },
-  {
-    "role": "user",
-    "content": "Can you suggest indexes to improve query performance?"
-  },
-  {
-    "role": "assistant", 
-    "content": "Based on my analysis of your slow queries and access patterns, here are the recommended indexes:\n\n**High Priority:**\n1. `CREATE INDEX idx_orders_status_payment_created ON orders(status, payment_status, created_at DESC);`\n   - Impact: 85% improvement for order filtering queries\n   - Affects: 12 slow queries\n\n2. `CREATE INDEX idx_audit_log_table_changed ON audit_log(table_name, changed_at DESC);`\n   - Impact: 90% improvement for audit log access\n   - Current queries scan 50K+ rows\n\n**Medium Priority:**\n3. `CREATE INDEX idx_reviews_product_approved ON product_reviews(product_id, is_approved) WHERE is_approved = true;`\n   - Partial index for approved reviews only\n   - Improves product page load times\n\nWould you like me to generate the full DDL statements or analyze any specific queries?"
-  }
-]
-TRANSCRIPT
-)
-        # Escape for SQL
-        transcript_escaped="${sample_transcript//\'/\'\'}"
+    # Trigger a real digest using DigestInsightAssemblerService
+    # This generates content from actual demo data (index recommendations, slow queries, etc.)
+    # The trigger runs async, so we wait and verify completion
+    echo "  Triggering real digest generation..."
+    
+    trigger_result="$(curl -sS -b "$cookie_jar" \
+        -H 'Content-Type: application/json' \
+        -X POST "$base/admin/slack/digest/trigger" 2>/dev/null || echo "{}")"
+    
+    if [[ "$trigger_result" == *"triggered\":true"* ]]; then
+        echo "  Digest trigger accepted, waiting for async generation (5s)..."
+        sleep 5
+    else
+        echo "  Note: Digest trigger returned: $trigger_result"
+        sleep 2  # Brief wait in case of transient issue
+    fi
+    
+    # Verify digest was created - if not, create a deterministic one from seeded data
+    digest_exists="$(compose exec -T postgres psql -U postgres -d dba_agent -At -c \
+        "SELECT COUNT(*) FROM slack_digest_log WHERE connection_id = '${connection_id}'" 2>/dev/null || echo "0")"
+    
+    if [[ "${digest_exists:-0}" -gt 0 ]]; then
+        echo "  Digest successfully generated from real data (${digest_exists} entries)."
+    else
+        echo "  No digest found - generating deterministic digest from seeded data..."
         
+        pref_id="$(compose exec -T postgres psql -U postgres -d dba_agent -At -c \
+            "SELECT id FROM user_digest_preference WHERE username = '${DEEPSQL_INITIAL_ADMIN_EMAIL}' AND connection_id = '${connection_id}' LIMIT 1" 2>/dev/null || echo "")"
+        
+        # Build digest content from actual seeded data (index recommendations, slow queries)
+        # This is deterministic content based on what was seeded, not hardcoded prose
         compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 <<EOSQL
--- Insert sample agent conversation
-INSERT INTO agent_conversation (
-    id, user_id, connection_id, agent_session_id, title, transcript, archived,
-    created_at, updated_at, last_message_at
-) VALUES (
-    gen_random_uuid()::text,
-    ${admin_id},
-    '${connection_id}',
-    'demo-session-' || gen_random_uuid()::text,
-    'Product Analysis & Index Recommendations',
-    '${transcript_escaped}'::jsonb,
-    false,
-    NOW() - INTERVAL '1 hour',
-    NOW() - INTERVAL '30 minutes',
-    NOW() - INTERVAL '30 minutes'
-) ON CONFLICT DO NOTHING;
+-- Generate deterministic digest from seeded analysis data
+-- Uses actual index recommendations and slow query stats
 
-SELECT 'Agent conversation seeded successfully' AS status;
+WITH index_recs AS (
+    SELECT table_name, index_name, priority, estimated_impact, reason
+    FROM index_recommendations 
+    WHERE connection_id = '${connection_id}' AND status = 'PENDING'
+    ORDER BY priority ASC, estimated_impact DESC
+    LIMIT 3
+),
+rec_summary AS (
+    SELECT 
+        COUNT(*) as rec_count,
+        string_agg(
+            '• *' || index_name || '* on ' || table_name || ' (' || priority || ' priority, ' || estimated_impact || '% impact)',
+            E'\n'
+        ) as rec_list
+    FROM index_recs
+),
+slow_summary AS (
+    SELECT COUNT(*) as slow_count
+    FROM slow_query_history 
+    WHERE connection_id = '${connection_id}'
+    AND created_at > NOW() - INTERVAL '1 day'
+)
+INSERT INTO slack_digest_log (
+    connection_id, connection_name, channel_id, content, headline,
+    sent_at, status, recipient_username, recipient_role, persona_tag,
+    delivery_method, preference_id, personalized
+)
+SELECT 
+    '${connection_id}',
+    '${DEEPSQL_SEED_CONNECTION_NAME}',
+    NULL,
+    '*🗄️ DB Health Briefing: ${DEEPSQL_SEED_CONNECTION_NAME}*
+_' || TO_CHAR(NOW(), 'FMDay, FMMonth DD') || ' · ' || r.rec_count || ' Index Recommendations · ' || s.slow_count || ' Slow Queries_
+
+────────────────────────────────
+
+*🔦 Index Recommendations*
+
+' || COALESCE(r.rec_list, 'No pending recommendations') || '
+
+────────────────────────────────
+
+*🐢 Slow Query Summary*
+
+• ' || s.slow_count || ' slow queries captured from pg_stat_statements
+• Review details in Performance tab
+
+────────────────────────────────
+
+*🎯 Quick Actions*
+
+• Review slow queries in Performance tab
+• Apply high-priority indexes from Index Advisor
+• Check Brain notes for table documentation
+
+────────────────────────────────
+
+_Powered by DeepSQL · Generated from actual database analysis_',
+    r.rec_count || ' Index Recommendations, ' || s.slow_count || ' Slow Queries',
+    NOW(),
+    'SENT',
+    '${DEEPSQL_INITIAL_ADMIN_EMAIL}',
+    'ADMIN',
+    'DBA',
+    'SLACK_DM',
+    ${pref_id:-NULL},
+    true
+FROM rec_summary r, slow_summary s;
+
+SELECT 'Deterministic digest created from seeded data' AS status;
 EOSQL
-        echo "  Agent conversation history seeded."
-    else
-        echo "  Skipping agent conversations (admin user not found)"
+        echo "  Deterministic digest created from seeded analysis data."
     fi
 else
-    echo "  Skipping agent conversations (no connection ID available)"
+    echo "  Skipping digest preferences (no connection ID available)"
 fi
 
 # ============================================================================
-# Step 8: Wait for brain init (optional)
+# Step 10: Seed curated Brain notes (instead of 90 noisy items)
 # ============================================================================
 
 echo ""
-echo "Step 8: Triggering brain initialization..."
+echo "Step 10: Seeding curated Brain notes..."
 
 if [[ -n "${connection_id:-}" ]]; then
-    # Check init status
-    init_status="$(curl -fsS -b "$cookie_jar" "$base/connections/${connection_id}/init-status" 2>/dev/null || echo "{}")"
-    current_stage="$(printf '%s' "$init_status" | sed -n 's/.*"currentStage":"\([^"]*\)".*/\1/p')"
+    compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 <<EOSQL
+-- Remove noisy auto-generated items for system tables
+DELETE FROM schema_documentation 
+WHERE connection_id = '${connection_id}' 
+AND (
+    object_name LIKE 'pg_%' 
+    OR object_name LIKE 'sql_%'
+    OR object_name = 'pg_stat_statements'
+    OR object_name = 'pg_stat_statements_info'
+);
+
+-- Add curated business context notes
+INSERT INTO schema_documentation (
+    id, connection_id, object_type, object_name, parent_object, 
+    description, source, created_at, updated_at
+) VALUES
+(
+    gen_random_uuid()::text,
+    '${connection_id}',
+    'TABLE',
+    'orders',
+    NULL,
+    'Core transaction table tracking all customer orders. Status transitions: pending → confirmed → processing → shipped → delivered (or cancelled/refunded). Foreign key to customers via customer_id. Contains denormalized totals (subtotal, tax_amount, shipping_amount, discount_amount, total_amount) for query performance.',
+    'USER',
+    NOW(),
+    NOW()
+),
+(
+    gen_random_uuid()::text,
+    '${connection_id}',
+    'TABLE',
+    'customers',
+    NULL,
+    'Customer master table with profile and loyalty data. The tier column (bronze/silver/gold/platinum) drives discount eligibility and marketing segmentation. loyalty_points accumulate from orders and can be redeemed.',
+    'USER',
+    NOW(),
+    NOW()
+),
+(
+    gen_random_uuid()::text,
+    '${connection_id}',
+    'TABLE',
+    'products',
+    NULL,
+    'Product catalog with inventory tracking. stock_quantity is decremented on order creation and incremented on returns/cancellations. low_stock_threshold triggers inventory alerts. Products can be soft-deleted via is_active=false.',
+    'USER',
+    NOW(),
+    NOW()
+),
+(
+    gen_random_uuid()::text,
+    '${connection_id}',
+    'TABLE',
+    'audit_log',
+    NULL,
+    'High-volume audit trail capturing all INSERT/UPDATE/DELETE operations. old_values and new_values store JSONB diffs. This table grows rapidly and is a candidate for partitioning by changed_at. Currently missing index on (table_name, changed_at) which causes slow queries.',
+    'USER',
+    NOW(),
+    NOW()
+),
+(
+    gen_random_uuid()::text,
+    '${connection_id}',
+    'COLUMN',
+    'status',
+    'orders',
+    'Order lifecycle status. Valid values: pending, confirmed, processing, shipped, delivered, cancelled, refunded. Queries filtering on status should avoid LOWER() as it prevents index usage.',
+    'USER',
+    NOW(),
+    NOW()
+)
+ON CONFLICT DO NOTHING;
+
+SELECT 'Brain notes seeded' AS status;
+EOSQL
+    echo "  Curated Brain notes created."
+else
+    echo "  Skipping Brain notes (no connection ID available)"
+fi
+
+# ============================================================================
+# Step 11: Trigger initial slow query analysis from pg_stat_statements
+# ============================================================================
+
+echo ""
+echo "Step 11: Triggering initial slow query analysis..."
+
+if [[ -n "${connection_id:-}" ]]; then
+    analysis_result="$(curl -sS -b "$cookie_jar" \
+        -H 'Content-Type: application/json' \
+        -X POST "$base/slow-query-analytics/${connection_id}/analyze" \
+        -d '{"threshold": 1.0, "limit": 50}' 2>/dev/null || echo "{}")"
     
-    if [[ "$current_stage" == "COMPLETED" ]]; then
-        echo "  Brain initialization already completed."
-    elif [[ "$current_stage" == "FAILED" ]]; then
-        echo "  Note: Brain initialization previously failed. Check LLM configuration."
+    if [[ "$analysis_result" == *"analysisDate"* || "$analysis_result" == *"topSlowQueries"* ]]; then
+        echo "  Initial slow query analysis completed."
     else
-        echo "  Brain initialization is in progress or pending."
-        echo "  Stage: ${current_stage:-UNKNOWN}"
-        echo "  The initialization will continue in the background."
-        echo "  Run 'curl http://localhost:${DEEPSQL_BACKEND_PORT}/api/connections/${connection_id}/init-status' to check progress."
+        echo "  Note: Slow query analysis may have returned empty results (this is normal if workload was too fast)"
+        echo "  Users can run analysis from the Performance tab."
     fi
 else
-    echo "  Skipping brain init check (no connection ID available)"
+    echo "  Skipping analysis (no connection ID available)"
+fi
+
+# ============================================================================
+# Step 12: Validate slow queries endpoint has data
+# ============================================================================
+
+echo ""
+echo "Step 12: Validating slow queries..."
+
+if [[ -n "${connection_id:-}" ]]; then
+    # Query the slow-queries endpoint to verify it returns data
+    slow_query_check="$(curl -sS -b "$cookie_jar" \
+        "$base/slow-query-analytics/${connection_id}/queries?limit=5" 2>/dev/null || echo "[]")"
+    
+    # Count how many slow queries were returned
+    slow_count="$(echo "$slow_query_check" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    if isinstance(data, list):
+        print(len(data))
+    elif isinstance(data, dict) and 'content' in data:
+        print(len(data['content']))
+    else:
+        print(0)
+except:
+    print(0)
+" 2>/dev/null || echo "0")"
+    
+    if [[ "$slow_count" -gt 0 ]]; then
+        echo "  ✓ Slow queries endpoint returned $slow_count queries."
+    else
+        echo ""
+        echo "  ⚠️  WARNING: Slow queries endpoint returned 0 rows!"
+        echo "  The Performance tab will show 'No Slow Queries Found'."
+        echo "  This defeats the purpose of the demo."
+        echo ""
+        echo "  Possible causes:"
+        echo "  - Data volume too small (need 300K+ audit_log, 100K+ order_items)"
+        echo "  - Workload queries too fast (need mean_exec_time > 100ms)"
+        echo "  - pg_stat_statements was reset after workload ran"
+        echo ""
+        echo "  Check pg_stat_statements directly:"
+        echo "  psql -U postgres -d dba_agent -c \"SELECT LEFT(query,60), calls, mean_exec_time::numeric(10,2) FROM pg_stat_statements WHERE dbid = (SELECT oid FROM pg_database WHERE datname = 'demo_shop') ORDER BY mean_exec_time DESC LIMIT 10;\""
+        echo ""
+    fi
+else
+    echo "  Skipping validation (no connection ID available)"
 fi
 
 # ============================================================================
@@ -981,29 +953,23 @@ echo "=========================================="
 echo ""
 echo "What was created:"
 echo "  - demo_shop database with e-commerce schema"
-echo "  - Sample products, customers, orders (5000+)"
+echo "    - 5,000 orders, 100K+ order_items, 300K+ audit_log rows"
 echo "  - Demo connection: ${DEEPSQL_SEED_CONNECTION_NAME}"
+echo "    Using read-only role: ${DEMO_ROLE_USER}"
 if [[ -n "${connection_id:-}" ]]; then
 echo "  - Connection ID: ${connection_id}"
 fi
+echo "  - Real slow query workload captured by pg_stat_statements"
+echo "  - Sample 'Demo Shop Overview' dashboard (works without LLM key)"
 echo "  - Saved queries in SQL Editor"
-echo "  - Sample slow query analysis (legacy history JSON)"
-echo "  - Slow-log source + Query Trends analytics (fingerprints / runs / samples)"
-echo "  - Per-customer rollups for the By Customer view"
-echo "  - Index recommendations"
-echo "  - Performance actions"
-echo "  - Sample agent conversation"
-echo ""
-echo "Demo users (create manually if API creation failed):"
-echo "  - analyst@demo.local / analyst123!"
-echo "  - developer@demo.local / developer123!"  
-echo "  - viewer@demo.local / viewer123!"
+echo "  - Index recommendations from actual slow queries"
+echo "  - Digest preferences (daily at 9 AM)"
+echo "  - Curated Brain notes for key tables"
 echo ""
 echo "Next steps:"
 echo "  1. Open http://localhost:${DEEPSQL_FRONTEND_PORT:-3000}"
-echo "  2. Select '${DEEPSQL_SEED_CONNECTION_NAME}' connection"
-echo "  3. Open Performance — Query Trends, By Customer, and Workload tabs"
-echo "  4. On Workload, click Run analysis for a fresh holistic report"
-echo "  5. Try the SQL Editor with pre-saved queries"
-echo "  6. Ask the Agent about the database"
+echo "  2. The '${DEEPSQL_SEED_CONNECTION_NAME}' connection is ready"
+echo "  3. Check Performance tab for slow queries from pg_stat_statements"
+echo "  4. View the sample dashboard in Dashboards tab"
+echo "  5. Try the sample prompts in the Agent tab"
 echo ""

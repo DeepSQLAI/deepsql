@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Activity, FileText, LineChart, Loader2, Settings, Users } from 'lucide-react'
+import { Activity, FileText, LineChart, Loader2, Settings, Users, Database } from 'lucide-react'
 import { useConnectionManager } from '@/lib/hooks/useConnectionManager'
 import { useSlowLogSourceConfig } from '@/lib/hooks/queries'
 import QueryTrendsTab from '@/components/tabs/Performance/QueryTrendsTab'
@@ -7,21 +7,29 @@ import CustomerExplorer from '@/components/tabs/Performance/CustomerExplorer'
 import SlowQuerySettingsPanel from '@/components/tabs/Performance/SlowQuerySettingsPanel'
 import WorkloadAnalysisPanel from '@/components/tabs/Performance/WorkloadAnalysisPanel'
 import SlowQuerySourceModal from '@/components/SlowQuerySourceModal'
+import SlowQueryAnalysisTab from '@/components/tabs/Performance/SlowQueryAnalysisTab'
 import { HelpTooltip } from '@/components/tabs/Brain/components/HelpTooltip'
 import sectionStyles from './TopLevelSection.module.css'
 import styles from './SlowQueriesSection.module.css'
 
 const TABS = [
-  { id: 'trends', label: 'Query Trends', icon: LineChart },
-  { id: 'customers', label: 'By Customer', icon: Users },
-  { id: 'workload', label: 'Workload', icon: Activity },
-  { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'analysis', label: 'Analysis', icon: Database, requiresLogSource: false },
+  { id: 'trends', label: 'Query Trends', icon: LineChart, requiresLogSource: true },
+  { id: 'customers', label: 'By Customer', icon: Users, requiresLogSource: true },
+  { id: 'workload', label: 'Workload', icon: Activity, requiresLogSource: true },
+  { id: 'settings', label: 'Settings', icon: Settings, requiresLogSource: false },
 ]
 
 const LOG_SOURCE_HELP = {
   title: 'Slow query log',
   description:
     'Query trends, per-customer load, and workload analysis all read from ingested slow-query logs. Attach CloudWatch, S3, Azure, GCP, Datadog, Elasticsearch, or a file upload before those views can run.',
+}
+
+const PG_STAT_HELP = {
+  title: 'pg_stat_statements',
+  description:
+    'PostgreSQL connections use pg_stat_statements for real-time query analysis. No external log source needed. The Analysis tab shows top queries by execution time with index recommendations.',
 }
 
 /**
@@ -32,8 +40,20 @@ const LOG_SOURCE_HELP = {
  */
 export default function SlowQueriesSection() {
   const { connectionId, selectedConnection, isLoading } = useConnectionManager()
-  const [tab, setTab] = useState('trends')
   const tabRefs = useRef({})
+  const logSourceQ = useSlowLogSourceConfig(connectionId)
+  const hasLogSource = Boolean(logSourceQ.data?.id)
+
+  // PostgreSQL connections can use pg_stat_statements directly without a log source
+  const isPostgres = ['postgresql', 'postgres'].includes(selectedConnection?.dbType?.toLowerCase())
+  const canShowPerformance = hasLogSource || isPostgres
+
+  // Filter tabs based on available data sources
+  const availableTabs = TABS.filter((t) => !t.requiresLogSource || hasLogSource)
+  
+  // Default to 'analysis' for PostgreSQL without log source, otherwise 'trends'
+  const defaultTab = (isPostgres && !hasLogSource) ? 'analysis' : 'trends'
+  const [tab, setTab] = useState(defaultTab)
 
   /** Arrow / Home / End move between tabs, as the ARIA tabs pattern expects. */
   const onTabKeyDown = (e) => {
@@ -44,11 +64,11 @@ export default function SlowQueriesSection() {
     // handler was created: two keypresses within one render would otherwise both move
     // relative to the same starting index and selection would stick after the first.
     setTab((current) => {
-      const i = TABS.findIndex((t) => t.id === current)
+      const i = availableTabs.findIndex((t) => t.id === current)
       const next = e.key === 'Home' ? 0
-        : e.key === 'End' ? TABS.length - 1
-        : (i + step + TABS.length) % TABS.length
-      const id = TABS[next].id
+        : e.key === 'End' ? availableTabs.length - 1
+        : (i + step + availableTabs.length) % availableTabs.length
+      const id = availableTabs[next].id
       // Focus follows selection, per the ARIA tabs pattern. Deferred so the tab is
       // already rendered with tabIndex=0 when we focus it.
       queueMicrotask(() => tabRefs.current[id]?.focus())
@@ -56,8 +76,6 @@ export default function SlowQueriesSection() {
     })
   }
   const [logSourceModalOpen, setLogSourceModalOpen] = useState(false)
-  const logSourceQ = useSlowLogSourceConfig(connectionId)
-  const hasLogSource = Boolean(logSourceQ.data?.id)
 
   // Wait for connection list to load before rendering anything
   if (isLoading) {
@@ -97,7 +115,7 @@ export default function SlowQueriesSection() {
         <div className={styles.empty}>
           Could not load the slow query log configuration for this connection.
         </div>
-      ) : !hasLogSource ? (
+      ) : !canShowPerformance ? (
         <div className={styles.setupCard}>
           <FileText size={32} className={styles.setupIcon} />
           <h2 className={styles.setupTitle}>Configure slow queries</h2>
@@ -131,7 +149,7 @@ export default function SlowQueriesSection() {
               aria-label="Performance views"
               onKeyDown={onTabKeyDown}
             >
-              {TABS.map((t) => {
+              {availableTabs.map((t) => {
                 const Icon = t.icon
                 const active = tab === t.id
                 return (
@@ -166,6 +184,25 @@ export default function SlowQueriesSection() {
             </button>
           </div>
 
+          {/* Show pg_stat_statements info banner for PostgreSQL without log source */}
+          {isPostgres && !hasLogSource && (
+            <div className={styles.pgStatBanner}>
+              <HelpTooltip content={PG_STAT_HELP}>
+                <span className={styles.pgStatBannerText}>
+                  <Database size={14} />
+                  Using pg_stat_statements for real-time query analysis.
+                </span>
+              </HelpTooltip>
+              <button
+                type="button"
+                className={styles.pgStatBannerLink}
+                onClick={() => setLogSourceModalOpen(true)}
+              >
+                Add log source for trends &amp; workload
+              </button>
+            </div>
+          )}
+
           <div
             className={styles.content}
             role="tabpanel"
@@ -173,6 +210,7 @@ export default function SlowQueriesSection() {
             aria-labelledby={`perf-tab-${tab}`}
             tabIndex={0}
           >
+            {tab === 'analysis' && <SlowQueryAnalysisTab connectionId={connectionId} />}
             {tab === 'trends' && <QueryTrendsTab connectionId={connectionId} />}
             {tab === 'customers' && <CustomerExplorer connectionId={connectionId} />}
             {tab === 'workload' && <WorkloadAnalysisPanel connectionId={connectionId} />}

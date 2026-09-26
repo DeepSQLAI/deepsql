@@ -60,6 +60,7 @@ class PostgresIntrospectionProviderTest {
             .thenReturn(false)  // No functions
             .thenReturn(false); // No procedures
 
+        when(resultSet.getString("schema_name")).thenReturn("public");
         when(resultSet.getString("name")).thenReturn("users");
         when(resultSet.getString("type")).thenReturn("table");
         when(resultSet.getObject("row_count")).thenReturn(100L);
@@ -70,6 +71,7 @@ class PostgresIntrospectionProviderTest {
         assertEquals(1, objects.size());
         assertEquals("users", objects.get(0).getName());
         assertEquals("table", objects.get(0).getType());
+        assertEquals("public", objects.get(0).getSchema());
     }
 
     @Test
@@ -216,6 +218,7 @@ class PostgresIntrospectionProviderTest {
             .thenReturn(true)
             .thenReturn(false);
 
+        when(resultSet.getString("schemaname")).thenReturn("public");
         when(resultSet.getString("tablename")).thenReturn("users");
         when(resultSet.getString("type")).thenReturn("table");
         when(resultSet.getObject("row_count")).thenReturn(100L);
@@ -228,6 +231,7 @@ class PostgresIntrospectionProviderTest {
         assertNotNull(schema.getTables());
         assertEquals(1, schema.getTables().size());
         assertEquals("users", schema.getTables().get(0).getName());
+        assertEquals("public", schema.getTables().get(0).getSchema());
     }
 
     @Test
@@ -240,8 +244,10 @@ class PostgresIntrospectionProviderTest {
             .thenReturn(false);
 
         when(resultSet.getString("constraint_name")).thenReturn("fk_orders_user");
+        when(resultSet.getString("source_schema")).thenReturn("public");
         when(resultSet.getString("source_table")).thenReturn("orders");
         when(resultSet.getString("source_column")).thenReturn("user_id");
+        when(resultSet.getString("target_schema")).thenReturn("public");
         when(resultSet.getString("target_table")).thenReturn("users");
         when(resultSet.getString("target_column")).thenReturn("id");
 
@@ -250,6 +256,7 @@ class PostgresIntrospectionProviderTest {
         assertNotNull(relationships);
         assertEquals(1, relationships.size());
         assertEquals("fk_orders_user", relationships.get(0).getConstraintName());
+        // qualifyForConsumers returns just the table name for "public" schema
         assertEquals("orders", relationships.get(0).getFromTable());
         assertEquals("user_id", relationships.get(0).getFromColumn());
         assertEquals("users", relationships.get(0).getToTable());
@@ -294,6 +301,7 @@ class PostgresIntrospectionProviderTest {
         when(foreignKeysStatement.executeQuery(anyString())).thenReturn(foreignKeysResultSet);
 
         when(resultSet.next()).thenReturn(true).thenReturn(false);
+        when(resultSet.getString("schemaname")).thenReturn("public");
         when(resultSet.getString("tablename")).thenReturn("dim_route");
         when(resultSet.getString("type")).thenReturn("table");
         when(resultSet.getObject("row_count")).thenReturn(null);
@@ -338,5 +346,109 @@ class PostgresIntrospectionProviderTest {
         assertEquals("email", details.get(0).getColumnName());
         assertEquals("character varying", details.get(0).getDataType());
         assertFalse(details.get(0).getIsNullable());
+    }
+
+    // ─── pg_stat_statements extension view exclusion tests ───────────────────────
+
+    @Test
+    void excludeExtensionViewsPredicate_excludesPgStatStatements() {
+        String predicate = PostgresIntrospectionProvider.excludeExtensionViewsPredicate("v.viewname");
+        
+        assertTrue(predicate.contains("pg_stat_statements"),
+            "Exclusion predicate should mention pg_stat_statements");
+        assertTrue(predicate.contains("pg_stat_statements_info"),
+            "Exclusion predicate should mention pg_stat_statements_info");
+        assertTrue(predicate.contains("pg_buffercache"),
+            "Exclusion predicate should mention pg_buffercache");
+        assertTrue(predicate.contains("NOT IN"),
+            "Exclusion predicate should use NOT IN clause");
+    }
+
+    @Test
+    void nonSystemSchemaPredicate_excludesPgCatalog() {
+        String predicate = PostgresIntrospectionProvider.nonSystemSchemaPredicate("t.schemaname");
+        
+        assertTrue(predicate.contains("pg_catalog"),
+            "Schema predicate should exclude pg_catalog");
+        assertTrue(predicate.contains("information_schema"),
+            "Schema predicate should exclude information_schema");
+        assertTrue(predicate.contains("pg_toast"),
+            "Schema predicate should exclude pg_toast");
+    }
+
+    @Test
+    void getTablesAndViews_queryExcludesExtensionViews() throws SQLException {
+        // Capture all SQL queries and find the tables/views one
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        when(connection.createStatement()).thenReturn(statement);
+        when(statement.executeQuery(sqlCaptor.capture())).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        // getDatabaseObjects calls getTablesAndViews internally
+        List<DatabaseObject> objects = provider.getDatabaseObjects(connection, "test_db");
+
+        // Find the tables/views query among all executed queries
+        String tablesViewsQuery = sqlCaptor.getAllValues().stream()
+            .filter(q -> q.contains("pg_tables") || q.contains("pg_views"))
+            .findFirst()
+            .orElse(null);
+        
+        assertNotNull(tablesViewsQuery, "Should have executed a query accessing pg_tables or pg_views");
+        
+        // The query for views should contain the extension exclusion
+        assertTrue(tablesViewsQuery.contains("pg_views"),
+            "Query should access pg_views");
+        assertTrue(tablesViewsQuery.contains("pg_tables"),
+            "Query should access pg_tables");
+        
+        // Verify schema exclusions are present
+        assertTrue(tablesViewsQuery.contains("NOT IN"),
+            "Query should have NOT IN clause for exclusions");
+        assertTrue(tablesViewsQuery.contains("pg_stat_statements"),
+            "Query should exclude pg_stat_statements extension views");
+    }
+
+    @Test
+    void extensionViewExclusion_isExactMatch() {
+        // Verify the exclusion predicate uses exact matches, not prefix matches
+        String predicate = PostgresIntrospectionProvider.EXCLUDED_EXTENSION_VIEWS_SQL;
+        
+        // The excluded list should be specific, exact names only
+        assertTrue(predicate.contains("'pg_stat_statements'"),
+            "Predicate should exclude exactly 'pg_stat_statements'");
+        assertTrue(predicate.contains("'pg_stat_statements_info'"),
+            "Predicate should exclude exactly 'pg_stat_statements_info'");
+        assertTrue(predicate.contains("'pg_buffercache'"),
+            "Predicate should exclude exactly 'pg_buffercache'");
+        
+        // Verify it's a NOT IN list (exact match semantics, not LIKE pattern)
+        assertTrue(predicate.startsWith("NOT IN"),
+            "Predicate should use NOT IN for exact matching");
+    }
+
+    @Test
+    void excludeExtensionFunctionsPredicate_excludesPgStatStatementsFunctions() {
+        String predicate = PostgresIntrospectionProvider.excludeExtensionFunctionsPredicate("p.proname");
+        
+        assertTrue(predicate.contains("pg_stat_statements"),
+            "Exclusion predicate should mention pg_stat_statements");
+        assertTrue(predicate.contains("pg_stat_statements_info"),
+            "Exclusion predicate should mention pg_stat_statements_info");
+        assertTrue(predicate.contains("pg_stat_statements_reset"),
+            "Exclusion predicate should mention pg_stat_statements_reset");
+        assertTrue(predicate.contains("NOT IN"),
+            "Exclusion predicate should use NOT IN clause");
+    }
+
+    @Test
+    void extensionFunctionExclusion_isExactMatch() {
+        String predicate = PostgresIntrospectionProvider.EXCLUDED_EXTENSION_FUNCTIONS_SQL;
+        
+        assertTrue(predicate.contains("'pg_stat_statements'"),
+            "Predicate should exclude exactly 'pg_stat_statements'");
+        assertTrue(predicate.contains("'pg_stat_statements_reset'"),
+            "Predicate should exclude exactly 'pg_stat_statements_reset'");
+        assertTrue(predicate.startsWith("NOT IN"),
+            "Predicate should use NOT IN for exact matching");
     }
 }

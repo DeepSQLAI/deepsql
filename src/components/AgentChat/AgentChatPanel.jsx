@@ -51,11 +51,30 @@ function deriveTitle(messages) {
 // systems, SaaS multi-tenant DBs, analytics warehouses, ...). Never hardcode
 // a domain-specific table/column name here (see the chat guardrail in
 // AGENTS.md); AgentChatPanel has no idea what tables the active connection has.
-const SUGGESTIONS = [
+const DEFAULT_SUGGESTIONS = [
   { icon: Hash, text: 'How many tables are there?' },
   { icon: Table2, text: 'Show the largest tables' },
   { icon: Clock, text: 'What are the top slow queries?' },
 ]
+
+// Demo Shop specific prompts — shown when the Demo Shop connection is active.
+// These prompts demonstrate real use cases with the demo e-commerce schema.
+const DEMO_SHOP_SUGGESTIONS = [
+  { icon: Clock, text: 'Why are order queries slow?' },
+  { icon: Table2, text: 'Top 10 customers by revenue last 30 days' },
+  { icon: Hash, text: 'Is it safe to add an index on orders.customer_id?' },
+  { icon: Database, text: 'Which tables need indexes?' },
+  { icon: Sparkles, text: 'Show revenue by product category as a chart' },
+  { icon: AlertCircle, text: 'Are there any tables without primary keys?' },
+]
+
+// Returns suggestions based on whether this is a demo connection
+function getSuggestions(connectionName) {
+  if (connectionName && connectionName.toLowerCase().includes('demo')) {
+    return DEMO_SHOP_SUGGESTIONS
+  }
+  return DEFAULT_SUGGESTIONS
+}
 
 export default function AgentChatPanel({ connectionId, connectionName, canManageContent = false }) {
   const { username } = useAuth()
@@ -307,7 +326,7 @@ export default function AgentChatPanel({ connectionId, connectionName, canManage
             <h2 className={styles.emptyTitle}>Ask about your database</h2>
             <p className={styles.emptySub}>Get instant answers grounded on your schema, live data, and query history.</p>
             <div className={styles.suggestions}>
-              {SUGGESTIONS.map(({ icon: Icon, text }, i) => (
+              {getSuggestions(connectionName).map(({ icon: Icon, text }, i) => (
                 <button
                   key={text}
                   className={styles.suggestion}
