@@ -645,6 +645,53 @@ ANALYZE audit_log;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO postgres;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO postgres;
 
+-- ============================================================================
+-- Create read-only demo role for DeepSQL connections
+-- ============================================================================
+-- This role is used by the seed script to register demo_shop as a connection.
+-- Using a dedicated read-only role instead of the superuser:
+--   1. Demonstrates best practices for DeepSQL connections
+--   2. Avoids exposing superuser credentials in the UI
+--   3. Shows realistic RBAC patterns users would follow
+
+-- Drop and recreate for idempotency (role is cluster-global, not per-DB)
+\connect postgres
+DO $$
+BEGIN
+    -- Terminate any connections using the role before dropping
+    PERFORM pg_terminate_backend(pid) 
+    FROM pg_stat_activity 
+    WHERE usename = 'deepsql_demo' AND pid <> pg_backend_pid();
+EXCEPTION WHEN OTHERS THEN
+    NULL; -- Ignore if no connections
+END $$;
+
+DROP ROLE IF EXISTS deepsql_demo;
+CREATE ROLE deepsql_demo WITH 
+    LOGIN 
+    PASSWORD 'deepsql_demo_password'
+    NOSUPERUSER 
+    NOCREATEDB 
+    NOCREATEROLE;
+
+-- Grant pg_read_all_stats for pg_stat_statements access
+GRANT pg_read_all_stats TO deepsql_demo;
+
+-- Grant connect to demo_shop
+GRANT CONNECT ON DATABASE demo_shop TO deepsql_demo;
+
+-- Reconnect to demo_shop to grant table permissions
+\connect demo_shop
+
+-- Grant read access to all tables in demo_shop
+GRANT USAGE ON SCHEMA public TO deepsql_demo;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO deepsql_demo;
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO deepsql_demo;
+
+-- Ensure future tables are also readable
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO deepsql_demo;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON SEQUENCES TO deepsql_demo;
+
 SELECT 'Demo shop database created successfully!' AS status;
 SELECT 'Tables: ' || COUNT(*)::text FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
 SELECT 'Products: ' || COUNT(*)::text FROM products;

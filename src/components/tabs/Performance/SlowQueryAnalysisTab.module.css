@@ -960,6 +960,23 @@
     background: var(--color-light-2);
 }
 
+.optionCardPrimary {
+    border-color: var(--color-primary);
+    border-width: 2px;
+    background: linear-gradient(180deg, #f8fdf9 0%, white 100%);
+    box-shadow: 0 2px 8px rgba(47, 122, 109, 0.1);
+}
+
+.optionCardPrimary:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 4px 16px rgba(47, 122, 109, 0.15);
+}
+
+.optionCardPrimary .optionIconWrapper {
+    background: var(--color-primary);
+    color: white;
+}
+
 .optionIconWrapper {
     display: flex;
     align-items: center;
