@@ -771,17 +771,51 @@ SELECT 'Digest preferences seeded' AS status;
 EOSQL
     echo "  Digest preferences created."
     
-    # Now create an actual digest entry so it shows in the web UI
-    echo "  Creating sample digest entry (visible in web Digest section)..."
+    # Trigger a real digest using DigestInsightAssemblerService
+    # This generates content from actual demo data (index recommendations, slow queries, etc.)
+    echo "  Triggering real digest generation..."
     
-    # Get preference ID for linking
-    pref_id="$(compose exec -T postgres psql -U postgres -d dba_agent -At -c \
-        "SELECT id FROM digest_preferences WHERE user_id = ${admin_id} AND connection_id = '${connection_id}' LIMIT 1" 2>/dev/null || echo "")"
+    trigger_result="$(curl -sS -b "$cookie_jar" \
+        -H 'Content-Type: application/json' \
+        -X POST "$base/admin/slack/digest/trigger" 2>/dev/null || echo "{}")"
     
-    compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 <<EOSQL
--- Create a sample digest log entry that shows in the web Digest section
--- This is a static demo digest showing what real digests look like
+    if [[ "$trigger_result" == *"triggered\":true"* ]]; then
+        echo "  Real digest generated successfully."
+        # Wait a moment for the async digest to be written
+        sleep 2
+    else
+        echo "  Note: Digest trigger returned: $trigger_result"
+        echo "  This is expected if Slack is not configured - digest shows in web UI only."
+        
+        # If no Slack, we need to manually call the assembler and save the result
+        # The trigger endpoint requires Slack to be configured for actual delivery
+        # For web-only display, insert a digest based on seeded index recommendations
+        echo "  Generating web-only digest from seeded data..."
+        
+        pref_id="$(compose exec -T postgres psql -U postgres -d dba_agent -At -c \
+            "SELECT id FROM digest_preferences WHERE user_id = ${admin_id} AND connection_id = '${connection_id}' LIMIT 1" 2>/dev/null || echo "")"
+        
+        # Build digest content from actual seeded data
+        compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 <<EOSQL
+-- Generate digest from actual seeded index recommendations
+-- This is deterministic content based on what was seeded, not hardcoded prose
 
+WITH index_recs AS (
+    SELECT table_name, index_name, priority, estimated_impact, reason
+    FROM index_recommendations 
+    WHERE connection_id = '${connection_id}' AND status = 'PENDING'
+    ORDER BY priority ASC, estimated_impact DESC
+    LIMIT 3
+),
+rec_summary AS (
+    SELECT 
+        COUNT(*) as rec_count,
+        string_agg(
+            '• *' || index_name || '* on ' || table_name || ' (' || priority || ' priority, ' || estimated_impact || '% impact)',
+            E'\n'
+        ) as rec_list
+    FROM index_recs
+)
 INSERT INTO slack_digest_log (
     connection_id, connection_name, channel_id, content, headline,
     sent_at, status, recipient_username, recipient_role, persona_tag,
@@ -790,42 +824,36 @@ INSERT INTO slack_digest_log (
 SELECT 
     '${connection_id}',
     '${DEEPSQL_SEED_CONNECTION_NAME}',
-    NULL,  -- No Slack channel for web-only display
+    NULL,
     '*🗄️ DB Health Briefing: ${DEEPSQL_SEED_CONNECTION_NAME}*
-_' || TO_CHAR(NOW(), 'FMDay, FMMonth DD') || ' · Quick Wins Ready_
+_' || TO_CHAR(NOW(), 'FMDay, FMMonth DD') || ' · ' || rec_count || ' Index Recommendations_
 
 ────────────────────────────────
 
-*🔦 Performance Spotlight*
+*🔦 Index Recommendations*
 
-• *3 high-priority index recommendations* ready to apply
-  - \`idx_orders_status_payment_created\` (orders): 85% estimated improvement
-  - \`idx_audit_log_table_changed\` (audit_log): Fixes 89s slow queries
-  - \`idx_products_name_trgm\` (products): Better ILIKE performance
-
-• Top slow query pattern: \`SELECT COUNT(*) FROM orders WHERE LOWER(status) = ...\`
-  ↳ Avg 45ms, called 1.2K times/day — index prevents full scan
+' || COALESCE(rec_list, 'No pending recommendations') || '
 
 ────────────────────────────────
 
-*🎯 Quick Wins*
+*🎯 Quick Actions*
 
-• *CREATE INDEX idx_orders_status_payment_created* — Estimated 38s daily savings
-• Review audit_log growth (50K+ rows, missing index on changed_at)
-• Consider trigram index for product search ILIKE patterns
-
-────────────────────────────────
-
-*📈 Brain Intelligence*
-
-• Workload analysis complete — 7 distinct query patterns identified
-• Database health score: Pending initial assessment
-• 5 curated schema notes ready for review
+• Review slow queries in Performance tab (pg_stat_statements)
+• Apply high-priority indexes from Index Advisor
+• Check Brain notes for table documentation
 
 ────────────────────────────────
 
-_Powered by DeepSQL · This digest runs daily at 9:00 AM_',
-    'Quick Wins Ready',
+*📈 Database Status*
+
+• Connection: ${DEEPSQL_SEED_CONNECTION_NAME}
+• Role: deepsql_demo (read-only + pg_read_all_stats)
+• pg_stat_statements: Enabled and tracking queries
+
+────────────────────────────────
+
+_Powered by DeepSQL · Generated from actual database analysis_',
+    rec_count || ' Index Recommendations',
     NOW(),
     'SENT',
     '${DEEPSQL_INITIAL_ADMIN_EMAIL}',
@@ -834,15 +862,17 @@ _Powered by DeepSQL · This digest runs daily at 9:00 AM_',
     'SLACK_DM',
     ${pref_id:-NULL},
     true
+FROM rec_summary
 WHERE NOT EXISTS (
     SELECT 1 FROM slack_digest_log 
     WHERE connection_id = '${connection_id}' 
     AND recipient_username = '${DEEPSQL_INITIAL_ADMIN_EMAIL}'
 );
 
-SELECT 'Sample digest entry created' AS status;
+SELECT 'Digest entry created from seeded data' AS status;
 EOSQL
-    echo "  Sample digest entry created."
+        echo "  Web-only digest created from actual seeded data."
+    fi
 else
     echo "  Skipping digest preferences (missing connection or admin ID)"
 fi
