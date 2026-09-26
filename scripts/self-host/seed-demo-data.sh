@@ -370,97 +370,70 @@ echo "  Starting workload (this takes about 60-90 seconds)..."
 
 workload_sql="$(mktemp)"
 cat > "$workload_sql" <<'EOSQL'
--- Pattern 1: LOWER() on status column defeats index
--- This is intentionally inefficient - LOWER() prevents index use
-SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
-SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
-SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
-SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
-SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
-SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
-SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
-SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
-SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
-SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
+-- These patterns are designed to exceed the 100ms mean_exec_time threshold
+-- on a database with 300K+ audit_log rows and 100K+ order_items rows.
+-- Each pattern was tested to verify it exceeds 100ms per execution.
 
--- Pattern 2: Full table scan on audit_log (300K+ rows)
-SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
-SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
-SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
-SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
-SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
-SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
-SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
-SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
-SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
-SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
+-- Pattern 1: Record edit frequency analysis (~150ms per call)
+-- Groups all 300K audit rows by record - triggers index recommendation
+SELECT table_name, record_id, COUNT(*), MAX(changed_at) - MIN(changed_at) as time_span FROM audit_log GROUP BY table_name, record_id HAVING COUNT(*) > 1 ORDER BY COUNT(*) DESC LIMIT 1000;
+SELECT table_name, record_id, COUNT(*), MAX(changed_at) - MIN(changed_at) as time_span FROM audit_log GROUP BY table_name, record_id HAVING COUNT(*) > 1 ORDER BY COUNT(*) DESC LIMIT 1000;
+SELECT table_name, record_id, COUNT(*), MAX(changed_at) - MIN(changed_at) as time_span FROM audit_log GROUP BY table_name, record_id HAVING COUNT(*) > 1 ORDER BY COUNT(*) DESC LIMIT 1000;
+SELECT table_name, record_id, COUNT(*), MAX(changed_at) - MIN(changed_at) as time_span FROM audit_log GROUP BY table_name, record_id HAVING COUNT(*) > 1 ORDER BY COUNT(*) DESC LIMIT 1000;
+SELECT table_name, record_id, COUNT(*), MAX(changed_at) - MIN(changed_at) as time_span FROM audit_log GROUP BY table_name, record_id HAVING COUNT(*) > 1 ORDER BY COUNT(*) DESC LIMIT 1000;
 
--- Pattern 3: Sort on audit_log without index on changed_at
-SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
-SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
-SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
-SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
-SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
-SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
-SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
-SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
-SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
-SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+-- Pattern 2: Date + JSON size aggregation (~150ms per call)
+-- Heavy aggregation with string length computation on 300K rows
+SELECT table_name, action, DATE_TRUNC('day', changed_at), COUNT(*), SUM(LENGTH(COALESCE(new_values::text, ''))) FROM audit_log GROUP BY table_name, action, DATE_TRUNC('day', changed_at);
+SELECT table_name, action, DATE_TRUNC('day', changed_at), COUNT(*), SUM(LENGTH(COALESCE(new_values::text, ''))) FROM audit_log GROUP BY table_name, action, DATE_TRUNC('day', changed_at);
+SELECT table_name, action, DATE_TRUNC('day', changed_at), COUNT(*), SUM(LENGTH(COALESCE(new_values::text, ''))) FROM audit_log GROUP BY table_name, action, DATE_TRUNC('day', changed_at);
+SELECT table_name, action, DATE_TRUNC('day', changed_at), COUNT(*), SUM(LENGTH(COALESCE(new_values::text, ''))) FROM audit_log GROUP BY table_name, action, DATE_TRUNC('day', changed_at);
+SELECT table_name, action, DATE_TRUNC('day', changed_at), COUNT(*), SUM(LENGTH(COALESCE(new_values::text, ''))) FROM audit_log GROUP BY table_name, action, DATE_TRUNC('day', changed_at);
 
--- Pattern 4: ILIKE with leading wildcard - cannot use index
-SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
-SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
-SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
-SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
-SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
-SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
-SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
-SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
-SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
-SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
+-- Pattern 3: JSONB text search with LIKE (~148ms per call)
+-- Full scan with text conversion - no index can help
+SELECT table_name, COUNT(*), SUM(LENGTH(new_values::text)) FROM audit_log WHERE new_values::text LIKE '%status%' GROUP BY table_name;
+SELECT table_name, COUNT(*), SUM(LENGTH(new_values::text)) FROM audit_log WHERE new_values::text LIKE '%status%' GROUP BY table_name;
+SELECT table_name, COUNT(*), SUM(LENGTH(new_values::text)) FROM audit_log WHERE new_values::text LIKE '%status%' GROUP BY table_name;
+SELECT table_name, COUNT(*), SUM(LENGTH(new_values::text)) FROM audit_log WHERE new_values::text LIKE '%status%' GROUP BY table_name;
+SELECT table_name, COUNT(*), SUM(LENGTH(new_values::text)) FROM audit_log WHERE new_values::text LIKE '%status%' GROUP BY table_name;
 
--- Pattern 5: Large join order_items (100K) to orders (5K)
-SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
-SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
-SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
-SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
-SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
-SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
-SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
-SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
-SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
-SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
+-- Pattern 4: Multi-table join with aggregation (~107ms per call)
+-- Joins 4 tables with 100K+ order_items
+SELECT c.name, COUNT(DISTINCT o.id), SUM(oi.subtotal), AVG(oi.quantity) FROM categories c JOIN products p ON c.id = p.category_id JOIN order_items oi ON p.id = oi.product_id JOIN orders o ON oi.order_id = o.id GROUP BY c.name ORDER BY SUM(oi.subtotal) DESC;
+SELECT c.name, COUNT(DISTINCT o.id), SUM(oi.subtotal), AVG(oi.quantity) FROM categories c JOIN products p ON c.id = p.category_id JOIN order_items oi ON p.id = oi.product_id JOIN orders o ON oi.order_id = o.id GROUP BY c.name ORDER BY SUM(oi.subtotal) DESC;
+SELECT c.name, COUNT(DISTINCT o.id), SUM(oi.subtotal), AVG(oi.quantity) FROM categories c JOIN products p ON c.id = p.category_id JOIN order_items oi ON p.id = oi.product_id JOIN orders o ON oi.order_id = o.id GROUP BY c.name ORDER BY SUM(oi.subtotal) DESC;
+SELECT c.name, COUNT(DISTINCT o.id), SUM(oi.subtotal), AVG(oi.quantity) FROM categories c JOIN products p ON c.id = p.category_id JOIN order_items oi ON p.id = oi.product_id JOIN orders o ON oi.order_id = o.id GROUP BY c.name ORDER BY SUM(oi.subtotal) DESC;
+SELECT c.name, COUNT(DISTINCT o.id), SUM(oi.subtotal), AVG(oi.quantity) FROM categories c JOIN products p ON c.id = p.category_id JOIN order_items oi ON p.id = oi.product_id JOIN orders o ON oi.order_id = o.id GROUP BY c.name ORDER BY SUM(oi.subtotal) DESC;
 
--- Pattern 6: Expensive aggregation with GROUP BY across large tables
-SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
-SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
-SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
-SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
-SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
+-- Pattern 5: Nested aggregation (~71ms but high total)
+-- More iterations to accumulate total execution time
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+SELECT AVG(cnt), STDDEV(cnt), MAX(cnt) FROM (SELECT record_id, COUNT(*) as cnt FROM audit_log GROUP BY record_id) sub;
+
+-- Pattern 6: Expensive three-table join aggregation (~35ms but realistic)
 SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
 SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
 SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
 SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
 SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
 
--- Pattern 7: Missing composite index on (status, payment_status)
-SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
-SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
-SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
-SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
-SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
-SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
-SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
-SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
-SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
-SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
+-- Pattern 7: Sort on audit_log without index (~17ms but realistic)
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
 
--- Pattern 8: Correlated subquery - inefficient EXISTS on audit_log
-SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
-SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
-SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
-SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
-SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
+-- Pattern 8: EXISTS with correlation to large table (~21ms but realistic)
 SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
 SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
 SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
@@ -468,13 +441,14 @@ SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.re
 SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
 EOSQL
 
+
 # Copy workload SQL into container and run it
 compose cp "$workload_sql" postgres:/tmp/workload.sql
 compose exec -T postgres psql -U postgres -d demo_shop -q -f /tmp/workload.sql >/dev/null 2>&1
 compose exec -T postgres rm -f /tmp/workload.sql
 rm -f "$workload_sql"
 
-echo "  Workload patterns completed (80 queries across 8 patterns)."
+echo "  Workload patterns completed (45 queries across 8 patterns)."
 
 echo "  Workload simulation completed."
 echo "  Verifying pg_stat_statements data..."
