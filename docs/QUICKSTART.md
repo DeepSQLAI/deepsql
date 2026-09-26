@@ -8,7 +8,7 @@ curl -fsSL https://deepsql.ai/install.sh | bash
 
 This runs the complete install: clones the repo, builds the stack from source, and
 starts all services. The only input needed is an LLM API key — or skip it and
-configure later in Settings → AI Provider.
+configure later during onboarding in the web UI.
 
 ## What you need
 
@@ -25,7 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/DeepSQLAI/deepsql/main/scripts/self
 ## With an LLM key
 
 ```bash
-DEEPSQL_CHAT_API_KEY=sk-your-key curl -fsSL https://deepsql.ai/install.sh | bash
+DEEPSQL_LLM_API_KEY=sk-your-key curl -fsSL https://deepsql.ai/install.sh | bash
 ```
 
 ## Without an LLM key (keyless start)
@@ -34,7 +34,7 @@ DEEPSQL_CHAT_API_KEY=sk-your-key curl -fsSL https://deepsql.ai/install.sh | bash
 DEEPSQL_INITIAL_ADMIN_EMAIL=admin@example.com curl -fsSL https://deepsql.ai/install.sh | bash
 ```
 
-Chat and AI features are disabled until you configure a key in Settings → AI Provider.
+Chat and AI features are disabled until you configure a key during onboarding in the web UI.
 
 ## After install
 

@@ -8,7 +8,7 @@ Ask the user for their LLM API key (OpenAI, Azure, etc.) — or skip if they wan
 configure later — then run:
 
 ```bash
-DEEPSQL_CHAT_API_KEY=<key> curl -fsSL https://deepsql.ai/install.sh | bash
+DEEPSQL_LLM_API_KEY=<key> curl -fsSL https://deepsql.ai/install.sh | bash
 ```
 
 Or without a key:
@@ -27,7 +27,7 @@ curl -fsS http://localhost:8080/api/actuator/health
 
 - Login URL: http://localhost:3000
 - Credentials: stored in `~/deepsql/.env`
-- If no LLM key: configure in Settings → AI Provider
+- If no LLM key: configure during onboarding in the web UI
 
 The installer prints `NEEDS_USER_INPUT: ...` for missing optional inputs, then exits 0
 with all services healthy.

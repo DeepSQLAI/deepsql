@@ -11,7 +11,7 @@ Human docs: https://deepsql.ai/docs
 
 1. A model provider API key (OpenAI, Azure OpenAI, Anthropic, or any OpenAI-compatible
    server). **Optional** — the stack runs without a key and the user can configure it
-   later in Settings → AI Provider.
+   later during onboarding in the web UI.
 2. Admin email (or use a default like admin@example.com).
 
 Everything else (password, secrets, embeddings) is auto-generated or optional.
@@ -23,7 +23,7 @@ Never print secrets back to the user or commit .env to version control.
 Ask the user for their LLM API key (or skip if they want to configure later), then run:
 
 ```bash
-DEEPSQL_CHAT_API_KEY=<key> curl -fsSL https://deepsql.ai/install.sh | bash
+DEEPSQL_LLM_API_KEY=<key> curl -fsSL https://deepsql.ai/install.sh | bash
 ```
 
 Or without a key:
@@ -129,7 +129,7 @@ DEEPSQL_CHAT_MODEL=llama3.1
 ```
 
 Keyless start: If no LLM key is provided, the stack starts with AI features disabled.
-Configure the key in Settings → AI Provider after logging in.
+Configure the key during onboarding in the web UI after logging in.
 
 ## Step 3 — Configure embeddings (optional)
 
@@ -161,7 +161,8 @@ Ports (override in .env): frontend 3000 (`DEEPSQL_FRONTEND_PORT`), backend 8080
 Open http://localhost:3000 and log in with the admin email and password from .env.
 Then, in the UI:
 1. Add a database connection (Postgres or MySQL — RDS, Aurora, Cloud SQL, self-managed).
-2. If no LLM key was configured: go to Settings → AI Provider to add it.
+2. If no LLM key was configured: add it during onboarding or re-run the installer with
+   DEEPSQL_LLM_API_KEY=<key>.
 3. Give company context: business rules, code scans, slow query logs.
 4. Configure users and row/column-level access policies.
 

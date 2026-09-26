@@ -11,17 +11,20 @@
 # successful install, it optionally seeds a demo database.
 #
 # Keyless start: The stack starts without an LLM key. Chat and AI features are
-# disabled until a key is configured in Settings → AI Provider.
+# disabled until a key is configured during onboarding in the web UI.
 #
 # Environment variables override .env placeholders:
-#   DEEPSQL_CHAT_API_KEY       LLM key for chat (optional - can set later in UI)
-#   DEEPSQL_CHAT_PROVIDER      Provider id (default: openai)
-#   DEEPSQL_CHAT_ENDPOINT      API endpoint (default: https://api.openai.com/v1)
-#   DEEPSQL_CHAT_MODEL         Model name (default: gpt-4o)
+#   DEEPSQL_LLM_API_KEY        LLM key (optional - can set later in the web UI)
+#   DEEPSQL_LLM_PROVIDER       Provider id (default: openai)
+#   DEEPSQL_LLM_BASE_URL       API endpoint (default: https://api.openai.com/v1)
+#   DEEPSQL_LLM_MODEL          Model name (default: gpt-4o)
 #   DEEPSQL_INITIAL_ADMIN_EMAIL    Admin login email (prompted if unset)
 #   DEEPSQL_INITIAL_ADMIN_PASSWORD Admin password (generated if unset)
 #   DEEPSQL_FRONTEND_PORT      Frontend port (default: 3000)
 #   DEEPSQL_PROJECT_NAME       Compose project name (default: deepsql-selfhost)
+#
+# Aliases (for backward compatibility):
+#   DEEPSQL_CHAT_API_KEY, DEEPSQL_CHAT_PROVIDER, DEEPSQL_CHAT_ENDPOINT, DEEPSQL_CHAT_MODEL
 #
 # Options:
 #   -h, --help           Show this help message and exit
@@ -84,24 +87,27 @@ Options:
   --project-name NAME  Set Compose project name
 
 Environment variables (override .env placeholders):
-  DEEPSQL_CHAT_API_KEY         LLM key (optional - can set later in UI)
-  DEEPSQL_CHAT_PROVIDER        Provider id (default: openai)
-  DEEPSQL_CHAT_ENDPOINT        API endpoint
-  DEEPSQL_CHAT_MODEL           Model name
+  DEEPSQL_LLM_API_KEY          LLM key (optional - can set later in the web UI)
+  DEEPSQL_LLM_PROVIDER         Provider id (default: openai)
+  DEEPSQL_LLM_BASE_URL         API endpoint (default: https://api.openai.com/v1)
+  DEEPSQL_LLM_MODEL            Model name (default: gpt-4o)
   DEEPSQL_INITIAL_ADMIN_EMAIL  Admin login email
   DEEPSQL_INITIAL_ADMIN_PASSWORD  Admin password (generated if unset)
   DEEPSQL_FRONTEND_PORT        Frontend port (default: 3000)
   DEEPSQL_PROJECT_NAME         Compose project name
+
+Aliases (backward compatible):
+  DEEPSQL_CHAT_API_KEY, DEEPSQL_CHAT_PROVIDER, DEEPSQL_CHAT_ENDPOINT, DEEPSQL_CHAT_MODEL
 
 Examples:
   # Interactive install (prompts for admin email)
   ./scripts/self-host/install.sh
 
   # Non-interactive with LLM key
-  DEEPSQL_CHAT_API_KEY=sk-... DEEPSQL_INITIAL_ADMIN_EMAIL=admin@example.com \
+  DEEPSQL_LLM_API_KEY=sk-... DEEPSQL_INITIAL_ADMIN_EMAIL=admin@example.com \
     ./scripts/self-host/install.sh --non-interactive
 
-  # Keyless install (configure LLM later in UI)
+  # Keyless install (configure LLM later in the web UI)
   DEEPSQL_INITIAL_ADMIN_EMAIL=admin@example.com \
     ./scripts/self-host/install.sh --non-interactive
 
@@ -109,7 +115,7 @@ Examples:
   ./scripts/self-host/install.sh --fresh
 
 For AI agents:
-  DEEPSQL_CHAT_API_KEY=<key> curl -fsSL https://deepsql.ai/install.sh | bash
+  DEEPSQL_LLM_API_KEY=<key> curl -fsSL https://deepsql.ai/install.sh | bash
 
   After install:
     Health: curl -fsS http://localhost:8080/api/actuator/health
@@ -685,7 +691,8 @@ print_summary() {
   
   if [[ "$has_llm_key" -eq 0 ]]; then
     echo "${YELLOW}  Note: No LLM key configured. Chat and AI features are disabled.${NC}"
-    echo "  Configure your LLM key in Settings → AI Provider after logging in."
+    echo "  Add the key during onboarding in the web UI, or re-run the installer with:"
+    echo "    DEEPSQL_LLM_API_KEY=<key> ./scripts/self-host/install.sh"
     echo
   fi
   
@@ -724,10 +731,27 @@ main() {
     fi
   fi
   
+  # ── Env var aliasing ─────────────────────────────────────────────────────────
+  # DEEPSQL_LLM_* is the primary documented name; DEEPSQL_CHAT_* is the alias.
+  # The backend uses DEEPSQL_CHAT_*, so we map LLM->CHAT here.
+  if [[ -n "${DEEPSQL_LLM_API_KEY:-}" ]]; then
+    export DEEPSQL_CHAT_API_KEY="${DEEPSQL_CHAT_API_KEY:-$DEEPSQL_LLM_API_KEY}"
+  fi
+  if [[ -n "${DEEPSQL_LLM_PROVIDER:-}" ]]; then
+    export DEEPSQL_CHAT_PROVIDER="${DEEPSQL_CHAT_PROVIDER:-$DEEPSQL_LLM_PROVIDER}"
+  fi
+  if [[ -n "${DEEPSQL_LLM_BASE_URL:-}" ]]; then
+    export DEEPSQL_CHAT_ENDPOINT="${DEEPSQL_CHAT_ENDPOINT:-$DEEPSQL_LLM_BASE_URL}"
+  fi
+  if [[ -n "${DEEPSQL_LLM_MODEL:-}" ]]; then
+    export DEEPSQL_CHAT_MODEL="${DEEPSQL_CHAT_MODEL:-$DEEPSQL_LLM_MODEL}"
+  fi
+  
   # ── Load .env but let env vars take precedence ──────────────────────────────
   # Store current env vars that should override .env
   declare -A override_vars
   for var in DEEPSQL_CHAT_API_KEY DEEPSQL_CHAT_PROVIDER DEEPSQL_CHAT_ENDPOINT DEEPSQL_CHAT_MODEL \
+             DEEPSQL_LLM_API_KEY DEEPSQL_LLM_PROVIDER DEEPSQL_LLM_BASE_URL DEEPSQL_LLM_MODEL \
              DEEPSQL_EMBEDDING_PROVIDER DEEPSQL_EMBEDDING_API_KEY DEEPSQL_EMBEDDING_ENDPOINT DEEPSQL_EMBEDDING_MODEL \
              DEEPSQL_INITIAL_ADMIN_EMAIL DEEPSQL_INITIAL_ADMIN_PASSWORD \
              DEEPSQL_FRONTEND_PORT DEEPSQL_BACKEND_PORT DEEPSQL_POSTGRES_PORT DEEPSQL_VALKEY_PORT \
@@ -748,6 +772,20 @@ main() {
   for var in "${!override_vars[@]}"; do
     export "$var=${override_vars[$var]}"
   done
+  
+  # Re-apply LLM->CHAT aliasing after sourcing .env (in case .env had DEEPSQL_LLM_*)
+  if [[ -n "${DEEPSQL_LLM_API_KEY:-}" ]] && [[ -z "${DEEPSQL_CHAT_API_KEY:-}" || "${DEEPSQL_CHAT_API_KEY}" == replace-with-* ]]; then
+    export DEEPSQL_CHAT_API_KEY="$DEEPSQL_LLM_API_KEY"
+  fi
+  if [[ -n "${DEEPSQL_LLM_PROVIDER:-}" ]] && [[ -z "${DEEPSQL_CHAT_PROVIDER:-}" || "${DEEPSQL_CHAT_PROVIDER}" == "openai" ]]; then
+    export DEEPSQL_CHAT_PROVIDER="$DEEPSQL_LLM_PROVIDER"
+  fi
+  if [[ -n "${DEEPSQL_LLM_BASE_URL:-}" ]] && [[ -z "${DEEPSQL_CHAT_ENDPOINT:-}" || "${DEEPSQL_CHAT_ENDPOINT}" == https://api.openai.com* ]]; then
+    export DEEPSQL_CHAT_ENDPOINT="$DEEPSQL_LLM_BASE_URL"
+  fi
+  if [[ -n "${DEEPSQL_LLM_MODEL:-}" ]] && [[ -z "${DEEPSQL_CHAT_MODEL:-}" || "${DEEPSQL_CHAT_MODEL}" == "gpt-4o" ]]; then
+    export DEEPSQL_CHAT_MODEL="$DEEPSQL_LLM_MODEL"
+  fi
   
   # ── Check for existing volumes ──────────────────────────────────────────────
   check_existing_volumes
@@ -778,7 +816,7 @@ main() {
     if can_prompt; then
       echo
       echo "LLM API key (e.g., OpenAI sk-... key)."
-      echo "Press Enter to skip and configure later in Settings → AI Provider."
+      echo "Press Enter to skip and configure later during onboarding in the web UI."
       prompt_value DEEPSQL_CHAT_API_KEY "LLM API key" 0 1
     fi
     
@@ -803,9 +841,9 @@ main() {
       fi
       echo
       echo "No LLM key configured. Chat and AI features will be disabled."
-      echo "Configure your LLM key in Settings → AI Provider after logging in."
+      echo "Configure your LLM key during onboarding in the web UI after logging in."
       if [[ "$NON_INTERACTIVE" -eq 1 ]]; then
-        echo "NEEDS_USER_INPUT: DEEPSQL_CHAT_API_KEY (optional, can be set in UI at http://localhost:${DEEPSQL_FRONTEND_PORT:-3000})"
+        echo "NEEDS_USER_INPUT: DEEPSQL_LLM_API_KEY (optional, can be set during onboarding at http://localhost:${DEEPSQL_FRONTEND_PORT:-3000})"
       fi
     fi
   fi

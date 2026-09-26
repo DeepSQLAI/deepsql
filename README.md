@@ -31,7 +31,7 @@ curl -fsSL https://deepsql.ai/install.sh | bash
 
 This clones the latest release to `~/deepsql`, runs the full install, and prints the
 login URL and credentials location. The only input you need is an LLM API key — or skip
-it and configure the key later in **Settings → AI Provider**.
+it and configure the key later during onboarding in the web UI.
 
 **Options:** `--non-interactive`, `--fresh` (clean install), `--no-seed-demo`,
 `--ref v1.3.0` (specific version). See
@@ -50,7 +50,7 @@ If you are a coding agent (Claude, Cursor, Codex) setting up DeepSQL for a user:
 
 2. **Run the install:**
    ```bash
-   DEEPSQL_CHAT_API_KEY=<key> curl -fsSL https://deepsql.ai/install.sh | bash
+   DEEPSQL_LLM_API_KEY=<key> curl -fsSL https://deepsql.ai/install.sh | bash
    ```
    Or without a key:
    ```bash
@@ -65,7 +65,7 @@ If you are a coding agent (Claude, Cursor, Codex) setting up DeepSQL for a user:
 4. **Tell the user:**
    - Login URL: **http://localhost:3000**
    - Login email and password: stored in `~/deepsql/.env`
-   - If no LLM key was provided: configure it in **Settings → AI Provider**
+   - If no LLM key was provided: configure it during onboarding in the web UI
 
 The installer prints `NEEDS_USER_INPUT: ...` lines for any missing optional inputs,
 then exits 0 with all services running.

@@ -225,6 +225,6 @@ echo
 echo "Next steps:"
 echo "  1. Put a checkout of the DeepSQL source in $DEPLOY_DIR (git clone), if not already there."
 echo "  2. cd $DEPLOY_DIR && cp .env.example .env   (skip if .env was created above)"
-echo "  3. Edit .env — at minimum DEEPSQL_CHAT_PROVIDER, DEEPSQL_CHAT_API_KEY,"
-echo "     DEEPSQL_CHAT_ENDPOINT, DEEPSQL_CHAT_MODEL."
+echo "  3. Edit .env — at minimum DEEPSQL_LLM_API_KEY (or set it as an env var)."
+echo "     Or skip it and configure during onboarding in the web UI."
 echo "  4. Run: ./scripts/self-host/install.sh"

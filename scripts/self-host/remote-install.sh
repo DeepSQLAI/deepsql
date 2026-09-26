@@ -11,7 +11,7 @@
 # or prompted.
 #
 # For AI agents (non-interactive):
-#   DEEPSQL_CHAT_API_KEY=sk-... curl -fsSL https://deepsql.ai/install.sh | bash
+#   DEEPSQL_LLM_API_KEY=sk-... curl -fsSL https://deepsql.ai/install.sh | bash
 #
 # Fallback (raw GitHub URL):
 #   curl -fsSL https://raw.githubusercontent.com/DeepSQLAI/deepsql/main/scripts/self-host/remote-install.sh | bash
@@ -380,7 +380,7 @@ DeepSQL Remote Installer
 Usage: curl -fsSL https://deepsql.ai/install.sh | bash -s -- [options]
 
 One command installs DeepSQL. The only input is an LLM key (optional—can be
-set later in Settings → AI Provider).
+set later during onboarding in the web UI).
 
 Options:
   -h, --help           Show this help message and exit
@@ -396,10 +396,10 @@ Options:
 Environment variables (override .env placeholders):
   DEEPSQL_HOME                 Installation directory (default: \$HOME/deepsql)
   DEEPSQL_REF                  Branch or tag to checkout (default: latest release)
-  DEEPSQL_CHAT_API_KEY         LLM key for chat (optional)
-  DEEPSQL_CHAT_PROVIDER        Provider id (default: openai)
-  DEEPSQL_CHAT_ENDPOINT        API endpoint
-  DEEPSQL_CHAT_MODEL           Model name
+  DEEPSQL_LLM_API_KEY          LLM key (optional - can set later in the web UI)
+  DEEPSQL_LLM_PROVIDER         Provider id (default: openai)
+  DEEPSQL_LLM_BASE_URL         API endpoint (default: https://api.openai.com/v1)
+  DEEPSQL_LLM_MODEL            Model name (default: gpt-4o)
   DEEPSQL_INITIAL_ADMIN_EMAIL  Admin login email
   DEEPSQL_INITIAL_ADMIN_PASSWORD  Admin password (generated if unset)
 
@@ -408,7 +408,7 @@ Examples:
   curl -fsSL https://deepsql.ai/install.sh | bash
 
   # With LLM key (non-interactive for AI agents)
-  DEEPSQL_CHAT_API_KEY=sk-... curl -fsSL https://deepsql.ai/install.sh | bash
+  DEEPSQL_LLM_API_KEY=sk-... curl -fsSL https://deepsql.ai/install.sh | bash
 
   # Keyless install (configure LLM later in UI)
   DEEPSQL_INITIAL_ADMIN_EMAIL=admin@example.com \\
@@ -423,7 +423,7 @@ Examples:
 For AI agents:
   Ask the user for their LLM API key (OpenAI, Azure OpenAI, etc.), then run:
 
-    DEEPSQL_CHAT_API_KEY=<key> curl -fsSL https://deepsql.ai/install.sh | bash
+    DEEPSQL_LLM_API_KEY=<key> curl -fsSL https://deepsql.ai/install.sh | bash
 
   After install:
     Health: curl -fsS http://localhost:8080/api/actuator/health
