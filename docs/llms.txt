@@ -1,0 +1,37 @@
+# DeepSQL — quick setup for AI agents
+
+DeepSQL is an open-source database agent for PostgreSQL and MySQL.
+
+## Install
+
+Ask the user for their LLM API key (OpenAI, Azure, etc.) — or skip if they want to
+configure later — then run:
+
+```bash
+DEEPSQL_CHAT_API_KEY=<key> curl -fsSL https://deepsql.ai/install.sh | bash
+```
+
+Or without a key:
+
+```bash
+DEEPSQL_INITIAL_ADMIN_EMAIL=admin@example.com curl -fsSL https://deepsql.ai/install.sh | bash
+```
+
+## Verify
+
+```bash
+curl -fsS http://localhost:8080/api/actuator/health
+```
+
+## After install
+
+- Login URL: http://localhost:3000
+- Credentials: stored in `~/deepsql/.env`
+- If no LLM key: configure in Settings → AI Provider
+
+The installer prints `NEEDS_USER_INPUT: ...` for missing optional inputs, then exits 0
+with all services healthy.
+
+## Full docs
+
+See docs/llms-full.txt for the complete runbook.

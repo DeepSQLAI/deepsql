@@ -1,90 +1,106 @@
 # Quick Start Guide
 
-## ✅ Frontend Status
-**Frontend is currently running on:** http://localhost:3000
+## One-liner install
 
-You can access it in your browser now!
-
-## 🚀 Starting the Backend
-
-The backend requires Java 17+ and Maven. Here's how to set it up:
-
-### Step 1: Install Java 17
-
-**macOS (using Homebrew):**
 ```bash
-brew install openjdk@17
+curl -fsSL https://deepsql.ai/install.sh | bash
 ```
 
-**Or download from:**
-- https://adoptium.net/ (recommended)
-- Select Java 17 LTS for macOS
+This runs the complete install: clones the repo, builds the stack from source, and
+starts all services. The only input needed is an LLM API key — or skip it and
+configure later in Settings → AI Provider.
 
-**Verify installation:**
+## What you need
+
+- **Docker** with Compose v2 and buildx >= 0.17.0
+- **~4 GB of memory** available to Docker
+- **An LLM API key** (optional — can configure later)
+
+On a fresh Ubuntu/Debian server:
+
 ```bash
-java -version
-# Should show: openjdk version "17.x.x"
+curl -fsSL https://raw.githubusercontent.com/DeepSQLAI/deepsql/main/scripts/self-host/bootstrap-server.sh | sudo bash
 ```
 
-### Step 2: Install Maven
+## With an LLM key
 
-**macOS (using Homebrew):**
 ```bash
-brew install maven
+DEEPSQL_CHAT_API_KEY=sk-your-key curl -fsSL https://deepsql.ai/install.sh | bash
 ```
 
-**Verify installation:**
+## Without an LLM key (keyless start)
+
 ```bash
-mvn -version
+DEEPSQL_INITIAL_ADMIN_EMAIL=admin@example.com curl -fsSL https://deepsql.ai/install.sh | bash
 ```
 
-### Step 3: Start the Backend
+Chat and AI features are disabled until you configure a key in Settings → AI Provider.
 
-**Option A: Using the helper script**
+## After install
+
+1. **Open** http://localhost:3000
+2. **Log in** with the email and password from `~/deepsql/.env`
+3. **Connect a database** (Postgres or MySQL)
+4. **Start asking questions** in the Agent tab
+
+## Verify the install
+
 ```bash
-./start-backend.sh
+curl -fsS http://localhost:8080/api/actuator/health
 ```
 
-**Option B: Manual start**
+## Options
+
+- `--non-interactive` — never prompt (use with env vars)
+- `--fresh` — remove existing volumes before install
+- `--no-seed-demo` — skip demo database seeding
+- `--ref v1.3.0` — install a specific version
+
+Example:
+
 ```bash
-cd backend
-mvn spring-boot:run
+curl -fsSL https://deepsql.ai/install.sh | bash -s -- --fresh --ref v1.3.0
 ```
 
-The backend will start on: **http://localhost:8080**
+## Ports
 
-### Step 4: Verify Both Services
+| Service  | Port | Override                |
+|----------|------|-------------------------|
+| Frontend | 3000 | `DEEPSQL_FRONTEND_PORT` |
+| Backend  | 8080 | `DEEPSQL_BACKEND_PORT`  |
+| Postgres | 5432 | `DEEPSQL_POSTGRES_PORT` |
+| Valkey   | 6379 | `DEEPSQL_VALKEY_PORT`   |
 
-1. **Backend**: Open http://localhost:8080/api/connections
-   - Should return: `[]` (empty array)
+## Troubleshooting
 
-2. **Frontend**: Already running at http://localhost:3000
-   - You should see the DBA Agent interface
+**Docker permission denied:**
+```bash
+sudo usermod -aG docker $USER
+newgrp docker
+```
 
-## 🎯 Next Steps
-
-1. Open http://localhost:3000 in your browser
-2. Click the Settings icon (⚙️) in the left panel
-3. Connect to your MySQL or PostgreSQL database
-4. View schema visualizations and DBA stats!
-
-## 📝 Notes
-
-- The frontend is already running in the background
-- You need to start the backend separately in a new terminal
-- Both services need to be running for full functionality
-- Backend stores encrypted credentials in `backend/data/vault.mv.db`
-
-## 🐛 Troubleshooting
+**buildx too old:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/DeepSQLAI/deepsql/main/scripts/self-host/bootstrap-server.sh | sudo bash
+```
 
 **Backend won't start:**
-- Ensure Java 17+ is installed: `java -version`
-- Ensure Maven is installed: `mvn -version`
-- Check if port 8080 is available: `lsof -i :8080`
+Check `docker compose logs backend` — usually a missing secret or port conflict.
 
-**Frontend can't connect to backend:**
-- Ensure backend is running on port 8080
-- Check browser console for errors
-- Verify `.env.local` has: `NEXT_PUBLIC_API_URL=http://localhost:8080`
+## Development
 
+For local development without Docker:
 
+```bash
+docker compose up -d postgres valkey
+cd backend && ./mvnw spring-boot:run    # http://localhost:8080/api
+npm install && npm run dev              # http://localhost:3000
+```
+
+Requires **JDK 25** and **Node 22**.
+
+## Next steps
+
+- [README.md](../README.md) — full documentation
+- [docs/llms-full.txt](llms-full.txt) — AI agent setup runbook
+- [mcp/README.md](../mcp/README.md) — CLI and MCP server

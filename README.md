@@ -29,12 +29,46 @@ DeepSQL Desktop first ship + Agent/Brain/Editor hardening. Notes:
 curl -fsSL https://deepsql.ai/install.sh | bash
 ```
 
-This checks prerequisites, clones the latest release to `~/deepsql`, and guides you
-through configuration. See [`scripts/self-host/remote-install.sh`](scripts/self-host/remote-install.sh)
-for options (`--yes` for noninteractive, `--branch` for a specific version).
+This clones the latest release to `~/deepsql`, runs the full install, and prints the
+login URL and credentials location. The only input you need is an LLM API key — or skip
+it and configure the key later in **Settings → AI Provider**.
+
+**Options:** `--non-interactive`, `--fresh` (clean install), `--no-seed-demo`,
+`--ref v1.3.0` (specific version). See
+[`scripts/self-host/remote-install.sh`](scripts/self-host/remote-install.sh) for the
+full list.
 
 > The script source of truth is [`scripts/self-host/remote-install.sh`](scripts/self-host/remote-install.sh)
 > in this repository. `deepsql.ai/install.sh` serves a copy for the homepage CTA.
+
+### For AI agents
+
+If you are a coding agent (Claude, Cursor, Codex) setting up DeepSQL for a user:
+
+1. **Ask the user for one input:** their LLM API key (OpenAI `sk-...`, Azure, etc.).
+   This is optional — the stack runs without a key and the user can add it later.
+
+2. **Run the install:**
+   ```bash
+   DEEPSQL_CHAT_API_KEY=<key> curl -fsSL https://deepsql.ai/install.sh | bash
+   ```
+   Or without a key:
+   ```bash
+   DEEPSQL_INITIAL_ADMIN_EMAIL=admin@example.com curl -fsSL https://deepsql.ai/install.sh | bash
+   ```
+
+3. **Verify the install:**
+   ```bash
+   curl -fsS http://localhost:8080/api/actuator/health
+   ```
+
+4. **Tell the user:**
+   - Login URL: **http://localhost:3000**
+   - Login email and password: stored in `~/deepsql/.env`
+   - If no LLM key was provided: configure it in **Settings → AI Provider**
+
+The installer prints `NEEDS_USER_INPUT: ...` lines for any missing optional inputs,
+then exits 0 with all services running.
 
 ### Step-by-step
 
