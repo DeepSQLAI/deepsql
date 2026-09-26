@@ -104,9 +104,14 @@ async function loadDashboard() {
             GROUP BY DATE(created_at) ORDER BY day DESC
         `);
         if (revenue.rows && revenue.rows.length > 0) {
+            const formatDate = (d) => {
+                const date = new Date(d);
+                const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                return `${months[date.getMonth()]} ${date.getDate()}`;
+            };
             document.getElementById("revenue-table").innerHTML = `<table>
                 <thead><tr><th>Date</th><th>Orders</th><th>Revenue</th></tr></thead>
-                <tbody>${revenue.rows.map(r => `<tr><td>${r.day}</td><td>${Number(r.orders).toLocaleString()}</td><td>$${Number(r.revenue || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>`).join("")}</tbody>
+                <tbody>${revenue.rows.map(r => `<tr><td>${formatDate(r.day)}</td><td>${Number(r.orders).toLocaleString()}</td><td>$${Number(r.revenue || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>`).join("")}</tbody>
             </table>`;
         }
         
