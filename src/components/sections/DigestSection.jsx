@@ -10,15 +10,15 @@ import styles from './DigestSection.module.css'
 // ─────────────────────────────────────────────
 function renderInline(text) {
   const parts = []
-  const re = /(\*[^*]+\*|_[^_]+_|`[^`]+`)/g
+  // Match bold (*text*) and code (`text`).
+  // Skip underscore italics (_text_) to preserve index/table names like idx_orders_status.
+  const re = /(\*[^*]+\*|`[^`]+`)/g
   let last = 0, m, key = 0
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) parts.push(text.slice(last, m.index))
     const raw = m[0]
     if (raw.startsWith('*') && raw.endsWith('*'))
       parts.push(<strong key={key++}>{raw.slice(1, -1)}</strong>)
-    else if (raw.startsWith('_') && raw.endsWith('_'))
-      parts.push(<em key={key++}>{raw.slice(1, -1)}</em>)
     else if (raw.startsWith('`') && raw.endsWith('`'))
       parts.push(<code key={key++} className={styles.inlineCode}>{raw.slice(1, -1)}</code>)
     last = m.index + raw.length
@@ -146,7 +146,9 @@ function DigestCard({ digest }) {
 }
 
 function DigestSection({ section }) {
-  const nonEmpty = section.lines.filter(l => l.trim())
+  const nonEmpty = section.lines
+    .filter(l => l.trim())
+    .filter(l => !l.includes('[sig:'))  // Hide internal signature/dedupe markers
   return (
     <div className={styles.section}>
       <div className={styles.sectionTitle}>{section.title}</div>
