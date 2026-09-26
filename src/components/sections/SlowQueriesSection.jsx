@@ -45,7 +45,7 @@ export default function SlowQueriesSection() {
   const hasLogSource = Boolean(logSourceQ.data?.id)
 
   // PostgreSQL connections can use pg_stat_statements directly without a log source
-  const isPostgres = selectedConnection?.dbType?.toLowerCase() === 'postgresql'
+  const isPostgres = ['postgresql', 'postgres'].includes(selectedConnection?.dbType?.toLowerCase())
   const canShowPerformance = hasLogSource || isPostgres
 
   // Filter tabs based on available data sources
