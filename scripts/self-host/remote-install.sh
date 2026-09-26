@@ -6,6 +6,13 @@
 # One-liner install:
 #   curl -fsSL https://deepsql.ai/install.sh | bash
 #
+# This script clones the repository and runs the full install. Pass environment
+# variables for LLM credentials and admin account; everything else is generated
+# or prompted.
+#
+# For AI agents (non-interactive):
+#   DEEPSQL_LLM_API_KEY=sk-... curl -fsSL https://deepsql.ai/install.sh | bash
+#
 # Fallback (raw GitHub URL):
 #   curl -fsSL https://raw.githubusercontent.com/DeepSQLAI/deepsql/main/scripts/self-host/remote-install.sh | bash
 #
@@ -28,7 +35,10 @@ set -euo pipefail
 
 DEEPSQL_REPO="DeepSQLAI/deepsql"
 DEEPSQL_HOME="${DEEPSQL_HOME:-$HOME/deepsql}"
-DEEPSQL_BRANCH="${DEEPSQL_BRANCH:-}"  # empty = auto-detect latest release tag
+DEEPSQL_REF="${DEEPSQL_REF:-}"  # empty = auto-detect latest release tag
+
+# Script version (updated with releases)
+REMOTE_INSTALLER_VERSION="1.4.0"
 
 # Colors (disabled if not a terminal)
 if [[ -t 1 ]]; then
@@ -42,9 +52,9 @@ else
   RED='' GREEN='' YELLOW='' BLUE='' BOLD='' NC=''
 fi
 
-info()  { printf "${BLUE}==>${NC} %s\n" "$*"; }
-warn()  { printf "${YELLOW}Warning:${NC} %s\n" "$*" >&2; }
-error() { printf "${RED}Error:${NC} %s\n" "$*" >&2; }
+info()    { printf "${BLUE}==>${NC} %s\n" "$*"; }
+warn()    { printf "${YELLOW}Warning:${NC} %s\n" "$*" >&2; }
+error()   { printf "${RED}Error:${NC} %s\n" "$*" >&2; }
 success() { printf "${GREEN}✓${NC} %s\n" "$*"; }
 
 # ── OS / Architecture Detection ───────────────────────────────────────────────
@@ -107,6 +117,34 @@ version_ge() {
   [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" == "$2" ]]
 }
 
+check_docker_permission() {
+  if ! docker info >/dev/null 2>&1; then
+    local docker_err
+    docker_err="$(docker info 2>&1 || true)"
+    
+    if echo "$docker_err" | grep -qi "permission denied\|connect: permission denied\|Got permission denied"; then
+      error "Docker permission denied."
+      echo
+      echo "Your user is not in the docker group. Fix with:"
+      echo
+      echo "  ${BOLD}sudo usermod -aG docker \$USER${NC}"
+      echo "  ${BOLD}newgrp docker${NC}  # or log out and back in"
+      echo
+      echo "Then re-run this installer:"
+      echo "  curl -fsSL https://deepsql.ai/install.sh | bash"
+      exit 1
+    elif echo "$docker_err" | grep -qi "Is the docker daemon running\|Cannot connect"; then
+      error "Docker daemon is not running."
+      echo
+      echo "Start Docker with:"
+      echo "  sudo systemctl start docker"
+      echo
+      echo "Then re-run this installer."
+      exit 1
+    fi
+  fi
+}
+
 check_docker() {
   info "Checking Docker..."
   
@@ -129,17 +167,7 @@ check_docker() {
     exit 1
   fi
   
-  if ! docker info >/dev/null 2>&1; then
-    error "Docker daemon is not running or you lack permission."
-    echo
-    echo "If Docker is installed but not running:"
-    echo "  sudo systemctl start docker"
-    echo
-    echo "If you need permission:"
-    echo "  sudo usermod -aG docker \$USER"
-    echo "  # Then log out and back in"
-    exit 1
-  fi
+  check_docker_permission
   success "Docker is running"
   
   # Check Compose v2
@@ -159,7 +187,7 @@ check_docker() {
   fi
   success "Docker Compose $compose_version"
   
-  # Check buildx (required for multi-stage builds)
+  # Check buildx
   local buildx_version
   buildx_version="$(docker buildx version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
   if [[ -z "$buildx_version" ]]; then
@@ -183,33 +211,59 @@ check_docker() {
   success "Docker buildx $buildx_version"
 }
 
-# ── Release Tag Detection ─────────────────────────────────────────────────────
+# ── Release Tag Detection with Retry ──────────────────────────────────────────
 
 get_latest_release_tag() {
-  # Query GitHub API for tags, filter to product tags (v[0-9]*), exclude desktop-v* tags
+  local max_retries=3
+  local retry_delay=2
+  local attempt
+  
+  for ((attempt=1; attempt<=max_retries; attempt++)); do
+    local tags
+    tags="$(curl -fsSL --retry 2 "https://api.github.com/repos/${DEEPSQL_REPO}/tags?per_page=50" 2>/dev/null || true)"
+    
+    if [[ -n "$tags" ]]; then
+      # Extract tag names, filter to product releases only:
+      # - Must start with v followed by a digit (v1.0.0, v2.3.4, etc.)
+      # - Excludes desktop-v*, agent-v*, or any other prefixed tags
+      local latest
+      latest="$(echo "$tags" \
+        | grep -o '"name": *"[^"]*"' \
+        | cut -d'"' -f4 \
+        | grep -E '^v[0-9]' \
+        | grep -v '^desktop-' \
+        | sort -V -r \
+        | head -1 || true)"
+      
+      if [[ -n "$latest" ]]; then
+        echo "$latest"
+        return 0
+      fi
+    fi
+    
+    if [[ "$attempt" -lt "$max_retries" ]]; then
+      sleep "$retry_delay"
+      retry_delay=$((retry_delay * 2))
+    fi
+  done
+  
+  return 1
+}
+
+# Fallback: use git ls-remote (not rate-limited like API)
+get_latest_release_tag_git() {
   local tags
-  tags="$(curl -fsSL "https://api.github.com/repos/${DEEPSQL_REPO}/tags?per_page=50" 2>/dev/null || true)"
+  tags="$(git ls-remote --tags "https://github.com/${DEEPSQL_REPO}.git" 2>/dev/null | \
+    grep -oE 'refs/tags/v[0-9][^{]*$' | \
+    sed 's|refs/tags/||' | \
+    grep -v '^desktop-' | \
+    sort -V -r | \
+    head -1 || true)"
   
-  if [[ -z "$tags" ]]; then
-    return 1
-  fi
-  
-  # Extract tag names, filter to product releases only:
-  # - Must start with v followed by a digit (v1.0.0, v2.3.4, etc.)
-  # - Excludes desktop-v*, agent-v*, or any other prefixed tags
-  local latest
-  latest="$(echo "$tags" \
-    | grep -o '"name": *"[^"]*"' \
-    | cut -d'"' -f4 \
-    | grep -E '^v[0-9]' \
-    | grep -v '^desktop-' \
-    | head -1 || true)"
-  
-  if [[ -n "$latest" ]]; then
-    echo "$latest"
+  if [[ -n "$tags" ]]; then
+    echo "$tags"
     return 0
   fi
-  
   return 1
 }
 
@@ -218,20 +272,20 @@ get_latest_release_tag() {
 clone_or_update() {
   local target_ref="$1"
   
+  # When piped, git commands can consume stdin. Redirect from /dev/null.
   if [[ -d "$DEEPSQL_HOME/.git" ]]; then
     info "Updating existing checkout at $DEEPSQL_HOME..."
     cd "$DEEPSQL_HOME"
     
     # Fetch latest (include tags)
-    if ! git fetch --tags origin 2>/dev/null; then
+    if ! git fetch --tags origin </dev/null 2>/dev/null; then
       warn "Failed to fetch updates. Continuing with existing checkout."
     fi
     
     if [[ -n "$target_ref" ]]; then
       info "Checking out $target_ref..."
-      git checkout "$target_ref" 2>/dev/null || git checkout -b "$target_ref" "origin/$target_ref" 2>/dev/null || {
-        # If it's a tag, just checkout directly
-        git checkout "$target_ref" 2>/dev/null || {
+      git checkout "$target_ref" </dev/null 2>/dev/null || git checkout -b "$target_ref" "origin/$target_ref" </dev/null 2>/dev/null || {
+        git checkout "$target_ref" </dev/null 2>/dev/null || {
           warn "Could not checkout $target_ref. Staying on current branch."
         }
       }
@@ -249,7 +303,7 @@ clone_or_update() {
       clone_args+=(--branch "$target_ref")
     fi
     
-    if ! git clone "${clone_args[@]}" "https://github.com/${DEEPSQL_REPO}.git" "$DEEPSQL_HOME"; then
+    if ! git clone "${clone_args[@]}" "https://github.com/${DEEPSQL_REPO}.git" "$DEEPSQL_HOME" </dev/null; then
       error "Failed to clone repository."
       exit 1
     fi
@@ -263,14 +317,11 @@ clone_or_update() {
 report_version() {
   local target_ref="$1"
   
-  # For shallow clones, git describe may not work correctly, so prefer the
-  # target ref we requested if it looks like a version tag
   if [[ "$target_ref" =~ ^v[0-9] ]]; then
     success "Version: $target_ref"
     return
   fi
   
-  # Try to get the current tag or branch
   local current_tag current_branch
   current_tag="$(git describe --tags --exact-match 2>/dev/null || true)"
   current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
@@ -305,70 +356,27 @@ setup_env() {
   fi
 }
 
-# ── Print Next Steps ──────────────────────────────────────────────────────────
-
-print_llm_setup() {
-  echo
-  echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-  echo "${BOLD}  IMPORTANT: Configure your LLM before running install.sh${NC}"
-  echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-  echo
-  echo "DeepSQL requires you to bring your own LLM. Edit ${BOLD}$DEEPSQL_HOME/.env${NC}"
-  echo "and set these variables:"
-  echo
-  echo "  ${GREEN}DEEPSQL_CHAT_PROVIDER${NC}=openai"
-  echo "  ${GREEN}DEEPSQL_CHAT_API_KEY${NC}=sk-your-key"
-  echo "  ${GREEN}DEEPSQL_CHAT_ENDPOINT${NC}=https://api.openai.com/v1"
-  echo "  ${GREEN}DEEPSQL_CHAT_MODEL${NC}=gpt-4o"
-  echo
-  echo "For Azure OpenAI, Anthropic, Ollama, or other providers, see the"
-  echo "examples in .env.example or the README."
-  echo
-}
-
-print_final_instructions() {
-  local port="${DEEPSQL_FRONTEND_PORT:-3000}"
-  
-  echo
-  echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-  echo "${GREEN}${BOLD}  DeepSQL is ready to install!${NC}"
-  echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-  echo
-  echo "Next steps:"
-  echo
-  echo "  1. ${BOLD}Edit .env${NC} with your LLM credentials (see above)"
-  echo
-  echo "  2. ${BOLD}Run the installer:${NC}"
-  echo "     cd $DEEPSQL_HOME"
-  echo "     ./scripts/self-host/install.sh"
-  echo
-  echo "  3. ${BOLD}Open DeepSQL:${NC}"
-  echo "     http://localhost:$port"
-  echo
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo
-  echo "Resources:"
-  echo "  Documentation: https://github.com/${DEEPSQL_REPO}#readme"
-  echo "  Whitepaper:    https://deepsql.ai/whitepaper"
-  echo "  Issues:        https://github.com/${DEEPSQL_REPO}/issues"
-  echo
-}
-
-# ── Run Install Script (optional) ─────────────────────────────────────────────
+# ── Run Install Script ────────────────────────────────────────────────────────
 
 run_install() {
   cd "$DEEPSQL_HOME"
   
   if [[ ! -x "./scripts/self-host/install.sh" ]]; then
-    error "install.sh not found or not executable."
-    exit 1
+    chmod +x "./scripts/self-host/install.sh"
   fi
   
   info "Running install.sh..."
   echo
   
-  # Pass through any arguments to install.sh
-  exec ./scripts/self-host/install.sh "$@"
+  # Pass through any remaining arguments to install.sh.
+  # When the script is piped (no TTY), redirect stdin from /dev/null so
+  # install.sh and its children (docker, git, read, etc.) don't consume
+  # the rest of the piped script.
+  if [[ -t 0 ]]; then
+    exec ./scripts/self-host/install.sh "$@"
+  else
+    exec ./scripts/self-host/install.sh "$@" </dev/null
+  fi
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -377,36 +385,63 @@ usage() {
   cat <<EOF
 DeepSQL Remote Installer
 
-Usage: $0 [options]
+Usage: curl -fsSL https://deepsql.ai/install.sh | bash -s -- [options]
+
+One command installs DeepSQL. The only input is an LLM key (optional—can be
+set later during onboarding in the web UI).
 
 Options:
-  -h, --help           Show this help message
-  -y, --yes            Run install.sh automatically after setup (noninteractive)
+  -h, --help           Show this help message and exit
+  -V, --version        Show version and exit
   --skip-docker-check  Skip Docker/Compose/buildx verification
-  --branch <ref>       Use a specific branch or tag instead of latest release
+  --ref <ref>          Use a specific branch or tag instead of latest release
+  --non-interactive    Never prompt; use env vars or defaults
+  --seed-demo          Seed demo database after install (default)
+  --no-seed-demo       Skip demo database seeding
+  --fresh              Remove existing volumes before install
+  --project-name NAME  Set Compose project name
 
-Environment variables:
-  DEEPSQL_HOME         Installation directory (default: \$HOME/deepsql)
-  DEEPSQL_BRANCH       Branch or tag to checkout (default: latest release)
+Environment variables (override .env placeholders):
+  DEEPSQL_HOME                 Installation directory (default: \$HOME/deepsql)
+  DEEPSQL_REF                  Branch or tag to checkout (default: latest release)
+  DEEPSQL_LLM_API_KEY          LLM key (optional - can set later in the web UI)
+  DEEPSQL_LLM_PROVIDER         Provider id (default: openai)
+  DEEPSQL_LLM_BASE_URL         API endpoint (default: https://api.openai.com/v1)
+  DEEPSQL_LLM_MODEL            Model name (default: gpt-4o)
+  DEEPSQL_INITIAL_ADMIN_EMAIL  Admin login email
+  DEEPSQL_INITIAL_ADMIN_PASSWORD  Admin password (generated if unset)
 
 Examples:
-  # Interactive setup (edit .env, then run install.sh yourself)
+  # Interactive install
   curl -fsSL https://deepsql.ai/install.sh | bash
 
-  # Noninteractive (requires .env to be pre-configured or prompts)
-  curl -fsSL https://deepsql.ai/install.sh | bash -s -- --yes
+  # With LLM key (non-interactive for AI agents)
+  DEEPSQL_LLM_API_KEY=sk-... curl -fsSL https://deepsql.ai/install.sh | bash
+
+  # Keyless install (configure LLM later in UI)
+  DEEPSQL_INITIAL_ADMIN_EMAIL=admin@example.com \\
+    curl -fsSL https://deepsql.ai/install.sh | bash
 
   # Install a specific version
-  curl -fsSL https://deepsql.ai/install.sh | bash -s -- --branch v1.3.0
+  curl -fsSL https://deepsql.ai/install.sh | bash -s -- --ref v1.3.0
 
-  # Fallback: raw GitHub URL (if deepsql.ai is unreachable)
-  curl -fsSL https://raw.githubusercontent.com/DeepSQLAI/deepsql/main/scripts/self-host/remote-install.sh | bash
+  # Fresh install (removes existing data)
+  curl -fsSL https://deepsql.ai/install.sh | bash -s -- --fresh
+
+For AI agents:
+  Ask the user for their LLM API key (OpenAI, Azure OpenAI, etc.), then run:
+
+    DEEPSQL_LLM_API_KEY=<key> curl -fsSL https://deepsql.ai/install.sh | bash
+
+  After install:
+    Health: curl -fsS http://localhost:8080/api/actuator/health
+    Login:  http://localhost:3000 (credentials in ~/deepsql/.env)
 EOF
 }
 
 main() {
-  local auto_install=0
   local skip_docker=0
+  local install_args=()
   
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -414,21 +449,37 @@ main() {
         usage
         exit 0
         ;;
-      -y|--yes)
-        auto_install=1
-        shift
+      -V|--version)
+        echo "DeepSQL Remote Installer $REMOTE_INSTALLER_VERSION"
+        exit 0
         ;;
       --skip-docker-check)
         skip_docker=1
         shift
         ;;
-      --branch)
-        DEEPSQL_BRANCH="$2"
+      --ref|--branch)
+        DEEPSQL_REF="$2"
         shift 2
+        ;;
+      --ref=*|--branch=*)
+        DEEPSQL_REF="${1#*=}"
+        shift
+        ;;
+      --non-interactive|--seed-demo|--no-seed-demo|--fresh)
+        install_args+=("$1")
+        shift
+        ;;
+      --project-name)
+        install_args+=("$1" "$2")
+        shift 2
+        ;;
+      --project-name=*)
+        install_args+=("--project-name" "${1#*=}")
+        shift
         ;;
       *)
         error "Unknown option: $1"
-        usage
+        echo "Run with --help for usage." >&2
         exit 1
         ;;
     esac
@@ -450,28 +501,38 @@ main() {
   fi
   
   # Determine target ref
-  local target_ref="$DEEPSQL_BRANCH"
+  local target_ref="$DEEPSQL_REF"
   if [[ -z "$target_ref" ]]; then
     info "Finding latest stable release..."
     target_ref="$(get_latest_release_tag || true)"
+    
+    # Fallback to git ls-remote if API fails
     if [[ -z "$target_ref" ]]; then
-      target_ref="main"
-      warn "Could not determine latest release. Using default branch: $target_ref"
+      target_ref="$(get_latest_release_tag_git || true)"
+    fi
+    
+    if [[ -z "$target_ref" ]]; then
+      # Fail loudly instead of silently falling back to main
+      error "Could not determine latest release."
+      echo
+      echo "This may be due to GitHub API rate limits. Try one of:"
+      echo "  1. Wait a few minutes and try again"
+      echo "  2. Specify a version explicitly:"
+      echo "     curl -fsSL https://deepsql.ai/install.sh | bash -s -- --ref v1.3.0"
+      echo "  3. Check available releases: https://github.com/${DEEPSQL_REPO}/releases"
+      exit 1
     else
       success "Latest release: $target_ref"
     fi
+  else
+    info "Using specified ref: $target_ref"
   fi
   
   clone_or_update "$target_ref"
   setup_env
   
-  if [[ "$auto_install" -eq 1 ]]; then
-    print_llm_setup
-    run_install
-  else
-    print_llm_setup
-    print_final_instructions
-  fi
+  # Run install with passed-through arguments
+  run_install "${install_args[@]}"
 }
 
 main "$@"
