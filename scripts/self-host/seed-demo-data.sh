@@ -357,71 +357,124 @@ compose exec -T postgres psql -U postgres -d demo_shop -c "SELECT pg_stat_statem
 # Run inefficient queries that will be captured by pg_stat_statements
 # These patterns are intentionally suboptimal to trigger index recommendations
 # NO pg_sleep - all slowness comes from real inefficient query patterns
-echo "  Starting workload (this takes about 30-60 seconds)..."
-# Generate SQL file with individual statements.
-# Queries inside PL/pgSQL DO blocks are NOT tracked separately by pg_stat_statements.
-# Each SELECT must be a standalone statement to be tracked individually.
-# Using generate_series() to repeat each pattern multiple times within a single query,
-# which pg_stat_statements will track and report the cumulative execution time.
+echo "  Starting workload (this takes about 60-90 seconds)..."
 
-compose exec -T postgres psql -U postgres -d demo_shop -v ON_ERROR_STOP=1 <<'EOWORK'
--- Pattern 1: LOWER() on status column defeats index (50 calls)
--- Each row of generate_series triggers a separate evaluation via LATERAL join
-SELECT 'LOWER(status) pattern' as pattern, COUNT(*)
-FROM generate_series(1, 50) g,
-LATERAL (SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100) sub;
+# CRITICAL: pg_stat_statements only tracks STANDALONE SQL statements.
+# - Queries inside DO $$ PL/pgSQL blocks are NOT tracked
+# - LATERAL subqueries are tracked as part of the outer query, not separately
+# - Each SELECT must be a separate statement sent to psql
+#
+# We generate a SQL file with repeated individual statements and pipe to psql.
+# Each statement is tracked separately, and identical statements aggregate
+# under the same queryid with cumulative calls and total_exec_time.
 
--- Pattern 2: Full table scan on audit_log 300K rows (20 calls)
-SELECT 'audit_log scan pattern' as pattern, COUNT(*)
-FROM generate_series(1, 20) g,
-LATERAL (SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days') sub;
+workload_sql="$(mktemp)"
+cat > "$workload_sql" <<'EOSQL'
+-- Pattern 1: LOWER() on status column defeats index
+-- This is intentionally inefficient - LOWER() prevents index use
+SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
+SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
+SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
+SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
+SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
+SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
+SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
+SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
+SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
+SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'delivered' AND total_amount > 100;
 
--- Pattern 3: Sort on audit_log without index (15 calls)
-SELECT 'audit_log sort pattern' as pattern, COUNT(*)
-FROM generate_series(1, 15) g,
-LATERAL (SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000) sub;
+-- Pattern 2: Full table scan on audit_log (300K+ rows)
+SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
+SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
+SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
+SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
+SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
+SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
+SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
+SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
+SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
+SELECT COUNT(*) FROM audit_log WHERE table_name = 'orders' AND changed_at > NOW() - INTERVAL '90 days';
 
--- Pattern 4: ILIKE with leading wildcard (30 calls)
-SELECT 'ILIKE pattern' as pattern, COUNT(*)
-FROM generate_series(1, 30) g,
-LATERAL (SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%') sub;
+-- Pattern 3: Sort on audit_log without index on changed_at
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
+SELECT id FROM audit_log WHERE table_name IN ('orders', 'customers', 'products') ORDER BY changed_at DESC LIMIT 1000;
 
--- Pattern 5: Large join order_items (100K) to orders (5K) (15 calls)
-SELECT 'large join pattern' as pattern, COUNT(*), SUM(total)
-FROM generate_series(1, 15) g,
-LATERAL (SELECT COUNT(*) as cnt, SUM(oi.subtotal) as total FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered') sub;
+-- Pattern 4: ILIKE with leading wildcard - cannot use index
+SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
+SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
+SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
+SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
+SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
+SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
+SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
+SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
+SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
+SELECT COUNT(*) FROM products WHERE name ILIKE '%widget%' OR description ILIKE '%premium%';
 
--- Pattern 6: Expensive aggregation with GROUP BY (10 calls)
-SELECT 'expensive aggregation pattern' as pattern, COUNT(*)
-FROM generate_series(1, 10) g,
-LATERAL (
-    SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal)
-    FROM orders o
-    JOIN order_items oi ON o.id = oi.order_id
-    JOIN products p ON oi.product_id = p.id
-    WHERE o.status NOT IN ('cancelled', 'refunded')
-    GROUP BY 1, p.id, p.name
-    ORDER BY 4 DESC
-    LIMIT 100
-) sub;
+-- Pattern 5: Large join order_items (100K) to orders (5K)
+SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
+SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
+SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
+SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
+SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
+SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
+SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
+SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
+SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
+SELECT COUNT(*), SUM(oi.subtotal) FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'delivered';
 
--- Pattern 7: Missing composite index on (status, payment_status) (40 calls)
-SELECT 'composite index pattern' as pattern, COUNT(*)
-FROM generate_series(1, 40) g,
-LATERAL (SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days') sub;
+-- Pattern 6: Expensive aggregation with GROUP BY across large tables
+SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
+SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
+SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
+SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
+SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
+SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
+SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
+SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
+SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
+SELECT DATE_TRUNC('month', o.created_at), p.name, COUNT(*), SUM(oi.subtotal) FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status NOT IN ('cancelled', 'refunded') GROUP BY 1, p.id, p.name ORDER BY 4 DESC LIMIT 100;
 
--- Pattern 8: Correlated subquery - inefficient EXISTS (20 calls)
-SELECT 'correlated subquery pattern' as pattern, COUNT(*)
-FROM generate_series(1, 20) g,
-LATERAL (
-    SELECT COUNT(*) FROM orders o
-    WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE')
-) sub;
+-- Pattern 7: Missing composite index on (status, payment_status)
+SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
+SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
+SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
+SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
+SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
+SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
+SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
+SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
+SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
+SELECT COUNT(*) FROM orders WHERE status = 'pending' AND payment_status = 'paid' AND created_at > NOW() - INTERVAL '30 days';
 
-SELECT 'Workload patterns completed' as status;
-EOWORK
+-- Pattern 8: Correlated subquery - inefficient EXISTS on audit_log
+SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
+SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
+SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
+SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
+SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
+SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
+SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
+SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
+SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
+SELECT COUNT(*) FROM orders o WHERE EXISTS (SELECT 1 FROM audit_log a WHERE a.record_id = o.id AND a.table_name = 'orders' AND a.action = 'UPDATE');
+EOSQL
 
-echo "  Workload patterns completed."
+# Copy workload SQL into container and run it
+compose cp "$workload_sql" postgres:/tmp/workload.sql
+compose exec -T postgres psql -U postgres -d demo_shop -q -f /tmp/workload.sql >/dev/null 2>&1
+compose exec -T postgres rm -f /tmp/workload.sql
+rm -f "$workload_sql"
+
+echo "  Workload patterns completed (80 queries across 8 patterns)."
 
 echo "  Workload simulation completed."
 echo "  Verifying pg_stat_statements data..."
