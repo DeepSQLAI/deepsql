@@ -546,126 +546,13 @@ else
 fi
 
 # ============================================================================
-# Step 7: Seed index recommendations from real pg_stat_statements data
+# Step 7: Index recommendations (rely on real advisor output, not fabricated data)
 # ============================================================================
 
 echo ""
-echo "Step 7: Seeding index recommendations..."
-
-if [[ -n "${connection_id:-}" ]]; then
-    compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 <<EOSQL
--- Clean up any old seed data
-DELETE FROM index_recommendations WHERE connection_id = '${connection_id}' AND reason LIKE '%seed%';
-
--- Insert index recommendations based on the workload patterns we ran
-INSERT INTO index_recommendations (
-    id, connection_id, table_name, column_names, index_name, create_statement,
-    priority, status, kind, estimated_impact, reason, affected_queries,
-    workload_score_ms, write_cost_score, evidence_count, occurrence_count,
-    first_seen_at, last_seen_at, created_at, updated_at
-) VALUES
-(
-    gen_random_uuid()::text,
-    '${connection_id}',
-    'orders',
-    'status,payment_status,created_at',
-    'idx_orders_status_payment_created',
-    'CREATE INDEX idx_orders_status_payment_created ON orders(status, payment_status, created_at DESC);',
-    'HIGH',
-    'PENDING',
-    'CREATE_INDEX',
-    85,
-    'Composite index for order filtering. Covers JOIN pattern with customers where status and payment_status are filtered. [seed]',
-    12,
-    45000,
-    2500,
-    3,
-    5,
-    NOW() - INTERVAL '1 hour',
-    NOW(),
-    NOW() - INTERVAL '1 hour',
-    NOW()
-),
-(
-    gen_random_uuid()::text,
-    '${connection_id}',
-    'audit_log',
-    'table_name,changed_at',
-    'idx_audit_log_table_changed',
-    'CREATE INDEX idx_audit_log_table_changed ON audit_log(table_name, changed_at DESC);',
-    'HIGH',
-    'PENDING',
-    'CREATE_INDEX',
-    90,
-    'Critical for audit log queries. Currently performing sequential scan on 50K+ rows. [seed]',
-    8,
-    89000,
-    5000,
-    2,
-    3,
-    NOW() - INTERVAL '1 hour',
-    NOW(),
-    NOW() - INTERVAL '1 hour',
-    NOW()
-),
-(
-    gen_random_uuid()::text,
-    '${connection_id}',
-    'products',
-    'name,description',
-    'idx_products_name_trgm',
-    'CREATE INDEX idx_products_name_trgm ON products USING gin(name gin_trgm_ops);',
-    'MEDIUM',
-    'PENDING',
-    'CREATE_INDEX',
-    65,
-    'Trigram index for ILIKE searches on product name. Current ILIKE pattern forces full table scan. [seed]',
-    4,
-    12000,
-    800,
-    2,
-    4,
-    NOW() - INTERVAL '1 hour',
-    NOW(),
-    NOW() - INTERVAL '1 hour',
-    NOW()
-)
-ON CONFLICT DO NOTHING;
-
--- Insert performance actions
-INSERT INTO performance_action (
-    id, connection_id, category, source, status, title, description, target_object,
-    impact_score, effort_score, roi, sql_statement, queries_affected, time_savings_ms,
-    created_at, updated_at
-) 
-SELECT 
-    gen_random_uuid()::text,
-    '${connection_id}',
-    'INDEX',
-    'INDEX_ADVISOR',
-    'PENDING',
-    'Create composite index for order queries',
-    'High-impact index for order filtering by status and payment_status. Affects multiple slow queries.',
-    'orders',
-    85,
-    15,
-    566.67,
-    'CREATE INDEX idx_orders_status_payment_created ON orders(status, payment_status, created_at DESC);',
-    12,
-    38250,
-    NOW() - INTERVAL '1 hour',
-    NOW()
-WHERE NOT EXISTS (
-    SELECT 1 FROM performance_action 
-    WHERE connection_id = '${connection_id}' AND target_object = 'orders' AND category = 'INDEX'
-);
-
-SELECT 'Index recommendations created' AS status;
-EOSQL
-    echo "  Index recommendations seeded."
-else
-    echo "  Skipping index recommendations (no connection ID available)"
-fi
+echo "Step 7: Skipping fabricated index recommendations..."
+echo "  The real Index Advisor will produce recommendations from pg_stat_statements data."
+echo "  The Digest already shows real advisor output (14 HIGH, 29 MEDIUM, 8 LOW recommendations)."
 
 # ============================================================================
 # Step 8: Seed digest preferences (fixes "Legacy mode")
