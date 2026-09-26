@@ -232,6 +232,21 @@ JSON
     echo "  Created demo connection: $connection_id"
 fi
 
+# Pin the demo connection as the default for the admin user
+if [[ -n "${connection_id:-}" ]]; then
+    echo "  Pinning demo connection as default..."
+    compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 <<EOSQL
+-- Pin the demo shop as the admin's default connection
+-- The unique constraint on username ensures one pin per user
+INSERT INTO connection_pin (username, connection_id, created_at, updated_at)
+VALUES ('${DEEPSQL_INITIAL_ADMIN_EMAIL}', '${connection_id}', NOW(), NOW())
+ON CONFLICT (username) DO UPDATE SET
+    connection_id = EXCLUDED.connection_id,
+    updated_at = NOW();
+EOSQL
+    echo "  Demo connection pinned as default."
+fi
+
 # ============================================================================
 # Step 4: Run real workload to populate pg_stat_statements
 # ============================================================================
