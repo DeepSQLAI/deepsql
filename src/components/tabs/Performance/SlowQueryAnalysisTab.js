@@ -299,7 +299,7 @@ export default function SlowQueryAnalysisTab({ connectionId }) {
 
   // Filter states
   const [timeRange, setTimeRange] = useState("LAST_24_HOURS");
-  const [thresholdMs, setThresholdMs] = useState(100);
+  const [thresholdMs, setThresholdMs] = useState(10);
   const [limit, setLimit] = useState(10);
   const [showFilters, setShowFilters] = useState(false);
 

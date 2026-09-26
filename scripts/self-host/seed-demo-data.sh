@@ -56,8 +56,18 @@ set +a
 DEMO_ROLE_USER="deepsql_demo"
 DEMO_ROLE_PASSWORD="deepsql_demo_password"
 
+# Detect docker compose command (v2 plugin vs standalone)
+if docker compose version &>/dev/null; then
+    DOCKER_COMPOSE_CMD="docker compose"
+elif command -v docker-compose &>/dev/null; then
+    DOCKER_COMPOSE_CMD="docker-compose"
+else
+    echo "Error: Neither 'docker compose' nor 'docker-compose' found." >&2
+    exit 1
+fi
+
 compose() {
-    DEEPSQL_RUNTIME_ENV_FILE="$ENV_FILE" docker compose \
+    DEEPSQL_RUNTIME_ENV_FILE="$ENV_FILE" $DOCKER_COMPOSE_CMD \
         --project-name "$PROJECT_NAME" \
         --env-file "$ENV_FILE" \
         -f "$COMPOSE_FILE" \
@@ -259,11 +269,51 @@ compose exec -T postgres psql -U postgres -d demo_shop -c "SELECT pg_stat_statem
 
 # Run inefficient queries that will be captured by pg_stat_statements
 # These patterns are intentionally suboptimal to trigger recommendations
+# Some queries use pg_sleep to ensure they exceed 100ms threshold
 echo "  Starting workload (this takes about ${DEEPSQL_SEED_WORKLOAD_DURATION} seconds)..."
 compose exec -T postgres psql -U postgres -d demo_shop -v ON_ERROR_STOP=1 <<EOWORK
 -- Workload simulation for pg_stat_statements
 -- Each pattern runs multiple times to accumulate meaningful statistics
+-- Deliberately slow queries (>100ms) are marked with pg_sleep
 
+-- First: Run deliberately slow queries that will DEFINITELY show up at 100ms threshold
+-- These queries simulate "stuck" or poorly optimized production queries
+
+-- Slow Query 1: Full table scan with sleep (simulates missing index)
+-- This query would benefit from an index on audit_log(table_name, changed_at)
+SELECT COUNT(*), pg_sleep(0.15)
+FROM audit_log 
+WHERE table_name = 'orders' 
+AND changed_at > NOW() - INTERVAL '7 days';
+
+-- Run it multiple times to accumulate calls
+SELECT COUNT(*), pg_sleep(0.12)
+FROM audit_log 
+WHERE table_name = 'orders' 
+AND changed_at > NOW() - INTERVAL '7 days';
+
+SELECT COUNT(*), pg_sleep(0.11)
+FROM audit_log 
+WHERE table_name = 'orders' 
+AND changed_at > NOW() - INTERVAL '7 days';
+
+-- Slow Query 2: Cross-join style lookup with LOWER() function (prevents index use)
+-- This query would benefit from a functional index on LOWER(status)
+SELECT COUNT(*), pg_sleep(0.14)
+FROM orders 
+WHERE LOWER(status) = 'delivered' AND total_amount > 100;
+
+SELECT COUNT(*), pg_sleep(0.13)
+FROM orders 
+WHERE LOWER(status) = 'delivered' AND total_amount > 100;
+
+-- Slow Query 3: Missing composite index on frequently filtered columns
+SELECT COUNT(*), pg_sleep(0.12)
+FROM orders o 
+JOIN customers c ON o.customer_id = c.id 
+WHERE o.status = 'pending' AND o.payment_status = 'paid';
+
+-- Now run the loop for additional patterns at faster speeds
 DO \$\$
 DECLARE 
     i int;
@@ -275,7 +325,6 @@ BEGIN
     
     WHILE (EXTRACT(EPOCH FROM (clock_timestamp() - start_time)) < duration_seconds) LOOP
         -- Pattern 1: LOWER() on indexed column (prevents index use)
-        -- This is a common anti-pattern that should trigger a recommendation
         SELECT COUNT(*) INTO result_count FROM orders 
         WHERE LOWER(status) = 'delivered' AND total_amount > 100;
         
