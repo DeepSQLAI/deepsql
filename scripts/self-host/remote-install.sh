@@ -272,19 +272,20 @@ get_latest_release_tag_git() {
 clone_or_update() {
   local target_ref="$1"
   
+  # When piped, git commands can consume stdin. Redirect from /dev/null.
   if [[ -d "$DEEPSQL_HOME/.git" ]]; then
     info "Updating existing checkout at $DEEPSQL_HOME..."
     cd "$DEEPSQL_HOME"
     
     # Fetch latest (include tags)
-    if ! git fetch --tags origin 2>/dev/null; then
+    if ! git fetch --tags origin </dev/null 2>/dev/null; then
       warn "Failed to fetch updates. Continuing with existing checkout."
     fi
     
     if [[ -n "$target_ref" ]]; then
       info "Checking out $target_ref..."
-      git checkout "$target_ref" 2>/dev/null || git checkout -b "$target_ref" "origin/$target_ref" 2>/dev/null || {
-        git checkout "$target_ref" 2>/dev/null || {
+      git checkout "$target_ref" </dev/null 2>/dev/null || git checkout -b "$target_ref" "origin/$target_ref" </dev/null 2>/dev/null || {
+        git checkout "$target_ref" </dev/null 2>/dev/null || {
           warn "Could not checkout $target_ref. Staying on current branch."
         }
       }
@@ -302,7 +303,7 @@ clone_or_update() {
       clone_args+=(--branch "$target_ref")
     fi
     
-    if ! git clone "${clone_args[@]}" "https://github.com/${DEEPSQL_REPO}.git" "$DEEPSQL_HOME"; then
+    if ! git clone "${clone_args[@]}" "https://github.com/${DEEPSQL_REPO}.git" "$DEEPSQL_HOME" </dev/null; then
       error "Failed to clone repository."
       exit 1
     fi
@@ -367,8 +368,15 @@ run_install() {
   info "Running install.sh..."
   echo
   
-  # Pass through any remaining arguments to install.sh
-  exec ./scripts/self-host/install.sh "$@"
+  # Pass through any remaining arguments to install.sh.
+  # When the script is piped (no TTY), redirect stdin from /dev/null so
+  # install.sh and its children (docker, git, read, etc.) don't consume
+  # the rest of the piped script.
+  if [[ -t 0 ]]; then
+    exec ./scripts/self-host/install.sh "$@"
+  else
+    exec ./scripts/self-host/install.sh "$@" </dev/null
+  fi
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
