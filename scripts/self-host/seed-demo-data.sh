@@ -755,6 +755,79 @@ WHERE NOT EXISTS (
 SELECT 'Digest preferences seeded' AS status;
 EOSQL
     echo "  Digest preferences created."
+    
+    # Now create an actual digest entry so it shows in the web UI
+    echo "  Creating sample digest entry (visible in web Digest section)..."
+    
+    # Get preference ID for linking
+    pref_id="$(compose exec -T postgres psql -U postgres -d dba_agent -At -c \
+        "SELECT id FROM digest_preferences WHERE user_id = ${admin_id} AND connection_id = '${connection_id}' LIMIT 1" 2>/dev/null || echo "")"
+    
+    compose exec -T postgres psql -U postgres -d dba_agent -v ON_ERROR_STOP=1 <<EOSQL
+-- Create a sample digest log entry that shows in the web Digest section
+-- This is a static demo digest showing what real digests look like
+
+INSERT INTO slack_digest_log (
+    connection_id, connection_name, channel_id, content, headline,
+    sent_at, status, recipient_username, recipient_role, persona_tag,
+    delivery_method, preference_id, personalized
+)
+SELECT 
+    '${connection_id}',
+    '${DEEPSQL_SEED_CONNECTION_NAME}',
+    NULL,  -- No Slack channel for web-only display
+    '*🗄️ DB Health Briefing: ${DEEPSQL_SEED_CONNECTION_NAME}*
+_' || TO_CHAR(NOW(), 'FMDay, FMMonth DD') || ' · Quick Wins Ready_
+
+────────────────────────────────
+
+*🔦 Performance Spotlight*
+
+• *3 high-priority index recommendations* ready to apply
+  - \`idx_orders_status_payment_created\` (orders): 85% estimated improvement
+  - \`idx_audit_log_table_changed\` (audit_log): Fixes 89s slow queries
+  - \`idx_products_name_trgm\` (products): Better ILIKE performance
+
+• Top slow query pattern: \`SELECT COUNT(*) FROM orders WHERE LOWER(status) = ...\`
+  ↳ Avg 45ms, called 1.2K times/day — index prevents full scan
+
+────────────────────────────────
+
+*🎯 Quick Wins*
+
+• *CREATE INDEX idx_orders_status_payment_created* — Estimated 38s daily savings
+• Review audit_log growth (50K+ rows, missing index on changed_at)
+• Consider trigram index for product search ILIKE patterns
+
+────────────────────────────────
+
+*📈 Brain Intelligence*
+
+• Workload analysis complete — 7 distinct query patterns identified
+• Database health score: Pending initial assessment
+• 5 curated schema notes ready for review
+
+────────────────────────────────
+
+_Powered by DeepSQL · This digest runs daily at 9:00 AM_',
+    'Quick Wins Ready',
+    NOW(),
+    'SENT',
+    '${DEEPSQL_INITIAL_ADMIN_EMAIL}',
+    'ADMIN',
+    'DBA',
+    'SLACK_DM',
+    ${pref_id:-NULL},
+    true
+WHERE NOT EXISTS (
+    SELECT 1 FROM slack_digest_log 
+    WHERE connection_id = '${connection_id}' 
+    AND recipient_username = '${DEEPSQL_INITIAL_ADMIN_EMAIL}'
+);
+
+SELECT 'Sample digest entry created' AS status;
+EOSQL
+    echo "  Sample digest entry created."
 else
     echo "  Skipping digest preferences (missing connection or admin ID)"
 fi
