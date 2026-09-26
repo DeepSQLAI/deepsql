@@ -461,6 +461,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
         schema.setDatabaseName(database);
 
         // Get all tables and views across non-system schemas (W2a).
+        // Views are further filtered to exclude extension-created system views.
         String tablesQuery = "SELECT t.schemaname, t.tablename, 'table' as type, "
             + "pg_total_relation_size(quote_ident(t.schemaname)||'.'||quote_ident(t.tablename)) as size_bytes, "
             + "CASE "
@@ -477,7 +478,7 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
             + "UNION ALL "
             + "SELECT v.schemaname, v.viewname as tablename, 'view' as type, 0 as size_bytes, 0 as row_count "
             + "FROM pg_views v "
-            + "WHERE " + nonSystemSchemaPredicate("v.schemaname") + " "
+            + "WHERE " + nonSystemSchemaPredicate("v.schemaname") + " AND " + excludeExtensionViewsPredicate("v.viewname") + " "
             + "ORDER BY schemaname, tablename";
 
         Map<String, TableMetadata> tableMap = new HashMap<>();
