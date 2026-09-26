@@ -412,4 +412,30 @@ class PostgresIntrospectionProviderTest {
         assertTrue(predicate.startsWith("NOT IN"),
             "Predicate should use NOT IN for exact matching");
     }
+
+    @Test
+    void excludeExtensionFunctionsPredicate_excludesPgStatStatementsFunctions() {
+        String predicate = PostgresIntrospectionProvider.excludeExtensionFunctionsPredicate("p.proname");
+        
+        assertTrue(predicate.contains("pg_stat_statements"),
+            "Exclusion predicate should mention pg_stat_statements");
+        assertTrue(predicate.contains("pg_stat_statements_info"),
+            "Exclusion predicate should mention pg_stat_statements_info");
+        assertTrue(predicate.contains("pg_stat_statements_reset"),
+            "Exclusion predicate should mention pg_stat_statements_reset");
+        assertTrue(predicate.contains("NOT IN"),
+            "Exclusion predicate should use NOT IN clause");
+    }
+
+    @Test
+    void extensionFunctionExclusion_isExactMatch() {
+        String predicate = PostgresIntrospectionProvider.EXCLUDED_EXTENSION_FUNCTIONS_SQL;
+        
+        assertTrue(predicate.contains("'pg_stat_statements'"),
+            "Predicate should exclude exactly 'pg_stat_statements'");
+        assertTrue(predicate.contains("'pg_stat_statements_reset'"),
+            "Predicate should exclude exactly 'pg_stat_statements_reset'");
+        assertTrue(predicate.startsWith("NOT IN"),
+            "Predicate should use NOT IN for exact matching");
+    }
 }

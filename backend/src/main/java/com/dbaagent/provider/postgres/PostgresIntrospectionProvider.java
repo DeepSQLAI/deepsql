@@ -37,12 +37,23 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
     static final String EXCLUDED_EXTENSION_VIEWS_SQL =
         "NOT IN ('pg_stat_statements', 'pg_stat_statements_info', 'pg_buffercache')";
 
+    /**
+     * Extension-created functions that should be excluded from Brain. These are
+     * internal extension functions not useful for application queries.
+     */
+    static final String EXCLUDED_EXTENSION_FUNCTIONS_SQL =
+        "NOT IN ('pg_stat_statements', 'pg_stat_statements_info', 'pg_stat_statements_reset', 'pg_buffercache_pages', 'pg_buffercache_summary')";
+
     static String nonSystemSchemaPredicate(String column) {
         return column + " " + String.format(NON_SYSTEM_SCHEMA_SQL, column);
     }
 
     static String excludeExtensionViewsPredicate(String column) {
         return column + " " + EXCLUDED_EXTENSION_VIEWS_SQL;
+    }
+
+    static String excludeExtensionFunctionsPredicate(String column) {
+        return column + " " + EXCLUDED_EXTENSION_FUNCTIONS_SQL;
     }
 
     /** Map / snapshot key that survives duplicate table names across schemas. */
@@ -128,13 +139,15 @@ public class PostgresIntrospectionProvider implements IntrospectionProvider {
     private List<DatabaseObject> getFunctions(Connection connection) throws SQLException {
         List<DatabaseObject> objects = new ArrayList<>();
 
+        String schemaPred = nonSystemSchemaPredicate("n.nspname");
+        String extFuncPred = excludeExtensionFunctionsPredicate("p.proname");
         String query = """
             SELECT n.nspname as schema_name, p.proname as name, pg_get_functiondef(p.oid) as definition
             FROM pg_proc p
             JOIN pg_namespace n ON p.pronamespace = n.oid
-            WHERE %s AND p.prokind = 'f'
+            WHERE %s AND %s AND p.prokind = 'f'
             ORDER BY n.nspname, p.proname
-            """.formatted(nonSystemSchemaPredicate("n.nspname"));
+            """.formatted(schemaPred, extFuncPred);
 
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery(query)) {
