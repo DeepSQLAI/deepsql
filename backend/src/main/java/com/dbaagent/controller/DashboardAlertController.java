@@ -9,6 +9,7 @@ import com.dbaagent.service.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -68,6 +69,7 @@ public class DashboardAlertController {
         try {
             SavedDashboard dashboard = requireDashboard(dashboardId);
             accessControlService.assertCanManageConnectionContent(dashboard.getConnectionId());
+            requireAlertOnDashboard(alertId, dashboardId);
             DashboardAlert updated = alertService.updateAlert(alertId, updates);
             return ResponseEntity.ok(Map.of("success", true, "alert", updated));
         } catch (IllegalArgumentException e) {
@@ -85,6 +87,7 @@ public class DashboardAlertController {
         try {
             SavedDashboard dashboard = requireDashboard(dashboardId);
             accessControlService.assertCanManageConnectionContent(dashboard.getConnectionId());
+            requireAlertOnDashboard(alertId, dashboardId);
             alertService.deleteAlert(alertId);
             return ResponseEntity.ok(Map.of("success", true));
         } catch (org.springframework.web.server.ResponseStatusException e) {
@@ -100,6 +103,16 @@ public class DashboardAlertController {
      * membership gate applies to all of them at once. The connection check stays with
      * each caller because read and write paths need different assertions.
      */
+    // Bind the alertId to the dashboard we just authorised. Authorising the dashboard is only
+    // half the check when a second id rides alongside it: 404 (not 403) for an unknown alert or
+    // one under a different dashboard, so this cannot confirm another dashboard's alert exists.
+    private void requireAlertOnDashboard(UUID alertId, UUID dashboardId) {
+        UUID owner = alertService.findDashboardIdForAlert(alertId).orElse(null);
+        if (owner == null || !owner.equals(dashboardId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Alert not found");
+        }
+    }
+
     private SavedDashboard requireDashboard(UUID dashboardId) {
         SavedDashboard dashboard = savedDashboardService.getDashboardById(dashboardId)
             .orElseThrow(() -> new IllegalArgumentException("Dashboard not found"));

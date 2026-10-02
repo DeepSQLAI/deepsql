@@ -57,7 +57,7 @@ public class CodeScanController {
         @RequestParam("connectionId") String connectionId,
         @RequestBody UpdateFocusRequest body
     ) {
-        accessControlService.assertCanManageConnectionContent(connectionId);
+        assertCanManageSource(sourceId);
         return ResponseEntity.ok(
             codeScanService.updateFocus(sourceId, body == null ? null : body.focus())
         );
@@ -72,7 +72,7 @@ public class CodeScanController {
     @DeleteMapping("/sources/{sourceId}")
     public ResponseEntity<Void> deleteSource(@PathVariable String sourceId,
                                              @RequestParam("connectionId") String connectionId) {
-        accessControlService.assertCanManageConnectionContent(connectionId);
+        assertCanManageSource(sourceId);
         codeScanService.deleteSource(sourceId);
         return ResponseEntity.ok().build();
     }
@@ -86,7 +86,7 @@ public class CodeScanController {
         @RequestParam(value = "focus", required = false) String focus,
         @RequestParam("file") MultipartFile file
     ) throws IOException {
-        accessControlService.assertCanManageConnectionContent(connectionId);
+        assertCanManageSource(sourceId);
         return ResponseEntity.ok(
             codeScanService.startScan(sourceId, file, focus, accessControlService.getCurrentUsername())
         );
@@ -95,7 +95,7 @@ public class CodeScanController {
     @GetMapping("/jobs/{jobId}")
     public ResponseEntity<CodeScanJob> getJob(@PathVariable String jobId,
                                               @RequestParam("connectionId") String connectionId) {
-        accessControlService.assertCanManageConnectionContent(connectionId);
+        assertCanManageJob(jobId);
         return codeScanService.getJob(jobId)
             .map(ResponseEntity::ok)
             .orElseGet(() -> ResponseEntity.notFound().build());
@@ -104,14 +104,14 @@ public class CodeScanController {
     @GetMapping("/sources/{sourceId}/jobs")
     public ResponseEntity<List<CodeScanJob>> listJobs(@PathVariable String sourceId,
                                                       @RequestParam("connectionId") String connectionId) {
-        accessControlService.assertCanManageConnectionContent(connectionId);
+        assertCanManageSource(sourceId);
         return ResponseEntity.ok(codeScanService.recentJobs(sourceId));
     }
 
     @GetMapping(value = "/jobs/{jobId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamJob(@PathVariable String jobId,
                                 @RequestParam("connectionId") String connectionId) {
-        accessControlService.assertCanManageConnectionContent(connectionId);
+        assertCanManageJob(jobId);
         return codeScanService.subscribeJob(jobId);
     }
 
@@ -137,7 +137,7 @@ public class CodeScanController {
         @RequestParam("connectionId") String connectionId,
         @RequestBody DecideRequest body
     ) {
-        accessControlService.assertCanManageConnectionContent(connectionId);
+        assertCanManageSuggestion(suggestionId);
         return ResponseEntity.ok(
             codeScanService.decide(
                 suggestionId,
@@ -153,9 +153,14 @@ public class CodeScanController {
         @RequestParam("connectionId") String connectionId,
         @RequestBody BulkDecideRequest body
     ) {
-        accessControlService.assertCanManageConnectionContent(connectionId);
         if (body == null || body.ids() == null || body.ids().isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "ids required"));
+        }
+        // Every id must resolve to a connection the caller can manage, and an id that
+        // resolves to nothing fails too — otherwise an unknown id rides into an otherwise
+        // valid batch. connectionId is accepted for wire compatibility but not trusted.
+        for (String suggestionId : body.ids()) {
+            assertCanManageSuggestion(suggestionId);
         }
         var result = codeScanService.bulkDecide(
             body.ids(),
@@ -169,6 +174,25 @@ public class CodeScanController {
         payload.put("failed", result.failures().size());
         payload.put("failures", result.failures());
         return ResponseEntity.ok(payload);
+    }
+
+    // Resolve the row's own connection and authorise against that — never the caller-supplied
+    // connectionId, which the caller may legitimately own while the id targets another tenant.
+    // 404 for both "no such id" and "not yours", so the endpoint is not an existence oracle,
+    // matching the rule DashboardWorkspaceService.assertCanReadDashboard already follows.
+    private void assertCanManageSource(String sourceId) {
+        accessControlService.assertCanManageConnectionContentOrNotFound(
+            codeScanService.findConnectionIdForSource(sourceId).orElse(null), "Scan source");
+    }
+
+    private void assertCanManageJob(String jobId) {
+        accessControlService.assertCanManageConnectionContentOrNotFound(
+            codeScanService.findConnectionIdForJob(jobId).orElse(null), "Scan job");
+    }
+
+    private void assertCanManageSuggestion(String suggestionId) {
+        accessControlService.assertCanManageConnectionContentOrNotFound(
+            codeScanService.findConnectionIdForSuggestion(suggestionId).orElse(null), "Suggestion");
     }
 
     private static CodeKnowledgeSuggestion.Status parseStatus(String s) {
