@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+import com.dbaagent.util.SqlIdentifier;
 
 /**
  * Service for collecting and caching column values, especially for low-cardinality columns.
@@ -447,12 +448,13 @@ public class ColumnValueCollectionService {
     /**
      * Quote identifier based on database type.
      */
+    /**
+     * Delegates to {@link SqlIdentifier}, which doubles an embedded quote. This copy had the
+     * same missing-escape bug as the one in {@code CardinalityEstimationService}; it is fed
+     * catalog-derived names today, so it was not exploitable, but it was one caller away.
+     */
     private String quoteIdentifier(String identifier, String dbType) {
-        if (dbType != null && dbType.toLowerCase().contains("mysql")) {
-            return "`" + identifier + "`";
-        }
-        // PostgreSQL and others use double quotes
-        return "\"" + identifier + "\"";
+        return SqlIdentifier.quote(identifier, dbType);
     }
 
     /**

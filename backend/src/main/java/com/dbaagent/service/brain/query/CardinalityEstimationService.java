@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+import com.dbaagent.util.SqlIdentifier;
 
 /**
  * Brain 2.0: Cardinality Estimation Service
@@ -47,6 +48,11 @@ public class CardinalityEstimationService {
      */
     @Transactional
     public List<ColumnStatistics> collectTableStatistics(String connectionId, String tableName) {
+        // Refused before any connection work. getDecryptedConnection below decrypts stored
+        // credentials and opens a JDBC session, so validating after it would make a hostile
+        // name a credential-use primitive even when the statement never runs — the same
+        // "check before the work, not after" rule the slow-query analytics endpoints learned.
+        SqlIdentifier.requireSafe(tableName);
         log.info("Collecting column statistics for table: {} in connection: {}", tableName, connectionId);
 
         try {
@@ -498,12 +504,17 @@ public class CardinalityEstimationService {
         }
     }
 
+    /**
+     * Delegates to {@link SqlIdentifier}, which doubles an embedded quote.
+     *
+     * <p>This used to wrap without doubling, so a {@code tableName} path variable carrying a
+     * quote closed the identifier and the rest became live SQL. Verified against a real
+     * PostgreSQL: the injected {@code DROP TABLE} executed, with none of the six
+     * {@code String.format} sinks below using a bind parameter, and this path never reaches
+     * {@code QueryExecutorService} so there is no {@code setReadOnly(true)} backstop either.
+     */
     private String quoteIdentifier(String dbType, String identifier) {
-        if ("postgres".equals(dbType)) {
-            return "\"" + identifier + "\"";
-        } else {
-            return "`" + identifier + "`";
-        }
+        return SqlIdentifier.quote(identifier, dbType);
     }
 
     private boolean isNumericType(String dataType) {

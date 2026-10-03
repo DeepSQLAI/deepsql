@@ -878,6 +878,36 @@ it against a real database — not a theoretical hardening pass.
   constructs a real `MySQLQueryExecutionProvider`. Do not reintroduce a stubbed
   dialect here; the mock is what let the blocker ship.
 
+### SQL Identifier Quoting
+
+- **Quoting an identifier without doubling the embedded quote is not protection.**
+  `CardinalityEstimationService.quoteIdentifier` returned `"\"" + identifier + "\""` and never
+  escaped, which is exactly as safe as `"'" + value + "'"` is for a string literal. Six
+  `String.format` sinks consumed it with no bind parameter, fed by an unvalidated
+  `@PathVariable tableName` on `POST /brain/statistics/{connectionId}/tables/{tableName}`.
+  Reproduced against a real PostgreSQL: the payload
+  `victim" AS t; DROP TABLE zz_v.probe; SELECT 1 FROM zz_v."victim` executed with **no errors**
+  and the probe table went from 1 row to gone. It carries no `/`, so `StrictHttpFirewall` does
+  not block it, and the path **never reaches `QueryExecutorService`** so there is no
+  `setReadOnly(true)` backstop — `grep setReadOnly` over `src/main/java` still returns one hit,
+  and it is not here.
+- **Use `SqlIdentifier.quote(identifier, dbType)`. Do not write another quoter.** Four of the
+  six quoters in the backend were already correct; the two that were not were both
+  reimplementations in *service* classes, while the *provider* classes got it right — the same
+  "clustered by when it was written" signature the `BrainController` authorization misses had.
+  Two copies of a security primitive is the defect: one gets fixed, the other is missed.
+- **`SqlIdentifier.requireSafe` is the second layer, and it runs before the connection work.**
+  Escaping makes injection impossible but still lets a caller address an object the feature
+  never meant to touch. It is called at the top of `collectTableStatistics`, ahead of
+  `getDecryptedConnection` — validating after it would make a hostile name a credential-use
+  primitive even when the statement never runs. The pattern `[A-Za-z0-9_$.]+` is deliberately
+  permissive enough for `v_daily_revenue` / `public.orders` / `tableName$`; a validator that
+  rejects real names is one the next person deletes. A rejected name is a **400**, not a 500.
+- **A grep is not an audit.** `SlackDailyDigestService:3028` escapes via
+  `identifier.replace(quote, quote + quote)` with a *variable*, so a literal-matching grep
+  reported it vulnerable when it is not. Read the body before believing the pattern.
+  See `docs/security/2026-09-16-sql-injection-quote-identifier.md`.
+
 ### Data Model Rules
 
 - **`mcp_tokens.user_id` is a non-null FK with no cascade.** Deleting a user who holds

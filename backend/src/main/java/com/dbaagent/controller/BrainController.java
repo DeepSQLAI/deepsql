@@ -1952,6 +1952,11 @@ public class BrainController {
             return ResponseEntity.ok(stats);
         } catch (ResponseStatusException e) {
             throw e;
+        } catch (IllegalArgumentException e) {
+            // A rejected identifier is a bad request, not a server fault. Without this the
+            // catch-all below reports 500 and sends the caller looking for an outage.
+            log.warn("Rejected table name for statistics collection: {}", e.getMessage());
+            return ResponseEntity.badRequest().build();
         } catch (Exception e) {
             log.error("Error collecting table statistics", e);
             return ResponseEntity.internalServerError().build();
