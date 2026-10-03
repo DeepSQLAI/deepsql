@@ -18,6 +18,7 @@ import {
 import * as XLSX from 'xlsx'
 import { Download, FileSpreadsheet, FileText, ChevronDown, ChevronUp } from 'lucide-react'
 import styles from './AgentArtifacts.module.css'
+import { boldify as sharedBoldify } from '../Agent/boldify.js'
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 
@@ -133,10 +134,13 @@ function chartToRows(data) {
 
 // ── Markdown text renderer ───────────────────────────────────────────────────
 
+// Presentation only — the escaping lives in the shared module so this renderer and
+// AgentView cannot diverge on the half that stops injected markup executing.
+const STYLED_CODE_TAG =
+  '<code style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:0.88em;font-family:monospace">$1</code>'
+
 function boldify(text) {
-  return text
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`([^`]+)`/g, '<code style="background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:0.88em;font-family:monospace">$1</code>')
+  return sharedBoldify(text, STYLED_CODE_TAG)
 }
 
 function RenderText({ content }) {

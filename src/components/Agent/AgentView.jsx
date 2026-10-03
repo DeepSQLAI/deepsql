@@ -16,6 +16,7 @@ import FeedbackButtons from "@/components/FeedbackButtons";
 import CreateAgentModal from "@/components/Brain/CreateAgentModal";
 import { saveAgent } from "@/components/Brain/brainAgentStore";
 import styles from "./AgentView.module.css";
+import { boldify } from "./boldify.js";
 
 const FALLBACK_PROMPTS = [
   {
@@ -880,12 +881,6 @@ function WaveText({ text, className }) {
       ))}
     </p>
   );
-}
-
-function boldify(text) {
-  return text
-    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-    .replace(/`([^`]+)`/g, "<code>$1</code>");
 }
 
 function renderMarkdownLine(line, i) {
