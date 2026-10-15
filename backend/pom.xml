@@ -284,7 +284,7 @@
         <dependency>
             <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-logging</artifactId>
-            <version>3.21.0</version>
+            <version>3.36.0</version>
         </dependency>
 
         <!-- Elasticsearch client for ELK integration -->
