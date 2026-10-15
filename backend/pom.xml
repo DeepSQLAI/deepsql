@@ -85,7 +85,7 @@
         <dependency>
             <groupId>com.github.kagkarlsson</groupId>
             <artifactId>db-scheduler-spring-boot-4-starter</artifactId>
-            <version>16.7.0</version>
+            <version>16.12.0</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
