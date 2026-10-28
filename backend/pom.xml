@@ -159,7 +159,7 @@
         <dependency>
             <groupId>com.slack.api</groupId>
             <artifactId>bolt-jakarta-socket-mode</artifactId>
-            <version>1.48.0</version>
+            <version>1.50.0</version>
         </dependency>
         <dependency>
             <groupId>jakarta.websocket</groupId>
