@@ -75,32 +75,59 @@ def iter_profile_homes(hermes_home: Path):
             yield child
 
 
-def mirror_token_for_live_mcp(hermes_home: Path, token: str) -> list[Path]:
-    """Publish the provisioned token to the ONE shared path a live MCP process
-    may have been started from — without touching any other user's profile.
+def iter_profile_homes(hermes_home: Path):
+    """Yield each ``profiles/<name>`` directory under a Hermes home."""
+    profiles = hermes_home / "profiles"
+    if not profiles.is_dir():
+        return
+    for child in profiles.iterdir():
+        if child.is_dir():
+            yield child
 
-    Hermes starts one DeepSQL MCP stdio server from whichever profile first
-    loaded ``mcp_servers``, then keeps that subprocess for the life of the
-    Agent API. ``POST /api/profile/switch`` is explicitly ``process_wide=False``
-    — it sets a cookie / thread-local for sessions, but does **not** respawn
-    MCP with the target profile's ``DEEPSQL_AUTH_TOKEN``. The MCP client
-    re-reads ``DEEPSQL_TOKEN_FILE`` per request (mtime cache), so the shared
-    root file is what lets a rotation reach that already-running process.
 
-    This previously also wrote every ``profiles/*/deepsql.token``, which made
-    the credential globally last-writer-wins: any user opening the Agent tab
-    overwrote every other user's token, so their agent then authenticated as
-    the newcomer — a cross-user read whose audit row named the wrong person.
-    Two concurrent users were enough; no impersonation required.
+def backend_mcp_token_url() -> str:
+    base = API_BASE.rstrip("/")
+    if base.endswith("/api"):
+        return f"{base}/agent/internal/mcp-token"
+    return f"{base.rstrip('/')}/agent/internal/mcp-token"
 
-    The root file alone is still shared, so a mismatched credential can still
-    reach the live process. That is why the *backend* is the real guard:
-    ``McpTokenAuthenticationFilter`` refuses a token whose owner differs from
-    the request's ``DEEPSQL_MCP_USER_ID`` claim, so a stale/foreign token fails
-    closed with ``mcp_identity_mismatch`` instead of silently reading another
-    user's data. Never restore the per-profile fan-out.
-    """
-    return [write_token_file(hermes_home, token)]
+
+def mint_token_from_backend(user: str) -> str:
+    """Ask Spring to mint a fresh agent MCP token for ``user`` (provisioner-only)."""
+    import urllib.error
+    import urllib.request
+
+    if not SECRET:
+        raise RuntimeError("AGENT_PROVISION_SECRET unset")
+    payload = json.dumps({"user": user}).encode("utf-8")
+    req = urllib.request.Request(
+        backend_mcp_token_url(),
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "X-Provision-Secret": SECRET,
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = json.loads(resp.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"backend mcp-token HTTP {e.code}: {detail}") from e
+    token = str(body.get("token") or "").strip()
+    if not token:
+        raise RuntimeError("backend returned no token")
+    return token
+
+
+def provision_user_credentials(user: str, token: str) -> Path:
+    profile = profile_for(user)
+    home = ensure_profile(profile)
+    token_file = write_token_file(home, token)
+    write_profile_mcp(home, user=user, token=token, token_file=token_file)
+    write_profile_env(home, user=user, token=token, token_file=token_file)
+    return home
 
 
 def ensure_profile(name: str) -> Path:
@@ -226,6 +253,8 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.rstrip("/")
         if path == "/provision":
             return self._handle_provision()
+        if path == "/refresh":
+            return self._handle_refresh()
         if path == "/revoke":
             return self._handle_revoke()
         return self._send(404, {"error": "not found"})
@@ -245,18 +274,32 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": "user required"})
         profile = profile_for(user)
         try:
-            home = ensure_profile(profile)
-            token_file = write_token_file(home, token)
-            write_profile_mcp(home, user=user, token=token, token_file=token_file)
-            write_profile_env(home, user=user, token=token, token_file=token_file)
-            mirrored = mirror_token_for_live_mcp(HERMES_HOME, token)
-            sys.stderr.write(
-                f"[agent-provisioner] mirrored MCP token for {user} onto "
-                f"{len(mirrored)} live token file(s)\n"
-            )
+            home = provision_user_credentials(user, token)
         except Exception as e:
             return self._send(500, {"error": str(e)})
         return self._send(200, {"ok": True, "profile": profile, "home": str(home)})
+
+    def _handle_refresh(self):
+        """Mint a fresh MCP token from Spring and rewrite only this user's profile."""
+        peer = self.client_address[0]
+        if peer not in ("127.0.0.1", "::1"):
+            return self._send(403, {"error": "forbidden"})
+        if not SECRET:
+            return self._send(500, {"error": "AGENT_PROVISION_SECRET unset"})
+        try:
+            body = self._read_json()
+        except Exception:
+            return self._send(400, {"error": "invalid json"})
+        user = str(body.get("user") or "").strip()
+        if not user:
+            return self._send(400, {"error": "user required"})
+        profile = profile_for(user)
+        try:
+            token = mint_token_from_backend(user)
+            home = provision_user_credentials(user, token)
+        except Exception as e:
+            return self._send(500, {"error": str(e)})
+        return self._send(200, {"ok": True, "profile": profile, "home": str(home), "refreshed": True})
 
     def _handle_revoke(self):
         """Best-effort disk cleanup on logout: blank the token file and the
@@ -308,34 +351,28 @@ def _self_test() -> int:
 
         # Each user opens the Agent tab; each gets their own credential.
         write_token_file(analyst, "dsql_mcp_analyst.tok")
-        mirror_token_for_live_mcp(hermes_home, "dsql_mcp_analyst.tok")
         write_token_file(admin, "dsql_mcp_admin.tok")
-        mirror_token_for_live_mcp(hermes_home, "dsql_mcp_admin.tok")
 
-        # The later open must NOT have rewritten the earlier user's token.
+        # Provisioning one user must never touch the other's token file.
+        write_token_file(admin, "dsql_mcp_admin_rotated.tok")
+
         analyst_now = token_file_for(analyst).read_text().strip()
         if analyst_now != "dsql_mcp_analyst.tok":
             raise AssertionError(
                 f"cross-user token leak: u-analyst holds {analyst_now!r}, "
-                "expected 'dsql_mcp_analyst.tok'. A user's Agent-tab open must "
-                "never overwrite another user's credential."
+                "expected 'dsql_mcp_analyst.tok'."
             )
         admin_now = token_file_for(admin).read_text().strip()
-        if admin_now != "dsql_mcp_admin.tok":
-            raise AssertionError(f"u-admin holds {admin_now!r}, expected own token")
+        if admin_now != "dsql_mcp_admin_rotated.tok":
+            raise AssertionError(f"u-admin holds {admin_now!r}, expected rotated token")
 
-        # The shared root file (the live-process watch path) still rotates, so
-        # View as keeps working; the backend rejects it if it names another user.
-        root_now = token_file_for(hermes_home).read_text().strip()
-        if root_now != "dsql_mcp_admin.tok":
-            raise AssertionError(f"root token file {root_now!r} did not rotate")
+        root = token_file_for(hermes_home)
+        if root.exists():
+            raise AssertionError(
+                "shared root deepsql.token must not exist — MCP reads per-profile tokens"
+            )
 
-        # And the fan-out must not come back.
-        paths = {p.resolve() for p in mirror_token_for_live_mcp(hermes_home, "x")}
-        if paths != {token_file_for(hermes_home).resolve()}:
-            raise AssertionError(f"mirror touched more than the root file: {paths}")
-
-        print("ok: per-user tokens stay isolated; only the shared root file rotates")
+        print("ok: per-user tokens stay isolated; no shared root credential")
         return 0
     except Exception:
         traceback.print_exc()

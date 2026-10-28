@@ -132,13 +132,15 @@ dashboard.pop("password_hash", None)
 dashboard.pop("password", None)
 
 existing_env = ((cfg.get("mcp_servers") or {}).get("deepsql") or {}).get("env") or {}
+profiles_home = f"{os.environ['AGENT_HOME']}/profiles"
+provisioner_port = os.environ.get("DEEPSQL_AGENT_PROVISIONER_PORT", "8788")
 mcp_env = {
     "DEEPSQL_API_BASE_URL": os.environ["DEEPSQL_API_BASE_URL"],
-    "DEEPSQL_MCP_USER_ID": existing_env.get("DEEPSQL_MCP_USER_ID", "deepsql-agent"),
+    "DEEPSQL_PROFILES_HOME": profiles_home,
+    "DEEPSQL_ACTOR_PROFILE_FILE": f"{os.environ['AGENT_HOME']}/active-mcp-profile",
+    "DEEPSQL_PROVISIONER_REFRESH_URL": f"http://127.0.0.1:{provisioner_port}/refresh",
     "DEEPSQL_MCP_PROJECT_ID": existing_env.get("DEEPSQL_MCP_PROJECT_ID", "deepsql-agent"),
 }
-if existing_env.get("DEEPSQL_AUTH_TOKEN"):
-    mcp_env["DEEPSQL_AUTH_TOKEN"] = existing_env["DEEPSQL_AUTH_TOKEN"]
 
 cfg.setdefault("mcp_servers", {})["deepsql"] = {
     "command": "node",

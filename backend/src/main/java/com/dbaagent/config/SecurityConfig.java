@@ -105,6 +105,7 @@ public class SecurityConfig {
                                     // Internal test-suite token issuance — validated by pre-shared
                                     // INTERNAL_TEST_TOKEN secret, not by user credentials
                                     "/auth/internal/token",
+                                    "/agent/internal/mcp-token",
                                     // Public dashboard sharing — the share token is the authorization;
                                     // these endpoints only resolve while the dashboard is published,
                                     // and every query is server-enforced read-only.

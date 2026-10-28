@@ -1,4 +1,6 @@
 const fs = require("fs");
+const path = require("path");
+const { AsyncLocalStorage } = require("async_hooks");
 
 const ALLOWED_READ_ONLY_KEYWORDS = new Set([
   "SELECT",
@@ -1286,18 +1288,23 @@ function clampInteger(value, min, max, fallback) {
   return Math.min(max, Math.max(min, parsed));
 }
 
-// Live bearer-token resolution. The MCP server is a long-lived stdio
-// subprocess; inside the DeepSQL Agent container the provisioner rotates the
-// token on disk (DEEPSQL_TOKEN_FILE) WITHOUT respawning us. Reading the token
-// per request — cached by mtime so we only touch disk when the file actually
-// changes — lets a rotated token take effect with no container restart. Editor
-// and CLI installs set no token file and keep using the env snapshot
-// (config.authToken), so their behaviour is unchanged.
-let _tokenFileCache = null; // { path, mtimeMs, token }
+const USER_SESSION_EXPIRED_MESSAGE =
+  "Your DeepSQL session expired — please sign in again";
 
-function readTokenFile(tokenFile) {
+// Per in-flight MCP tool call — Hermes may interleave users on one stdio server.
+const _requestAuthStorage = new AsyncLocalStorage();
+
+// Live bearer-token resolution. The MCP server is a long-lived stdio subprocess.
+// In the DeepSQL Agent container we resolve credentials per tool call from the
+// active Hermes profile's on-disk token (see DEEPSQL_PROFILES_HOME). Editor and
+// CLI installs keep the legacy single-user tokenFile / env snapshot path.
+let _tokenFileCache = null; // { path, mtimeMs, token }
+let _actorProfileCache = null; // { path, mtimeMs, profileName }
+
+function readTokenFile(tokenFile, { bypassCache = false } = {}) {
   const stat = fs.statSync(tokenFile);
   if (
+    !bypassCache &&
     _tokenFileCache &&
     _tokenFileCache.path === tokenFile &&
     _tokenFileCache.mtimeMs === stat.mtimeMs
@@ -1309,26 +1316,149 @@ function readTokenFile(tokenFile) {
   return token;
 }
 
-function getAuthToken(config) {
+function invalidateTokenCache(tokenFile) {
+  if (!tokenFile) {
+    _tokenFileCache = null;
+    return;
+  }
+  if (_tokenFileCache && _tokenFileCache.path === tokenFile) {
+    _tokenFileCache = null;
+  }
+}
+
+function invalidateActorProfileCache() {
+  _actorProfileCache = null;
+}
+
+function isAgentMultiUserMode(config) {
+  return Boolean(config && config.profilesHome);
+}
+
+function readActorProfileName(config) {
+  const actorFile = config && config.actorProfileFile;
+  if (!actorFile) {
+    return null;
+  }
+  try {
+    const stat = fs.statSync(actorFile);
+    if (
+      _actorProfileCache &&
+      _actorProfileCache.path === actorFile &&
+      _actorProfileCache.mtimeMs === stat.mtimeMs
+    ) {
+      return _actorProfileCache.profileName;
+    }
+    const profileName = fs.readFileSync(actorFile, "utf8").trim();
+    _actorProfileCache = { path: actorFile, mtimeMs: stat.mtimeMs, profileName };
+    return profileName;
+  } catch {
+    invalidateActorProfileCache();
+    return null;
+  }
+}
+
+function profileTokenPath(profilesHome, profileName) {
+  return path.join(profilesHome, profileName, "deepsql.token");
+}
+
+function readProfileUsername(profilesHome, profileName) {
+  const envPath = path.join(profilesHome, profileName, ".env");
+  try {
+    const text = fs.readFileSync(envPath, "utf8");
+    for (const line of text.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) {
+        continue;
+      }
+      const [key, ...rest] = trimmed.split("=");
+      if (key.trim() === "DEEPSQL_MCP_USER_ID") {
+        const value = rest.join("=").trim();
+        return value || null;
+      }
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+function resolveRequestAuthContext(config) {
+  if (isAgentMultiUserMode(config)) {
+    const profileName = readActorProfileName(config);
+    if (!profileName) {
+      return {
+        error: USER_SESSION_EXPIRED_MESSAGE,
+        errorCode: "MCP_ACTOR_PROFILE_MISSING",
+      };
+    }
+    const tokenFile = profileTokenPath(config.profilesHome, profileName);
+    let token = "";
+    try {
+      token = readTokenFile(tokenFile);
+    } catch {
+      token = "";
+    }
+    if (!token) {
+      return {
+        error: USER_SESSION_EXPIRED_MESSAGE,
+        errorCode: "MCP_TOKEN_MISSING",
+        profileName,
+        tokenFile,
+      };
+    }
+    const username =
+      readProfileUsername(config.profilesHome, profileName) ||
+      config.clientAgent ||
+      null;
+    if (!username) {
+      return {
+        error: USER_SESSION_EXPIRED_MESSAGE,
+        errorCode: "MCP_USER_IDENTITY_MISSING",
+        profileName,
+        tokenFile,
+      };
+    }
+    return { token, username, profileName, tokenFile };
+  }
+
   if (config && config.tokenFile) {
     try {
       const token = readTokenFile(config.tokenFile);
       if (token) {
-        return token;
+        return {
+          token,
+          username: config.clientAgent || null,
+          tokenFile: config.tokenFile,
+        };
       }
     } catch {
-      // Any stat/read error → fall back to the env token snapshot so we never
-      // hard-fail just because the file is momentarily missing mid-rewrite.
+      // unreadable token file — fall through to env snapshot for editor installs
     }
   }
-  return (config && config.authToken) || "";
+  const envToken = (config && config.authToken) || "";
+  if (!envToken) {
+    return {
+      error: USER_SESSION_EXPIRED_MESSAGE,
+      errorCode: "MCP_TOKEN_MISSING",
+    };
+  }
+  return { token: envToken, username: config.clientAgent || null };
 }
 
-// Force the next getAuthToken() to re-read from disk regardless of mtime. Used
-// by the 401 self-heal path, where the provisioner may have just rewritten the
-// token file (same second → identical mtime granularity on some filesystems).
-function invalidateTokenCache() {
-  _tokenFileCache = null;
+function getAuthToken(config) {
+  const active = _requestAuthStorage.getStore();
+  if (active && active.token) {
+    return active.token;
+  }
+  const resolved = resolveRequestAuthContext(config);
+  return resolved.token || "";
+}
+
+function mapAuthFailure(status, payloadMessage) {
+  if (status === 401 || status === 403) {
+    return USER_SESSION_EXPIRED_MESSAGE;
+  }
+  return payloadMessage;
 }
 
 function buildHeaders(config, extraHeaders = {}) {
@@ -1337,20 +1467,19 @@ function buildHeaders(config, extraHeaders = {}) {
     ...extraHeaders,
   };
 
-  const authToken = getAuthToken(config);
+  const active = _requestAuthStorage.getStore();
+  const authToken = active && active.token ? active.token : getAuthToken(config);
   if (authToken) {
     headers.Authorization = `Bearer ${authToken}`;
   }
 
-  // Origin-tracking headers so the backend audit row can distinguish
-  // CLI/MCP traffic and identify which editor invoked the MCP server.
-  // `clientAgent` carries the value of DEEPSQL_MCP_USER_ID — editor configs
-  // set this to "claude-desktop", "cursor-mcp", "codex-mcp", etc.
   if (config.clientType) {
     headers["X-DeepSQL-Client-Type"] = config.clientType;
   }
-  if (config.clientAgent) {
-    headers["X-DeepSQL-Client-Agent"] = config.clientAgent;
+  const clientAgent =
+    (active && active.username) || config.clientAgent || null;
+  if (clientAgent) {
+    headers["X-DeepSQL-Client-Agent"] = clientAgent;
   }
   if (config.clientVersion) {
     headers["X-DeepSQL-Client-Version"] = config.clientVersion;
@@ -1398,17 +1527,60 @@ async function performFetch(config, path, { method = "GET", json, headers } = {}
   }
 }
 
+async function refreshAuthViaProvisioner(config, auth) {
+  const url = config && config.provisionerRefreshUrl;
+  const username = auth && auth.username;
+  if (!url || !username) {
+    return false;
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ user: username }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return false;
+    }
+    if (auth.tokenFile) {
+      invalidateTokenCache(auth.tokenFile);
+    }
+    invalidateActorProfileCache();
+    const tokenAfter = auth.tokenFile
+      ? readTokenFile(auth.tokenFile, { bypassCache: true })
+      : "";
+    if (!tokenAfter) {
+      return false;
+    }
+    auth.token = tokenAfter;
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function callDeepSqlApi(config, path, options = {}) {
+  const active = _requestAuthStorage.getStore();
   const tokenBefore = getAuthToken(config);
   let response = await performFetch(config, path, options);
 
-  // 401 self-heal: our long-lived subprocess may be holding a token the agent
-  // provisioner has since rotated on disk. Re-read the token file (bypassing
-  // the mtime cache) and retry exactly once if it actually changed. We
-  // deliberately do NOT retry 403 — that's an RBAC denial, not stale creds —
-  // and only retry when a tokenFile is configured (editor/CLI installs aren't).
-  if (response.status === 401 && config && config.tokenFile) {
-    invalidateTokenCache();
+  if (
+    (response.status === 401 || response.status === 403) &&
+    active &&
+    config &&
+    config.provisionerRefreshUrl
+  ) {
+    const refreshed = await refreshAuthViaProvisioner(config, active);
+    if (refreshed && getAuthToken(config) !== tokenBefore) {
+      response = await performFetch(config, path, options);
+    }
+  } else if (response.status === 401 && config && config.tokenFile) {
+    invalidateTokenCache(config.tokenFile);
     const tokenAfter = getAuthToken(config);
     if (tokenAfter && tokenAfter !== tokenBefore) {
       response = await performFetch(config, path, options);
@@ -1426,10 +1598,11 @@ async function callDeepSqlApi(config, path, options = {}) {
   }
 
   if (!response.ok) {
-    const message =
+    const rawMessage =
       (payload && typeof payload === "object" && payload.message) ||
       response.statusText ||
       "DeepSQL API request failed";
+    const message = mapAuthFailure(response.status, rawMessage);
     throw new DeepSqlApiError(message, response.status, payload);
   }
 
@@ -2189,6 +2362,14 @@ function attachCallerCapabilities(payload, caps) {
 }
 
 async function handleToolCall(config, name, args = {}) {
+  const auth = resolveRequestAuthContext(config);
+  if (auth.error) {
+    return buildToolError(auth.error, { errorCode: auth.errorCode });
+  }
+  return _requestAuthStorage.run(auth, () => _handleToolCallScoped(config, name, args));
+}
+
+async function _handleToolCallScoped(config, name, args = {}) {
   switch (name) {
     case "list_connections": {
       const payload = await fetchConnectionsCached(config);
@@ -2809,21 +2990,22 @@ function createConfigFromEnv(env = process.env) {
     // best-effort
   }
 
+  const profilesHome = env.DEEPSQL_PROFILES_HOME || null;
+  const actorProfileFile = env.DEEPSQL_ACTOR_PROFILE_FILE || null;
+  const provisionerRefreshUrl = env.DEEPSQL_PROVISIONER_REFRESH_URL || null;
+
   return {
     baseUrl,
-    authToken: env.DEEPSQL_AUTH_TOKEN || "",
-    // Optional path to a file holding just the bearer token. When set (the
-    // agent-container case), getAuthToken reads it live per request so a
-    // provisioner-rotated token takes effect without respawning this process.
-    tokenFile: env.DEEPSQL_TOKEN_FILE || null,
+    authToken: profilesHome ? "" : (env.DEEPSQL_AUTH_TOKEN || ""),
+    tokenFile: profilesHome ? null : (env.DEEPSQL_TOKEN_FILE || null),
+    profilesHome,
+    actorProfileFile,
+    provisionerRefreshUrl,
     timeoutMs: clampInteger(env.DEEPSQL_MCP_TIMEOUT_MS, 1000, 600000, 120000),
     defaultUserId: env.DEEPSQL_MCP_USER_ID || "mcp-phase1",
     defaultProjectId: env.DEEPSQL_MCP_PROJECT_ID || "mcp-phase1",
-    // Origin metadata for the backend audit row. The MCP server always
-    // identifies as `mcp`; the agent name comes from DEEPSQL_MCP_USER_ID
-    // which editor configs set to claude-desktop / cursor-mcp / codex-mcp.
     clientType: "mcp",
-    clientAgent: env.DEEPSQL_MCP_USER_ID || null,
+    clientAgent: profilesHome ? null : (env.DEEPSQL_MCP_USER_ID || null),
     clientVersion,
   };
 }
@@ -2843,6 +3025,9 @@ module.exports = {
   getAuthToken,
   handleToolCall,
   invalidateTokenCache,
+  invalidateActorProfileCache,
+  resolveRequestAuthContext,
+  USER_SESSION_EXPIRED_MESSAGE,
   normalizeSqlForInspection,
   resolveApiUrl,
   splitStatements,

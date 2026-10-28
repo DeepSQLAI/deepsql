@@ -17,6 +17,9 @@ const {
   createConfigFromEnv,
   getAuthToken,
   invalidateTokenCache,
+  invalidateActorProfileCache,
+  resolveRequestAuthContext,
+  USER_SESSION_EXPIRED_MESSAGE,
   buildCallerCapabilities,
   summarizeCallerCapabilities,
   summarizeConnections,
@@ -1127,7 +1130,21 @@ test("Phase A tools that require connectionId reject empty input cleanly (no net
 // mtime-cached live read, buildHeaders/callDeepSqlApi picking up a rotated
 // token, and the one-shot 401 self-heal retry.
 
-test("createConfigFromEnv wires DEEPSQL_TOKEN_FILE and keeps the env token fallback", () => {
+test("createConfigFromEnv wires DEEPSQL_PROFILES_HOME for agent multi-user mode", () => {
+  const agent = createConfigFromEnv({
+    DEEPSQL_PROFILES_HOME: "/data/profiles",
+    DEEPSQL_ACTOR_PROFILE_FILE: "/data/active-mcp-profile",
+    DEEPSQL_PROVISIONER_REFRESH_URL: "http://127.0.0.1:8788/refresh",
+    DEEPSQL_AUTH_TOKEN: "legacy",
+    DEEPSQL_TOKEN_FILE: "/shared/deepsql.token",
+  });
+  assert.equal(agent.profilesHome, "/data/profiles");
+  assert.equal(agent.actorProfileFile, "/data/active-mcp-profile");
+  assert.equal(agent.provisionerRefreshUrl, "http://127.0.0.1:8788/refresh");
+  assert.equal(agent.authToken, "");
+  assert.equal(agent.tokenFile, null);
+  assert.equal(agent.clientAgent, null);
+
   const withFile = createConfigFromEnv({ DEEPSQL_TOKEN_FILE: "/x/y.token", DEEPSQL_AUTH_TOKEN: "z" });
   assert.equal(withFile.tokenFile, "/x/y.token");
   assert.equal(withFile.authToken, "z");
@@ -1216,7 +1233,10 @@ test("callDeepSqlApi does not retry a 401 when no token file is configured", asy
   const cfg = { baseUrl: "http://test/api/", authToken: "envtok", timeoutMs: 5000 };
   const stub = installFetchStub([{ status: 401, ok: false, statusText: "Unauthorized", body: { message: "nope" } }]);
   try {
-    await assert.rejects(() => callDeepSqlApi(cfg, "/connections"), /nope/);
+    await assert.rejects(
+      () => callDeepSqlApi(cfg, "/connections"),
+      (err) => err.message === USER_SESSION_EXPIRED_MESSAGE,
+    );
   } finally {
     stub.restore();
   }
@@ -1229,7 +1249,10 @@ test("callDeepSqlApi does not retry a 401 when the token file is unchanged", asy
   const cfg = { baseUrl: "http://test/api/", tokenFile: p, timeoutMs: 5000 };
   const stub = installFetchStub([{ status: 401, ok: false, statusText: "Unauthorized", body: { message: "nope" } }]);
   try {
-    await assert.rejects(() => callDeepSqlApi(cfg, "/connections"), /nope/);
+    await assert.rejects(
+      () => callDeepSqlApi(cfg, "/connections"),
+      (err) => err.message === USER_SESSION_EXPIRED_MESSAGE,
+    );
   } finally {
     stub.restore();
   }
@@ -1295,4 +1318,119 @@ test("handleToolCall(get_brain_context) stamps callerCapabilities onto the paylo
   assert.equal(result.structuredContent.callerCapabilities.canWriteSharedBrainNotes, false);
   assert.ok(result.structuredContent.callerCapabilities.doNotOffer.includes("save_brain_note"));
   assert.match(result.content[0].text, /Do not offer:.*save_brain_note/);
+});
+
+function makeMultiUserProfilesFixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dsql-mcp-profiles-"));
+  const profilesHome = path.join(root, "profiles");
+  const actorProfileFile = path.join(root, "active-mcp-profile");
+  for (const [profile, user, token] of [
+    ["u-alice", "alice", "tok-alice"],
+    ["u-bob", "bob", "tok-bob"],
+  ]) {
+    const home = path.join(profilesHome, profile);
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(path.join(home, "deepsql.token"), `${token}\n`);
+    fs.writeFileSync(path.join(home, ".env"), `DEEPSQL_MCP_USER_ID=${user}\n`);
+  }
+  return {
+    baseUrl: "http://test/api/",
+    timeoutMs: 5000,
+    profilesHome,
+    actorProfileFile,
+    provisionerRefreshUrl: "http://127.0.0.1:9/refresh",
+  };
+}
+
+test("multi-user mode resolves per-profile tokens and never uses another user's credential", async () => {
+  invalidateActorProfileCache();
+  const cfg = makeMultiUserProfilesFixture();
+  fs.writeFileSync(cfg.actorProfileFile, "u-alice\n");
+  const stub = installFetchStub([{ body: [] }, { body: [] }]);
+  try {
+    await handleToolCall(cfg, "list_connections", {});
+    fs.writeFileSync(cfg.actorProfileFile, "u-bob\n");
+    invalidateActorProfileCache();
+    await handleToolCall(cfg, "list_connections", {});
+  } finally {
+    stub.restore();
+  }
+  assert.equal(stub.authHeaders[0], "Bearer tok-alice");
+  assert.equal(stub.authHeaders[1], "Bearer tok-bob");
+});
+
+test("expired user gets re-login message while the other user still succeeds", async () => {
+  resetToolCaches();
+  invalidateActorProfileCache();
+  const cfg = makeMultiUserProfilesFixture();
+  fs.writeFileSync(path.join(cfg.profilesHome, "u-alice", "deepsql.token"), "\n");
+  fs.writeFileSync(cfg.actorProfileFile, "u-alice\n");
+
+  const alice = await handleToolCall(cfg, "list_connections", {});
+  assert.equal(alice.isError, true);
+  assert.match(alice.content[0].text, /session expired/i);
+
+  fs.writeFileSync(cfg.actorProfileFile, "u-bob\n");
+  invalidateActorProfileCache();
+  const stub = installFetchStub([{ body: [{ id: "c1", connectionName: "DB" }] }]);
+  try {
+    const bob = await handleToolCall(cfg, "list_connections", {});
+    assert.notEqual(bob.isError, true);
+  } finally {
+    stub.restore();
+  }
+  assert.equal(stub.authHeaders[0], "Bearer tok-bob");
+});
+
+test("concurrent in-flight MCP calls keep isolated Authorization headers", async () => {
+  resetToolCaches();
+  invalidateActorProfileCache();
+  const cfg = makeMultiUserProfilesFixture();
+  const authAtFetch = [];
+  let releaseAlice;
+  const aliceGate = new Promise((resolve) => { releaseAlice = resolve; });
+  const responses = [{ body: [] }, { body: [] }];
+  const stub = installFetchStub(responses);
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init) => {
+    authAtFetch.push(init?.headers?.Authorization);
+    if (init?.headers?.Authorization === "Bearer tok-alice") {
+      await aliceGate;
+    }
+    return originalFetch(url, init);
+  };
+  try {
+    fs.writeFileSync(cfg.actorProfileFile, "u-alice\n");
+    invalidateActorProfileCache();
+    const alicePromise = handleToolCall(cfg, "list_connections", {});
+
+    fs.writeFileSync(cfg.actorProfileFile, "u-bob\n");
+    invalidateActorProfileCache();
+    await handleToolCall(cfg, "list_connections", {});
+
+    releaseAlice();
+    await alicePromise;
+  } finally {
+    global.fetch = originalFetch;
+    stub.restore();
+  }
+  assert.deepEqual(authAtFetch, ["Bearer tok-alice", "Bearer tok-bob"]);
+});
+
+test("401 from backend maps to the re-login message", async () => {
+  resetToolCaches();
+  invalidateActorProfileCache();
+  const cfg = makeMultiUserProfilesFixture();
+  fs.writeFileSync(cfg.actorProfileFile, "u-alice\n");
+  const stub = installFetchStub([
+    { status: 401, ok: false, statusText: "Unauthorized", body: { message: "bad token" } },
+  ]);
+  try {
+    await assert.rejects(
+      () => handleToolCall(cfg, "list_connections", {}),
+      (err) => err instanceof Error && err.message === USER_SESSION_EXPIRED_MESSAGE,
+    );
+  } finally {
+    stub.restore();
+  }
 });

@@ -167,7 +167,7 @@ services:
     volumes:
       - dba-agent-agent:/var/lib/deepsql-agent
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8788/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8787/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
