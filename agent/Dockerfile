@@ -106,21 +106,22 @@ COPY agent/distribution.yaml    /opt/deepsql-agent/distribution.yaml
 COPY mcp                        /opt/deepsql-agent/mcp
 COPY scripts/local-agent-provisioner.py /opt/deepsql-agent/provisioner.py
 COPY agent/docker-entrypoint.sh /opt/deepsql-agent/docker-entrypoint.sh
+COPY agent/patches              /opt/deepsql-agent/patches
 
 RUN chmod +x /opt/deepsql-agent/docker-entrypoint.sh \
     && cd /opt/deepsql-agent/mcp && npm install --omit=dev --ignore-scripts \
     && mkdir -p /var/lib/deepsql-agent/logs /var/lib/deepsql-agent/profiles \
     # Apply DeepSQL Agent branding to the API UI (idempotent overlay).
-    && bash /opt/deepsql-agent/webui-overlay/apply-overlay.sh /opt/deepsql-agent/api || true
+    && bash /opt/deepsql-agent/webui-overlay/apply-overlay.sh /opt/deepsql-agent/api || true \
+    && python3 /opt/deepsql-agent/patches/stamp-deepsql-mcp-actor.py /opt/deepsql-agent/runtime/tools/mcp_tool.py
 
 # Expose the agent API (:8787) and the secret-gated provisioner (:8788).
 EXPOSE 8787 8788
 
 VOLUME ["/var/lib/deepsql-agent"]
 
-# Provisioner /health is unauthenticated and always 200 when the process is up.
-# The API on :8787 may require a session, so we don't use it for the healthcheck.
+# Agent API liveness on :8787; provisioner /health on :8788 is a separate check.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=5 \
-  CMD curl -fsS http://127.0.0.1:8788/health >/dev/null || exit 1
+  CMD curl -fsS http://127.0.0.1:8787/health >/dev/null || exit 1
 
 ENTRYPOINT ["/opt/deepsql-agent/docker-entrypoint.sh"]

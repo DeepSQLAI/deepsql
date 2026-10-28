@@ -176,10 +176,9 @@ public class AgentBridgeService {
             }
             agentToken = authToken == null ? "" : authToken;
         }
-        // The provisioner also mirrors this token onto every profile
-        // `deepsql.token` the already-running Hermes MCP subprocess watches.
-        // Profile switch does not respawn MCP; without that mirror, View as
-        // Agent chats keep the admin credential and skip policy.
+        // Per-user credentials live only under profiles/u-<user>/deepsql.token.
+        // The long-lived MCP subprocess resolves the active profile on each tool
+        // call (DEEPSQL_ACTOR_PROFILE_FILE) — never a shared root token file.
         callProvisioner(username, profile, agentToken, connectionId);
         return new ProfileBootstrap(profile, agentToken);
     }
@@ -372,6 +371,17 @@ public class AgentBridgeService {
                 username, e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Mint endpoint for the agent-side provisioner ({@code POST /refresh} on :8788).
+     * Returns {@code null} when the user is unknown or minting fails.
+     */
+    public String mintAgentTokenForProvisioner(String username) {
+        if (username == null || username.isBlank()) {
+            return null;
+        }
+        return mintAgentToken(username);
     }
 
     /** Mint a dedicated CHANNEL token (Slack, etc.); null if minting failed. */

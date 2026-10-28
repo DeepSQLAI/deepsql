@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 /**
  * Bootstrap endpoint for the native "Agent" chat tab. Resolves the current
@@ -31,6 +33,42 @@ public class AgentBridgeController {
 
     @Value("${security.cookie.name:auth_token}")
     private String cookieName;
+
+    @Value("${agent.provision-secret:}")
+    private String provisionSecret;
+
+    /**
+     * Secret-gated token mint for the agent container provisioner ({@code POST /refresh}).
+     * Not for browser or MCP clients — only the loopback provisioner on :8788.
+     */
+    @PostMapping("/internal/mcp-token")
+    public ResponseEntity<Map<String, Object>> mintProvisionerToken(
+            @RequestHeader(value = "X-Provision-Secret", required = false) String providedSecret,
+            @RequestBody(required = false) Map<String, Object> body) {
+        if (provisionSecret == null || provisionSecret.isBlank()) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                "message", "Agent provisioning is not configured"
+            ));
+        }
+        if (providedSecret == null || !MessageDigest.isEqual(
+                provisionSecret.getBytes(StandardCharsets.UTF_8),
+                providedSecret.getBytes(StandardCharsets.UTF_8))) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                "message", "Unauthorized"
+            ));
+        }
+        String user = body == null ? null : asString(body.get("user"));
+        if (user == null || user.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "user is required"));
+        }
+        String token = agentBridgeService.mintAgentTokenForProvisioner(user.trim());
+        if (token == null || token.isBlank()) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of(
+                "message", "Could not mint MCP token for " + user
+            ));
+        }
+        return ResponseEntity.ok(Map.of("token", token, "user", user.trim()));
+    }
 
     @PostMapping("/session")
     public ResponseEntity<Map<String, Object>> session(
