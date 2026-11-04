@@ -1,0 +1,248 @@
+# DeepSQL — end-to-end setup runbook for AI agents
+
+You are setting up DeepSQL, an open-source database agent for PostgreSQL and MySQL,
+on the user's machine or server. Follow these steps in order. Do not skip
+verification steps. Ask the user only for the values listed under "Inputs required".
+
+Source of truth: https://github.com/DeepSQLAI/deepsql
+Human docs: https://deepsql.ai/docs
+
+## Inputs required from the user
+
+1. A model provider API key (OpenAI, Azure OpenAI, Anthropic, or any OpenAI-compatible
+   server). **Optional** — the stack runs without a key and the user can configure it
+   later during onboarding in the web UI.
+2. Admin email (or use a default like admin@example.com).
+
+Everything else (password, secrets, embeddings) is auto-generated or optional.
+
+Never print secrets back to the user or commit .env to version control.
+
+## For AI agents — quick path
+
+Ask the user for their LLM API key (or skip if they want to configure later), then run:
+
+```bash
+DEEPSQL_LLM_API_KEY=<key> curl -fsSL https://deepsql.ai/install.sh | bash
+```
+
+Or without a key:
+
+```bash
+DEEPSQL_INITIAL_ADMIN_EMAIL=admin@example.com curl -fsSL https://deepsql.ai/install.sh | bash
+```
+
+After install:
+- Health check: `curl -fsS http://localhost:8080/api/actuator/health`
+- Login URL: http://localhost:3000
+- Credentials: stored in `~/deepsql/.env`
+
+The installer prints `NEEDS_USER_INPUT: ...` lines for any missing optional inputs,
+then exits 0 with all services healthy.
+
+## Step 0 — Preflight
+
+Run and confirm all succeed:
+
+```bash
+docker compose version    # Compose v2
+docker buildx version     # >= 0.17.0
+git --version
+curl --version
+```
+
+Docker must have ~4 GB of memory available: the backend JVM uses a 3 GB max heap and
+smaller allocations fail with unrelated-looking errors.
+
+On a fresh Debian/Ubuntu or Amazon Linux 2023 / RHEL server, after cloning (Step 1)
+you can install everything missing with:
+
+```bash
+sudo ./scripts/self-host/bootstrap-server.sh
+```
+
+A stock `dnf install docker` on Amazon Linux 2023 ships neither the Compose plugin
+nor a new enough buildx, so run bootstrap even if Docker is present.
+
+## Step 1 — One-liner install (recommended)
+
+```bash
+curl -fsSL https://deepsql.ai/install.sh | bash
+```
+
+This clones the repo, creates .env, runs the full install, and prints the login URL.
+Options:
+- `--non-interactive` — never prompt
+- `--fresh` — remove existing volumes first
+- `--no-seed-demo` — skip demo database seeding
+- `--ref v1.3.0` — install a specific version
+
+Or clone manually:
+
+```bash
+git clone https://github.com/DeepSQLAI/deepsql.git
+cd deepsql
+./scripts/self-host/install.sh
+```
+
+## Step 2 — Configure the model (if not using env vars)
+
+The provider id is always `openai`. There is one provider implementation and it
+speaks OpenAI, Azure OpenAI, and every OpenAI-compatible server; it dispatches on the
+shape of the endpoint, not on a configured name.
+
+`DEEPSQL_CHAT_PROVIDER` gates the whole group — if it is unset, no other
+`DEEPSQL_CHAT_*` variable is read. That is the most common setup failure.
+
+OpenAI:
+```env
+DEEPSQL_CHAT_PROVIDER=openai
+DEEPSQL_CHAT_API_KEY=sk-your-key
+DEEPSQL_CHAT_ENDPOINT=https://api.openai.com/v1
+DEEPSQL_CHAT_MODEL=gpt-4o
+```
+
+Azure OpenAI (an `.azure.com` / `.azure-api.net` endpoint switches auth to the
+`api-key` header automatically; `_MODEL` is the *deployment* name):
+```env
+DEEPSQL_CHAT_PROVIDER=openai
+DEEPSQL_CHAT_API_KEY=your-azure-openai-key
+DEEPSQL_CHAT_ENDPOINT=https://your-resource.cognitiveservices.azure.com/
+DEEPSQL_CHAT_MODEL=your-deployment-name
+```
+
+Anthropic (serves an OpenAI-compatible /v1/chat/completions; no embeddings API, so
+pair it with another embedding provider):
+```env
+DEEPSQL_CHAT_PROVIDER=openai
+DEEPSQL_CHAT_API_KEY=sk-ant-your-key
+DEEPSQL_CHAT_ENDPOINT=https://api.anthropic.com/v1
+DEEPSQL_CHAT_MODEL=claude-haiku-4-5-20251001
+```
+
+Local model (Ollama/vLLM/LM Studio/TGI) — key must be non-empty but is unused:
+```env
+DEEPSQL_CHAT_PROVIDER=openai
+DEEPSQL_CHAT_API_KEY=ollama
+DEEPSQL_CHAT_ENDPOINT=http://host.docker.internal:11434/v1
+DEEPSQL_CHAT_MODEL=llama3.1
+```
+
+Keyless start: If no LLM key is provided, the stack starts with AI features disabled.
+Configure the key during onboarding in the web UI after logging in.
+
+## Step 3 — Configure embeddings (optional)
+
+```env
+DEEPSQL_EMBEDDING_PROVIDER=openai
+DEEPSQL_EMBEDDING_API_KEY=sk-your-key
+DEEPSQL_EMBEDDING_ENDPOINT=https://api.openai.com/v1
+DEEPSQL_EMBEDDING_MODEL=text-embedding-3-large
+```
+
+The model MUST emit 3072-dimension vectors: `rag_documents.embedding` is a single
+`vector(3072)` column, so `text-embedding-3-small` (1536) is rejected. Skipping
+embeddings is survivable — retrieval falls back to keyword-only.
+
+## Step 4 — Verify
+
+```bash
+docker compose ps          # all services healthy
+curl -fsS http://localhost:8080/api/actuator/health
+curl -fsS -o /dev/null -w '%{http_code}\n' http://localhost:3000
+```
+
+Ports (override in .env): frontend 3000 (`DEEPSQL_FRONTEND_PORT`), backend 8080
+(`DEEPSQL_BACKEND_PORT`), postgres 5432 (`DEEPSQL_POSTGRES_PORT`), valkey 6379
+(`DEEPSQL_VALKEY_PORT`).
+
+## Step 5 — First login and configuration
+
+Open http://localhost:3000 and log in with the admin email and password from .env.
+Then, in the UI:
+1. Add a database connection (Postgres or MySQL — RDS, Aurora, Cloud SQL, self-managed).
+2. If no LLM key was configured: add it during onboarding or re-run the installer with
+   DEEPSQL_LLM_API_KEY=<key>.
+3. Give company context: business rules, code scans, slow query logs.
+4. Configure users and row/column-level access policies.
+
+Tell the user, explicitly: back up `ENCRYPTION_KEY` from `.env`. It encrypts every
+stored database credential and there is no recovery path if it is lost.
+
+Optional demo database (seeded by default):
+```bash
+./scripts/self-host/seed-demo-data.sh
+```
+
+## Step 6 — Connect coding agents over MCP
+
+DeepSQL exposes an MCP server so Claude, Codex and Cursor can query schemas, run
+read-only SQL, and check migrations against the brain before they are applied.
+
+Install the client package (MCP server + DeepSQL skills):
+
+```bash
+npm install -g @deepsql/mcp@latest
+```
+
+Then register the server and load the skills into each client:
+
+```bash
+deepsql mcp config --install --for claude-code --force
+deepsql mcp config --install --for codex --force
+deepsql mcp config --install --for cursor --force
+```
+
+`--force` overwrites an existing DeepSQL entry. Restart the client afterwards.
+
+See https://deepsql.ai/docs#mcp for details, and
+https://deepsql.ai/docs#cli-slack for the CLI and Slack surfaces.
+
+
+## Operating the stack
+
+```bash
+docker compose ps
+docker compose logs -f backend
+docker compose restart backend
+git pull && docker compose up -d --build   # upgrade
+./scripts/self-host/status.sh              # health probes
+./scripts/self-host/uninstall.sh           # stop containers
+./scripts/self-host/uninstall.sh --purge-data  # also drop volumes
+```
+
+Remote access is via SSH tunnel rather than exposing ports; see
+https://deepsql.ai/docs#remote.
+
+## Environment reference (most important)
+
+- `DEEPSQL_CHAT_PROVIDER`, `_API_KEY`, `_ENDPOINT`, `_MODEL` — chat model. Optional.
+- `DEEPSQL_EMBEDDING_PROVIDER`, `_API_KEY`, `_ENDPOINT`, `_MODEL` — embeddings.
+- `DEEPSQL_CHAT_TEMPERATURE`, `_API_VERSION`, `_USE_RESPONSES_API` — optional tuning.
+- `SECURITY_JWT_SECRET` — signs session tokens (`openssl rand -base64 64`).
+- `ENCRYPTION_KEY` (or `ENCRYPTION_KEYS` + `ENCRYPTION_KEY_ID`) — AES-GCM vault key.
+- `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` — vault database (Compose sets these).
+- `SPRING_PROFILES_ACTIVE=prod` — hardened defaults for self-hosting.
+- `SECURITY_AUTH_ENABLED` — `false` only for local development.
+- `SECURITY_ADMIN_BOOTSTRAP_ENABLED`, `ADMIN_BOOTSTRAP_SECRET` — first-admin endpoint.
+- `CORS_ALLOWED_ORIGINS` — browser origins allowed to call the API.
+- `VECTOR_STORE_TYPE` — `pgvector` (default) or `azure`.
+- `EMBEDDING_FAIL_OPEN` — whether a failed embedding call degrades silently.
+- `SLACK_*`, `EMAIL_*` — optional Slack bot and SMTP.
+
+## Troubleshooting
+
+- Carefully filled `.env` appears ignored → `DEEPSQL_CHAT_PROVIDER` is unset.
+- Build fails immediately → buildx older than 0.17.0, or Compose v1.
+- Backend exits at startup → missing `SECURITY_JWT_SECRET` or `ENCRYPTION_KEY`.
+- Backend OOM / mysterious crashes → less than ~4 GB available to Docker.
+- Embedding calls rejected → model is not 3072-dimension.
+- Cannot log in after manual `docker compose up` → no admin exists; use the bootstrap
+  endpoint or run `install.sh`.
+- 404 on `/v1/responses` → set `DEEPSQL_CHAT_USE_RESPONSES_API=false`.
+- Docker permission denied → run `sudo usermod -aG docker $USER` then `newgrp docker`.
+
+## Support
+
+Discord: https://discord.gg/duEJq7AeeG
+Slack: https://join.slack.com/t/deepsql/shared_invite/zt-44c3ll30h-qWxOxM9m8CkR6BGNOq2fWg
