@@ -299,7 +299,7 @@ export default function SlowQueryAnalysisTab({ connectionId }) {
 
   // Filter states
   const [timeRange, setTimeRange] = useState("LAST_24_HOURS");
-  const [thresholdMs, setThresholdMs] = useState(100);
+  const [thresholdMs, setThresholdMs] = useState(10);
   const [limit, setLimit] = useState(10);
   const [showFilters, setShowFilters] = useState(false);
 
@@ -398,6 +398,39 @@ export default function SlowQueryAnalysisTab({ connectionId }) {
       }
     }
   }, [activeJobData, activeJobFetched, activeJobUpdatedAt]);
+
+  // Auto-run analysis from pg_stat_statements on first load if no analysis exists
+  // This makes pg_stat_statements the primary/default data source for Postgres
+  const [autoAnalysisAttempted, setAutoAnalysisAttempted] = useState(false);
+  useEffect(() => {
+    // Only run auto-analysis once per mount, when we have a connectionId, 
+    // analysis data has been fetched (even if empty), and no analysis exists yet
+    if (
+      connectionId &&
+      !autoAnalysisAttempted &&
+      !loadingAnalysis &&
+      !latestAnalysisData?.analysisData &&
+      !analyzeSlowQueriesMutation.isPending &&
+      canRunAnalysis
+    ) {
+      setAutoAnalysisAttempted(true);
+      // Auto-run analysis from pg_stat_statements
+      analyzeSlowQueriesMutation.mutate({
+        connectionId,
+        threshold: thresholdMs,
+        limit,
+      });
+    }
+  }, [
+    connectionId,
+    autoAnalysisAttempted,
+    loadingAnalysis,
+    latestAnalysisData,
+    analyzeSlowQueriesMutation,
+    canRunAnalysis,
+    thresholdMs,
+    limit,
+  ]);
 
   // Handlers using mutations
   const handleAcknowledgeRegression = async (regressionId) => {
@@ -1167,8 +1200,8 @@ export default function SlowQueryAnalysisTab({ connectionId }) {
           <div className={styles.emptyStateHeader}>
             <h2>Slow Query Analysis</h2>
             <p>
-              Identify and optimize slow-running queries to improve database
-              performance
+              Analyzing slow queries from pg_stat_statements (PostgreSQL) or 
+              performance_schema (MySQL). Cloud log sources are optional extras.
             </p>
           </div>
           <div className={styles.emptyStatePillRow}>
@@ -1323,10 +1356,10 @@ export default function SlowQueryAnalysisTab({ connectionId }) {
 
           {/* Three Option Cards */}
           <div className={styles.optionCardsGrid}>
-            {/* Option 1: Query from Database */}
+            {/* Option 1: Query from Database (PRIMARY - pg_stat_statements/performance_schema) */}
             <ActionGuard action="analyze-slow-queries" mode="disable">
               <div
-                className={styles.optionCard}
+                className={`${styles.optionCard} ${styles.optionCardPrimary}`}
                 onClick={runFreshAnalysis}
                 role="button"
                 tabIndex={0}
@@ -1337,13 +1370,14 @@ export default function SlowQueryAnalysisTab({ connectionId }) {
                 <div className={styles.optionContent}>
                   <h3>Query from Database</h3>
                   <p>
-                    Analyze slow queries from built-in performance tables.
-                    MySQL: performance_schema + mysql.slow_log. PostgreSQL:
-                    pg_stat_statements.
+                    <strong>Recommended:</strong> Analyze slow queries directly from your database.
+                    PostgreSQL uses pg_stat_statements. MySQL uses performance_schema.
+                    No external setup required.
                   </p>
                   <div className={styles.optionMeta}>
+                    <span className={styles.optionTag}>Recommended</span>
                     <span className={styles.optionTag}>Instant</span>
-                    <span className={styles.optionTag}>No setup required</span>
+                    <span className={styles.optionTag}>No setup</span>
                   </div>
                 </div>
                 <ArrowRight size={18} className={styles.optionArrow} />
@@ -1384,7 +1418,7 @@ export default function SlowQueryAnalysisTab({ connectionId }) {
               </label>
             </ActionGuard>
 
-            {/* Option 3: Connect Cloud Source */}
+            {/* Option 3: Connect Cloud Source (OPTIONAL - for managed databases) */}
             <ActionGuard action="configure-source" mode="disable">
               <div
                 className={`${styles.optionCard} ${hasExternalSource ? styles.optionCardConfigured : ""}`}
@@ -1398,15 +1432,13 @@ export default function SlowQueryAnalysisTab({ connectionId }) {
                 <div className={styles.optionContent}>
                   <h3>Connect Cloud Source</h3>
                   <p>
-                    Set up automatic ingestion from AWS CloudWatch Logs or S3
-                    buckets. Support for Azure, GCP, and others coming soon.
+                    <em>Optional:</em> Ingest logs from AWS CloudWatch or S3 for managed
+                    databases (RDS, Aurora). Most users should use Query from Database above.
                   </p>
                   <div className={styles.optionMeta}>
+                    <span className={styles.optionTagMuted}>Optional</span>
                     <span className={styles.optionTag}>CloudWatch</span>
                     <span className={styles.optionTag}>S3</span>
-                    <span className={styles.optionTagMuted}>
-                      More coming soon
-                    </span>
                   </div>
                 </div>
                 {hasExternalSource ? (

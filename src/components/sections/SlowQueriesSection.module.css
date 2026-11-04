@@ -152,3 +152,41 @@
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+.pgStatBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  border: 1px solid #d1fae5;
+  border-radius: 10px;
+  background: #ecfdf5;
+  font-size: 13px;
+}
+
+.pgStatBannerText {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #065f46;
+  font-weight: 500;
+}
+
+.pgStatBannerLink {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #059669;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.pgStatBannerLink:hover {
+  color: #047857;
+}

@@ -49,7 +49,7 @@ export function useAnalyzeSlowQueries() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ connectionId, threshold = 100, limit = 10 }) =>
+    mutationFn: ({ connectionId, threshold = 10, limit = 10 }) =>
       slowQueriesAPI.analyzeSlowQueries(connectionId, threshold, limit),
     onSuccess: (_data, { connectionId }) => {
       queryClient.invalidateQueries({
