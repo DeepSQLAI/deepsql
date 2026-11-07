@@ -89,6 +89,9 @@ class QueryExecutionPolicyProdGuardTest {
             "/*!50000 GRANT ALL ON *.* TO 'x'@'%' */",
             "/*! ALTER TABLE customers ADD COLUMN x INT */",
             "/*!SET GLOBAL max_connections = 10*/",
+            // MariaDB's form: MySQL ignores it, MariaDB runs it.
+            "/*M!100000 GRANT ALL ON *.* TO 'x'@'%' */",
+            "/*m!100000 DROP TABLE customers */",
             "SELECT /*+ MAX_EXECUTION_TIME(600000) */ * FROM customers",
             "UPDATE /*+ SET_VAR(innodb_lock_wait_timeout=31536000) */ customers SET a = 1 WHERE id = 2")) {
             assertThat(blocked(sql, QueryExecutionContext.editor("analyst", false, false)).getErrorCode())
@@ -117,7 +120,10 @@ class QueryExecutionPolicyProdGuardTest {
         lenient().when(accessControlService.hasPermission(Permission.EXECUTE_DDL)).thenReturn(false);
         for (String sql : List.of(
             "CALL rebuild_customer_indexes()",
-            "SELECT * INTO customers_copy FROM customers")) {
+            "SELECT * INTO customers_copy FROM customers",
+            // Postgres runs the wrapped statement under EXPLAIN ANALYZE: this creates a table.
+            "EXPLAIN ANALYZE CREATE TABLE customers_copy AS SELECT * FROM customers",
+            "DO RELEASE_LOCK('x')")) {
             assertThat(blocked(sql, QueryExecutionContext.editor("dba", true, true)).getErrorCode())
                 .as(sql).isEqualTo(QueryExecutionPolicyException.DDL_PERMISSION_REQUIRED);
         }
@@ -199,6 +205,16 @@ class QueryExecutionPolicyProdGuardTest {
             .getErrorCode()).isEqualTo(QueryExecutionPolicyException.EDITOR_MUTATION_FORBIDDEN);
         assertThat(blocked("ALTER TABLE customers ADD COLUMN x INT", QueryExecutionContext.chat())
             .getErrorCode()).isEqualTo(QueryExecutionPolicyException.CHAT_MUTATION_BLOCKED);
+    }
+
+    @Test
+    void aDataModifyingCteIsStillRowOnly() {
+        lenient().when(accessControlService.hasPermission(Permission.EXECUTE_DDL)).thenReturn(false);
+        QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
+            new QueryRequest("WITH stale AS (SELECT id FROM customers WHERE active = 0) "
+                + "DELETE FROM customers WHERE id IN (SELECT id FROM stale)", null, null),
+            QueryExecutionContext.editor("dba", true, true), "mysql");
+        assertThat(decision.mutating()).isTrue();
     }
 
     @Test

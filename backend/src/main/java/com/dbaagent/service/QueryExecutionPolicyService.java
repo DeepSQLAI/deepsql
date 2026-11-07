@@ -114,12 +114,21 @@ public class QueryExecutionPolicyService {
     // /*+ ... */ optimizer hints (MAX_EXECUTION_TIME, SET_VAR) override the session
     // guards for one statement. Matched on the raw text: a literal containing "/*!" is
     // refused too, which is the right side to be wrong on.
-    private static final Pattern EXECUTABLE_COMMENT_PATTERN = Pattern.compile("/\\*[!+]");
+    // MariaDB's /*M! ... */ is executable there and inert on MySQL; a "mysql" connection
+    // can point at either. \s* over-blocks `/* !`, which is harmless.
+    private static final Pattern EXECUTABLE_COMMENT_PATTERN =
+        Pattern.compile("/\\*\\s*(?:M?!|\\+)", Pattern.CASE_INSENSITIVE);
     // Mutations that only change rows. Anything else that mutates — DDL, CALL/DO (a
     // procedure can run DDL), SELECT ... INTO a new table — needs EXECUTE_DDL. An
     // allowlist, so a statement shape nobody anticipated lands on the stricter side.
     private static final java.util.Set<String> ROW_ONLY_MUTATIONS =
         java.util.Set.of("INSERT", "UPDATE", "DELETE", "MERGE", "UPSERT", "REPLACE");
+    // The statement's real leading verb must agree. queryType alone can come from the
+    // keyword fallback, which sanitizes a prefix before matching, so it can disagree with
+    // what the database executes. WITH covers data-modifying CTEs. EXPLAIN is absent on
+    // purpose: Postgres runs `EXPLAIN ANALYZE CREATE TABLE ... AS` for real.
+    private static final Pattern ROW_ONLY_LEADING_VERB = Pattern.compile(
+        "^(?:INSERT|UPDATE|DELETE|MERGE|UPSERT|REPLACE|WITH)\\b", Pattern.CASE_INSENSITIVE);
 
     private final DatabaseProviderRegistry providerRegistry;
     private final AccessControlService accessControlService;
@@ -300,10 +309,12 @@ public class QueryExecutionPolicyService {
      * table; the keyword fallback also reports RENAME as "OTHER".
      */
     private boolean isDdlStatement(String statement, String queryType) {
-        if (DDL_VERB_PATTERN.matcher(stripLeadingComments(statement)).find()) {
+        String head = stripLeadingComments(statement);
+        if (DDL_VERB_PATTERN.matcher(head).find()) {
             return true;
         }
-        return queryType == null || !ROW_ONLY_MUTATIONS.contains(queryType.toUpperCase(Locale.ROOT));
+        boolean rowOnlyType = queryType != null && ROW_ONLY_MUTATIONS.contains(queryType.toUpperCase(Locale.ROOT));
+        return !(rowOnlyType && ROW_ONLY_LEADING_VERB.matcher(head).find());
     }
 
     private boolean isTruncate(String queryType, String statement) {

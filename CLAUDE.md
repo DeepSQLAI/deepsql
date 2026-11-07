@@ -886,10 +886,13 @@ it against a real database — not a theoretical hardening pass.
     swallows it and the ALTER silently runs with the default (possibly blocking) algorithm.
   - **`EXECUTE_DDL` is separate from DML** and ADMIN-only by default (grant DBAs via an
     override/custom role). Confirmed DML is routine; DDL is not.
-    DDL is a leading DDL verb **or any mutation that is not row-only DML** (an allowlist:
-    INSERT/UPDATE/DELETE/MERGE/UPSERT/REPLACE) — a verb check alone missed `CALL` (a
-    procedure can run DDL) and Postgres `SELECT … INTO new_table`, and the keyword
-    fallback reports `RENAME` as `OTHER`. Index Advisor `APPLY` runs real `CREATE INDEX`
+    DDL is a leading DDL verb **or any mutation that is not row-only DML**. Row-only needs
+    both a row-only `queryType` (INSERT/UPDATE/DELETE/MERGE/UPSERT/REPLACE) **and** a
+    matching real leading verb (or `WITH`): the keyword-fallback `queryType` sanitizes a
+    prefix before matching, so it alone can disagree with what the database runs. A verb
+    check alone missed `CALL`, `DO`, Postgres `SELECT … INTO new_table` and
+    `EXPLAIN ANALYZE CREATE TABLE … AS` (Postgres executes it); the keyword fallback also
+    reports `RENAME` as `OTHER`. Executable comments include MariaDB's `/*M! … */`. Index Advisor `APPLY` runs real `CREATE INDEX`
     outside the policy, so it checks the same permission; without that it is decorative.
   - **MySQL executable comments and optimizer hints are refused** (`/*! … */`, `/*+ … */`).
     MySQL runs the body of `/*!50000 GRANT … */`, while every check here strips it as a
