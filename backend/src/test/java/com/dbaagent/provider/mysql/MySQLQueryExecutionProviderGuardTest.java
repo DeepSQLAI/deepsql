@@ -116,7 +116,9 @@ class MySQLQueryExecutionProviderGuardTest {
     @Test
     void clauseDetectionStaysLinearOnUnterminatedCommentsAndQuotes() {
         // A lazy /\*.*?\*/ rescans to the end from every unterminated opener.
-        for (String tail : List.of("/*" + "a/*".repeat(32_000), "'" + "a\\'".repeat(32_000), "`" + "a".repeat(64_000))) {
+        for (String tail : List.of("/*" + "a/*".repeat(32_000), "'" + "a\\'".repeat(32_000), "`" + "a".repeat(64_000),
+            // CodeQL java/polynomial-redos: ALGORITHM followed by a long run of spaces and no value.
+            ("ALGORITHM" + " ".repeat(2_000) + "x ").repeat(25), ("LOCK" + " ".repeat(2_000) + "x ").repeat(25))) {
             long startedAt = System.currentTimeMillis();
             provider.onlineDdlAttempts("ALTER TABLE t ADD COLUMN x INT " + tail);
             assertThat(System.currentTimeMillis() - startedAt).as("must not backtrack").isLessThan(5_000L);

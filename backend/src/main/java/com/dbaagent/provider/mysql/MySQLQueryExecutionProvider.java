@@ -149,10 +149,12 @@ public class MySQLQueryExecutionProvider implements QueryExecutionProvider {
     private static final Pattern ALTER_TABLE = Pattern.compile(
         "^ALTER\\s+(?:ONLINE\\s+|IGNORE\\s+)?TABLE\\b", Pattern.CASE_INSENSITIVE);
     // Value-anchored so a column named `algorithm` or `lock` does not read as a clause.
+    // Possessive: `\s*=?\s*` lets the engine split a long run of spaces between the two
+    // `\s*` every possible way before failing — quadratic (CodeQL java/polynomial-redos).
     private static final Pattern ALGORITHM_CLAUSE = Pattern.compile(
-        "\\bALGORITHM\\s*=?\\s*(DEFAULT|INSTANT|INPLACE|COPY)\\b", Pattern.CASE_INSENSITIVE);
+        "\\bALGORITHM\\s*+(?:=\\s*+)?(DEFAULT|INSTANT|INPLACE|COPY)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern LOCK_CLAUSE = Pattern.compile(
-        "\\bLOCK\\s*=?\\s*(DEFAULT|NONE|SHARED|EXCLUSIVE)\\b", Pattern.CASE_INSENSITIVE);
+        "\\bLOCK\\s*+(?:=\\s*+)?(DEFAULT|NONE|SHARED|EXCLUSIVE)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern PARTITION_CLAUSE = Pattern.compile("\\bPARTITION(?:S|ING)?\\b", Pattern.CASE_INSENSITIVE);
     // One left-to-right pass over literals, identifiers and comments: at each position the
     // first alternative that starts there wins, so a quote inside a comment, or a comment
