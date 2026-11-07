@@ -892,8 +892,25 @@ it against a real database — not a theoretical hardening pass.
     `sql_mode`, `foreign_key_checks`, `unique_checks`, `time_zone` — an explicit list, since
     MySQL has no SQL form of COM_RESET_CONNECTION. Other MySQL session variables still carry
     over, as they always did. INTERNAL/SCHEDULED runs keep the pool baseline only.
+    **Restore with `= @@global.x`, never `= DEFAULT`:** measured on MySQL 8.4,
+    `SET SESSION foreign_key_checks = DEFAULT` (and `unique_checks`) leaves the session at 0
+    while the global is 1 — the reset silently failed for exactly the integrity switches.
+  - **HikariCP evicts on SQLState `0A000`, and MySQL's "ALGORITHM=INSTANT is not supported"
+    (1845) is `0A000`.** Hikari 7.1 hardcodes that state as connection-fatal, so the pool threw
+    away a healthy connection mid-run and the INPLACE fallback died on "No operations allowed
+    after statement closed" — the fallback never worked once through the real pool.
+    `ConnectionService.applyGuardrails` sets a `SQLExceptionOverride` that asks the dialect
+    (`isOnlineDdlUnsupported`) instead. Plain JDBC does not reproduce it; mocked tests cannot.
   - **Replicas are `@@global.read_only OR @@global.innodb_read_only`** — Aurora readers report
     `read_only=0`.
+  - **`MySQLGuardrailLiveTest` runs all of this against a real server** through the real
+    executor, policy and pool config (skipped unless `DEEPSQL_MYSQL_TEST_URL` is set). Both bugs
+    above were found by it, not by the mocked suites. Point it only at a disposable server — it
+    creates/drops a schema and toggles `@@global.read_only`. A throwaway instance without
+    Docker: `mysqld --no-defaults --initialize-insecure --datadir=<dir>`, then start it with
+    `--port=33084 --bind-address=127.0.0.1 --socket=/tmp/x.sock` (macOS caps socket paths at
+    103 chars), and run with
+    `DEEPSQL_MYSQL_TEST_URL='jdbc:mysql://127.0.0.1:33084/?user=root&allowPublicKeyRetrieval=true&useSSL=false'`.
   - **Row cap: 10k by default, an explicit request up to 100k** (the Editor's CSV export asks
     for `EXPORT_ROW_LIMIT = 100000`; a flat 10k ceiling silently truncated exports). Enforced by
     `setMaxRows` only; `LIMIT` text is appended only when the client asked for a limit —

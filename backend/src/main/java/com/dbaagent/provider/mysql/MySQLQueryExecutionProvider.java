@@ -212,9 +212,20 @@ public class MySQLQueryExecutionProvider implements QueryExecutionProvider {
      */
     @Override
     public String statementGuardResetSql(String serverVersion) {
-        return "SET SESSION " + LOCK_GUARD + ", sql_safe_updates = DEFAULT"
-            + ", sql_mode = DEFAULT, foreign_key_checks = DEFAULT, unique_checks = DEFAULT, time_zone = DEFAULT"
-            + (isMariaDb(serverVersion) ? "" : ", max_execution_time = DEFAULT");
+        // `= @@global.x`, not `= DEFAULT`: measured on MySQL 8.4, `SET SESSION
+        // foreign_key_checks = DEFAULT` (and unique_checks) leaves the session at 0 while
+        // the global is 1 — the reset silently failed for exactly the integrity switches.
+        return "SET SESSION " + LOCK_GUARD
+            + restore("sql_safe_updates", "sql_mode", "foreign_key_checks", "unique_checks", "time_zone")
+            + (isMariaDb(serverVersion) ? "" : restore("max_execution_time"));
+    }
+
+    private static String restore(String... variables) {
+        StringBuilder sql = new StringBuilder();
+        for (String v : variables) {
+            sql.append(", ").append(v).append(" = @@global.").append(v);
+        }
+        return sql.toString();
     }
 
     private static boolean isMariaDb(String serverVersion) {

@@ -149,10 +149,13 @@ class MySQLQueryExecutionProviderGuardTest {
     @Test
     void theResetRestoresThePoolBaselineSoNothingLeaksToTheNextBorrower() {
         // Also the settings a preamble could use to weaken the next borrower's writes.
+        // `= @@global.x`, not `= DEFAULT`: on MySQL 8.4, `foreign_key_checks = DEFAULT`
+        // leaves the session at 0 (see MySQLGuardrailLiveTest).
         assertThat(provider.statementGuardResetSql("8.0.36")).isEqualTo(
-            "SET SESSION lock_wait_timeout = 5, innodb_lock_wait_timeout = 5, sql_safe_updates = DEFAULT, "
-                + "sql_mode = DEFAULT, foreign_key_checks = DEFAULT, unique_checks = DEFAULT, time_zone = DEFAULT, "
-                + "max_execution_time = DEFAULT");
+            "SET SESSION lock_wait_timeout = 5, innodb_lock_wait_timeout = 5, "
+                + "sql_safe_updates = @@global.sql_safe_updates, sql_mode = @@global.sql_mode, "
+                + "foreign_key_checks = @@global.foreign_key_checks, unique_checks = @@global.unique_checks, "
+                + "time_zone = @@global.time_zone, max_execution_time = @@global.max_execution_time");
     }
 
     @Test
