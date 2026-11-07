@@ -218,6 +218,16 @@ class QueryExecutionPolicyProdGuardTest {
     }
 
     @Test
+    void aWriteInsideACteIsStillRowOnly() {
+        // Classified as "DELETE (in CTE)"; the label must not read as a schema change.
+        lenient().when(accessControlService.hasPermission(Permission.EXECUTE_DDL)).thenReturn(false);
+        QueryExecutionPolicyService.PolicyDecision decision = service.enforce(
+            new QueryRequest("WITH d AS (DELETE FROM customers WHERE id = 5 RETURNING *) SELECT * FROM d", null, null),
+            QueryExecutionContext.editor("dba", true, true), "mysql");
+        assertThat(decision.mutating()).isTrue();
+    }
+
+    @Test
     void dmlDoesNotNeedTheDdlPermission() {
         lenient().when(accessControlService.hasPermission(Permission.EXECUTE_DDL)).thenReturn(false);
         QueryExecutionPolicyService.PolicyDecision decision = service.enforce(

@@ -661,6 +661,19 @@ public class QueryExecutorService {
             runningQueryRegistry.register(
                 queryRequest.getExecutionId(), connectionId, sessionPid, executionContext.actorUsername());
 
+            // Session guardrails wrap the whole run: applied before the preambles (a
+            // read-only batch may put a heavy SELECT first), re-applied after them (so a
+            // `SET SESSION lock_wait_timeout = ...` cannot loosen them), and reset to the
+            // pool baseline in the finally below, because session variables outlive the
+            // borrow and would otherwise reach the next borrower, background jobs included.
+            // Fails closed: nothing runs without them.
+            QueryExecutionProvider executionProvider = providerRegistry.getDialect(connRequest.getDbType()).queryExecution();
+            String serverVersion = serverVersion(connection);
+            String guardSql = executionProvider.statementGuardSql(effectiveTimeout, serverVersion);
+            String tag = actorTag(executionContext);
+            applyGuard(connection, guardSql);
+            try {
+
             // Execute all preamble statements (SET @var, USE db, etc.) on the same connection
             // so that session variables are in scope for the final SELECT.
             for (int si = 0; si < statements.size() - 1; si++) {
@@ -668,23 +681,11 @@ public class QueryExecutorService {
                 if (preamble == null || preamble.isBlank()) continue;
                 try (Statement preambleStmt = connection.createStatement()) {
                     if (effectiveTimeout > 0) preambleStmt.setQueryTimeout(effectiveTimeout);
-                    preambleStmt.execute(preamble);
+                    preambleStmt.execute(tag + preamble);
                 }
             }
-
-            // Re-assert the session guardrails after the user's preambles, so a
-            // `SET SESSION lock_wait_timeout = ...` in front of the query cannot loosen
-            // them, and so a value one caller changed never leaks to the next borrower
-            // of this pooled connection. Fails closed: a statement does not run without them.
-            QueryExecutionProvider executionProvider = providerRegistry.getDialect(connRequest.getDbType()).queryExecution();
-            String guardSql = executionProvider.statementGuardSql(effectiveTimeout);
-            if (guardSql != null) {
-                try (Statement guardStmt = connection.createStatement()) {
-                    guardStmt.execute(guardSql);
-                } catch (SQLException e) {
-                    throw new SQLException("Could not apply DeepSQL's database safety settings, so the query was not run: "
-                        + e.getMessage(), e.getSQLState(), e.getErrorCode(), e);
-                }
+            if (statements.size() > 1) {
+                applyGuard(connection, guardSql);
             }
 
             // The last (or only) statement is the query whose results we return
@@ -714,7 +715,11 @@ public class QueryExecutorService {
                 String queryLower = queryTrimmed.toLowerCase();
                 boolean isSelect = queryLower.startsWith("select");
                 boolean alreadyHasLimit = queryLower.matches("(?s).*\\blimit\\s+\\d+.*");
-                if (isSelect && !alreadyHasLimit) {
+                // Text append only when the client asked for a limit, as before. The
+                // server-side cap is enforced by setMaxRows alone: appending to every
+                // SELECT broke FETCH FIRST, FOR UPDATE and LOCK IN SHARE MODE.
+                boolean clientAskedForLimit = queryRequest.getLimit() != null && queryRequest.getLimit() > 0;
+                if (isSelect && !alreadyHasLimit && clientAskedForLimit) {
                     baseQuery = queryTrimmed;
                     if (baseQuery.endsWith(";")) {
                         baseQuery = baseQuery.substring(0, baseQuery.length() - 1);
@@ -739,7 +744,6 @@ public class QueryExecutorService {
                     throw QueryExecutionPolicyException.unsafeMutation(
                         blocking.getMessage(), policyDecision.primaryQueryType());
                 }
-                String tag = actorTag(executionContext);
                 boolean hasResultSet = false;
                 for (int attempt = 0; attempt < attempts.size(); attempt++) {
                     try {
@@ -832,6 +836,9 @@ public class QueryExecutorService {
                     result.setRows(Arrays.asList(Arrays.asList(updateCount)));
                 }
             }
+            } finally {
+                resetGuard(connection, executionProvider.statementGuardResetSql(serverVersion), connectionId);
+            }
         } finally {
             runningQueryRegistry.unregister(queryRequest.getExecutionId());
         }
@@ -844,6 +851,42 @@ public class QueryExecutorService {
             log.debug("Failed to record SQL Runner lineage: {}", e.getMessage());
         }
         return userDataAccessPolicyService.redactResult(connectionId, result, executionContext);
+    }
+
+    private static void applyGuard(Connection connection, String guardSql) throws SQLException {
+        if (guardSql == null) {
+            return;
+        }
+        try (Statement guardStmt = connection.createStatement()) {
+            guardStmt.execute(guardSql);
+        } catch (SQLException e) {
+            throw new SQLException("Could not apply DeepSQL's database safety settings, so the query was not run: "
+                + e.getMessage(), e.getSQLState(), e.getErrorCode(), e);
+        }
+    }
+
+    /**
+     * Best effort: a failed reset leaves the per-statement settings in place, which are
+     * stricter than the pool baseline, not looser — so it is logged, not thrown, rather
+     * than masking the query's own result or error.
+     */
+    private void resetGuard(Connection connection, String resetSql, String connectionId) {
+        if (resetSql == null) {
+            return;
+        }
+        try (Statement resetStmt = connection.createStatement()) {
+            resetStmt.execute(resetSql);
+        } catch (SQLException | RuntimeException e) {
+            log.warn("Could not reset session guardrails on connection {}: {}", connectionId, e.getMessage());
+        }
+    }
+
+    private static String serverVersion(Connection connection) {
+        try {
+            return connection.getMetaData().getDatabaseProductVersion();
+        } catch (SQLException | RuntimeException e) {
+            return null;
+        }
     }
 
     /** Hard ceiling on rows returned to a person or agent, whatever the request asks for. */

@@ -105,10 +105,51 @@ class MySQLQueryExecutionProviderGuardTest {
 
     @Test
     void perStatementGuardCapsReadsAtThirtySecondsOnlyOnAWritableServer() {
-        assertThat(provider.statementGuardSql(240)).isEqualTo(
+        assertThat(provider.statementGuardSql(240, "8.0.36")).isEqualTo(
             "SET SESSION lock_wait_timeout = 5, innodb_lock_wait_timeout = 5, sql_safe_updates = 1, "
                 + "max_execution_time = IF(@@global.read_only, 240000, LEAST(240000, 30000))");
-        assertThat(provider.statementGuardSql(0)).contains("IF(@@global.read_only, 30000, LEAST(30000, 30000))");
+        assertThat(provider.statementGuardSql(0, null)).contains("IF(@@global.read_only, 30000, LEAST(30000, 30000))");
+    }
+
+    @Test
+    void mariaDbGetsNoMaxExecutionTimeBecauseItDoesNotHaveOne() {
+        // The MySQL provider also serves "mariadb" connections. An unknown variable fails the
+        // SET, and the executor fails closed — every query on the connection would be refused.
+        assertThat(provider.statementGuardSql(240, "10.11.6-MariaDB-log")).isEqualTo(
+            "SET SESSION lock_wait_timeout = 5, innodb_lock_wait_timeout = 5, sql_safe_updates = 1");
+        assertThat(provider.statementGuardResetSql("10.11.6-MariaDB-log")).doesNotContain("max_execution_time");
+    }
+
+    @Test
+    void theResetRestoresThePoolBaselineSoNothingLeaksToTheNextBorrower() {
+        assertThat(provider.statementGuardResetSql("8.0.36")).isEqualTo(
+            "SET SESSION lock_wait_timeout = 5, innodb_lock_wait_timeout = 5, "
+                + "sql_safe_updates = DEFAULT, max_execution_time = DEFAULT");
+    }
+
+    @Test
+    void serversWithoutInstantFallBackToInplace() {
+        // MySQL 5.7 / Aurora MySQL 2 reject INSTANT as a syntax error at the word we appended.
+        assertThat(provider.isOnlineDdlUnsupported(new SQLException(
+            "You have an error in your SQL syntax; check the manual ... near 'INSTANT' at line 2", "42000", 1064)))
+            .isTrue();
+        // A genuine syntax error elsewhere is not an excuse to retry.
+        assertThat(provider.isOnlineDdlUnsupported(new SQLException(
+            "You have an error in your SQL syntax; ... near 'COLUMNN c INT' at line 1", "42000", 1064)))
+            .isFalse();
+    }
+
+    @Test
+    void aPartitionChangeMustStateItsAlgorithmExplicitly() {
+        // Partition options come last in an ALTER, so an appended clause is a syntax error.
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+            () -> provider.onlineDdlAttempts("ALTER TABLE t ADD PARTITION (PARTITION p3 VALUES LESS THAN (2030))"));
+        assertThat(e.getMessage()).contains("ALGORITHM=INPLACE, LOCK=NONE");
+        assertThat(provider.onlineDdlAttempts(
+            "ALTER TABLE t ALGORITHM=INPLACE, LOCK=NONE, ADD PARTITION (PARTITION p3 VALUES LESS THAN (2030))"))
+            .hasSize(1);
+        // A column merely named like it is not a partition clause.
+        assertThat(provider.onlineDdlAttempts("ALTER TABLE t ADD COLUMN partition_key INT")).hasSize(2);
     }
 
     // ---- errors --------------------------------------------------------------

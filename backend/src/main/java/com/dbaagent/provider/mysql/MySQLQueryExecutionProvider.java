@@ -153,6 +153,7 @@ public class MySQLQueryExecutionProvider implements QueryExecutionProvider {
         "\\bALGORITHM\\s*=?\\s*(DEFAULT|INSTANT|INPLACE|COPY)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern LOCK_CLAUSE = Pattern.compile(
         "\\bLOCK\\s*=?\\s*(DEFAULT|NONE|SHARED|EXCLUSIVE)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern PARTITION_CLAUSE = Pattern.compile("\\bPARTITION(?:S|ING)?\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern QUOTED = Pattern.compile(
         "'(?:[^'\\\\]|\\\\.|'')*'|\"(?:[^\"\\\\]|\\\\.)*\"|`[^`]*`");
 
@@ -161,6 +162,7 @@ public class MySQLQueryExecutionProvider implements QueryExecutionProvider {
     private static final int ER_QUERY_TIMEOUT = 3024;
     private static final int ER_ALTER_OPERATION_NOT_SUPPORTED = 1845;
     private static final int ER_ALTER_OPERATION_NOT_SUPPORTED_REASON = 1846;
+    private static final int ER_PARSE_ERROR = 1064;
 
     @Override
     public String connectionGuardSql() {
@@ -175,10 +177,27 @@ public class MySQLQueryExecutionProvider implements QueryExecutionProvider {
      * and DDL are bounded by the lock waits and the JDBC timeout.
      */
     @Override
-    public String statementGuardSql(int timeoutSeconds) {
+    public String statementGuardSql(int timeoutSeconds, String serverVersion) {
+        String guard = "SET SESSION " + LOCK_GUARD + ", sql_safe_updates = 1";
+        if (isMariaDb(serverVersion)) {
+            // MariaDB has no max_execution_time (the SET would fail and, fail-closed, block
+            // every query). Its max_statement_time also stops writes and DDL mid-flight, so
+            // reads there stay bounded by the JDBC timeout alone.
+            return guard;
+        }
         int clientMs = timeoutSeconds > 0 ? timeoutSeconds * 1000 : PRIMARY_READ_LIMIT_MS;
-        return "SET SESSION " + LOCK_GUARD + ", sql_safe_updates = 1, max_execution_time = IF(@@global.read_only, "
+        return guard + ", max_execution_time = IF(@@global.read_only, "
             + clientMs + ", LEAST(" + clientMs + ", " + PRIMARY_READ_LIMIT_MS + "))";
+    }
+
+    @Override
+    public String statementGuardResetSql(String serverVersion) {
+        return "SET SESSION " + LOCK_GUARD + ", sql_safe_updates = DEFAULT"
+            + (isMariaDb(serverVersion) ? "" : ", max_execution_time = DEFAULT");
+    }
+
+    private static boolean isMariaDb(String serverVersion) {
+        return serverVersion != null && serverVersion.toLowerCase(java.util.Locale.ROOT).contains("mariadb");
     }
 
     @Override
@@ -203,6 +222,14 @@ public class MySQLQueryExecutionProvider implements QueryExecutionProvider {
         }
         // The appended clause starts on a new line: a trailing "-- comment" would
         // otherwise swallow it, and the ALTER would run with MySQL's default algorithm.
+        if (algorithm == null && lock == null && PARTITION_CLAUSE.matcher(clauses).find()) {
+            // Partition options must come last in an ALTER, so an appended clause is a
+            // syntax error. Ask for the clause up front instead of guessing where it goes.
+            throw new IllegalArgumentException(
+                "DeepSQL cannot check a partition change for online safety by itself. State it explicitly at the "
+                    + "start, e.g. ALTER TABLE t ALGORITHM=INPLACE, LOCK=NONE, ADD PARTITION (...), or run it off-peak "
+                    + "with gh-ost or pt-online-schema-change.");
+        }
         if (algorithm == null && lock == null) {
             return List.of(base + "\n, ALGORITHM=INSTANT", base + "\n, ALGORITHM=INPLACE, LOCK=NONE");
         }
@@ -220,10 +247,14 @@ public class MySQLQueryExecutionProvider implements QueryExecutionProvider {
     @Override
     public boolean isOnlineDdlUnsupported(SQLException e) {
         int code = e.getErrorCode();
+        String message = e.getMessage() == null ? "" : e.getMessage();
         return code == ER_ALTER_OPERATION_NOT_SUPPORTED
             || code == ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
             // Later InnoDB limits (row versions, max row size) word it the same way.
-            || (e.getMessage() != null && e.getMessage().contains("Try ALGORITHM="));
+            || message.contains("Try ALGORITHM=")
+            // MySQL 5.7 / Aurora MySQL 2 / older MariaDB do not know INSTANT at all and
+            // reject it as a syntax error pointing at the word we appended.
+            || (code == ER_PARSE_ERROR && message.contains("near 'INSTANT"));
     }
 
     @Override
@@ -238,8 +269,10 @@ public class MySQLQueryExecutionProvider implements QueryExecutionProvider {
                 + "waiting statement makes every later write to the table wait too. Try again when it is quieter.";
             case ER_UPDATE_WITHOUT_KEY_IN_SAFE_MODE -> "MySQL safe-updates mode refused this: the WHERE clause must "
                 + "filter on an indexed (key) column, or the statement must have a LIMIT.";
-            case ER_QUERY_TIMEOUT -> "Stopped at the " + PRIMARY_READ_LIMIT_MS / 1000 + "-second limit for reads on a "
-                + "primary database. Run heavy queries on the replica connection instead.";
+            // Could be the 30s primary cap or the query's own timeout; the error does not say which.
+            case ER_QUERY_TIMEOUT -> "Stopped at the time limit for reads: your query timeout, and at most "
+                + PRIMARY_READ_LIMIT_MS / 1000 + " seconds on a primary database. Narrow the query, or run heavy "
+                + "reads on a replica connection.";
             default -> null;
         };
     }

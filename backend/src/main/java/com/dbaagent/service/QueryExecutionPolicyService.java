@@ -121,8 +121,10 @@ public class QueryExecutionPolicyService {
     // Mutations that only change rows. Anything else that mutates — DDL, CALL/DO (a
     // procedure can run DDL), SELECT ... INTO a new table — needs EXECUTE_DDL. An
     // allowlist, so a statement shape nobody anticipated lands on the stricter side.
+    // "WRITE" is the text backstop's label for a CTE matching AS ( INSERT|UPDATE|DELETE|MERGE,
+    // which is always a row write; the leading-verb check below still has to agree.
     private static final java.util.Set<String> ROW_ONLY_MUTATIONS =
-        java.util.Set.of("INSERT", "UPDATE", "DELETE", "MERGE", "UPSERT", "REPLACE");
+        java.util.Set.of("INSERT", "UPDATE", "DELETE", "MERGE", "UPSERT", "REPLACE", "WRITE");
     // The statement's real leading verb must agree. queryType alone can come from the
     // keyword fallback, which sanitizes a prefix before matching, so it can disagree with
     // what the database executes. WITH covers data-modifying CTEs. EXPLAIN is absent on
@@ -313,7 +315,9 @@ public class QueryExecutionPolicyService {
         if (DDL_VERB_PATTERN.matcher(head).find()) {
             return true;
         }
-        boolean rowOnlyType = queryType != null && ROW_ONLY_MUTATIONS.contains(queryType.toUpperCase(Locale.ROOT));
+        // Data-modifying CTEs are labelled "DELETE (in CTE)" etc.; compare the verb.
+        String verb = queryType == null ? "" : queryType.trim().split("[\\s(]", 2)[0].toUpperCase(Locale.ROOT);
+        boolean rowOnlyType = ROW_ONLY_MUTATIONS.contains(verb);
         return !(rowOnlyType && ROW_ONLY_LEADING_VERB.matcher(head).find());
     }
 

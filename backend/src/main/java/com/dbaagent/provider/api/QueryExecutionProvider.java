@@ -75,13 +75,25 @@ public interface QueryExecutionProvider {
     }
 
     /**
-     * Session settings re-applied immediately before each user or agent statement,
-     * after any SET preambles the user sent, so a preamble cannot loosen them. A
-     * superset of {@link #connectionGuardSql()}.
+     * Session settings applied before each user or agent run, and again after any SET
+     * preambles the user sent, so a preamble cannot loosen them. A superset of
+     * {@link #connectionGuardSql()}.
      *
      * @param timeoutSeconds the client-side timeout for this statement; 0 when unset
+     * @param serverVersion  {@code DatabaseMetaData.getDatabaseProductVersion()}, or null
+     *                       when unknown — a dialect alias can point at a different
+     *                       server (MySQL's covers MariaDB) with different variables
      */
-    default String statementGuardSql(int timeoutSeconds) {
+    default String statementGuardSql(int timeoutSeconds, String serverVersion) {
+        return connectionGuardSql();
+    }
+
+    /**
+     * Restores the pooled connection to its {@link #connectionGuardSql()} baseline after a
+     * run. Session variables outlive the borrow: without this, a per-statement limit or a
+     * user's own SET would carry over to the next borrower, background jobs included.
+     */
+    default String statementGuardResetSql(String serverVersion) {
         return connectionGuardSql();
     }
 

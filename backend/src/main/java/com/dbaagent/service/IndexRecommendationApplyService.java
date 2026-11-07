@@ -194,7 +194,24 @@ public class IndexRecommendationApplyService {
             } else {
                 try (Statement s = c.createStatement()) {
                     log.info("Applying recommendation {} on {}: {}", rec.getId(), rec.getConnectionId(), ddl);
-                    s.execute(ddl);
+                    // CREATE/DROP INDEX CONCURRENTLY waits for every older transaction,
+                    // and those waits honour the pool's 5s lock_timeout: hitting it midway
+                    // leaves an INVALID index behind. Its locks do not block reads or
+                    // writes, so waiting is safe here; restore the pool guard afterwards.
+                    boolean concurrently = ddl.toUpperCase(java.util.Locale.ROOT).contains(" CONCURRENTLY ");
+                    if (concurrently) {
+                        s.execute("SET lock_timeout = 0");
+                    }
+                    try {
+                        s.execute(ddl);
+                    } finally {
+                        String guard = concurrently
+                            ? providerRegistry.getDialect(req.getDbType()).queryExecution().connectionGuardSql()
+                            : null;
+                        if (guard != null) {
+                            s.execute(guard);
+                        }
+                    }
                 }
             }
 

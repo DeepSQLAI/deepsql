@@ -43,7 +43,9 @@ import static org.mockito.Mockito.when;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class QueryExecutorGuardrailTest {
 
-    private static final String GUARD = new MySQLQueryExecutionProvider().statementGuardSql(240);
+    // The mocked Connection has no metadata, so the server version is unknown (null).
+    private static final String GUARD = new MySQLQueryExecutionProvider().statementGuardSql(240, null);
+    private static final String RESET = new MySQLQueryExecutionProvider().statementGuardResetSql(null);
 
     @Mock private ConnectionService connectionService;
     @Mock private CredentialService credentialService;
@@ -102,11 +104,44 @@ class QueryExecutorGuardrailTest {
                 null, 240),
             QueryExecutionContext.editor("dba", true, true));
 
+        String tag = "/* deepsql origin=editor user=dba */ ";
         InOrder order = inOrder(statement);
-        order.verify(statement).execute("SET SESSION lock_wait_timeout = 31536000");
+        order.verify(statement).execute(GUARD);
+        order.verify(statement).execute(tag + "SET SESSION lock_wait_timeout = 31536000");
+        order.verify(statement).execute(GUARD);
+        order.verify(statement).execute(tag + "UPDATE customers SET contact = NULL WHERE id = 7");
+        order.verify(statement).execute(RESET);
+    }
+
+    @Test
+    void aHeavyReadPlacedFirstInABatchStillRunsUnderTheGuards() throws Exception {
+        // A read-only batch may hold several SELECTs; the first used to run as a preamble
+        // with no read time limit and no actor tag.
+        policyReturns(false, "SELECT");
+
+        executor.executeQuery("conn-1",
+            new QueryRequest("SELECT * FROM bookings b JOIN payments p ON p.booking_id = b.id; SELECT 1", null, 240),
+            QueryExecutionContext.editor("dba", true, false));
+
+        InOrder order = inOrder(statement);
         order.verify(statement).execute(GUARD);
         order.verify(statement).execute(
-            "/* deepsql origin=editor user=dba */ UPDATE customers SET contact = NULL WHERE id = 7");
+            "/* deepsql origin=editor user=dba */ SELECT * FROM bookings b JOIN payments p ON p.booking_id = b.id");
+    }
+
+    @Test
+    void theSessionIsResetEvenWhenTheStatementFails() throws Exception {
+        // Session variables outlive the borrow: without the reset, this run's
+        // sql_safe_updates and max_execution_time would reach the next borrower,
+        // background jobs on the same pool included.
+        policyReturns(true, "UPDATE");
+        when(statement.execute(startsWith("/* deepsql"))).thenThrow(new SQLException("Duplicate entry", "23000", 1062));
+
+        assertThrows(SQLException.class, () -> executor.executeQuery("conn-1",
+            new QueryRequest("UPDATE customers SET email = 'a@b.c' WHERE id = 7", null, 240),
+            QueryExecutionContext.editor("dba", true, true)));
+
+        verify(statement).execute(RESET);
     }
 
     @Test
@@ -193,7 +228,9 @@ class QueryExecutorGuardrailTest {
         executor.executeQuery("conn-1", new QueryRequest("SELECT * FROM customers", null, 240),
             QueryExecutionContext.mcp("agent"));
 
+        // The cap is setMaxRows only. Appending LIMIT text to a request that asked for no
+        // limit broke FETCH FIRST, FOR UPDATE and LOCK IN SHARE MODE.
         verify(statement).setMaxRows(10_001);
-        verify(statement).execute("/* deepsql origin=mcp user=agent */ SELECT * FROM customers LIMIT 10001");
+        verify(statement).execute("/* deepsql origin=mcp user=agent */ SELECT * FROM customers");
     }
 }

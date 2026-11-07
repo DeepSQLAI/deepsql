@@ -872,10 +872,22 @@ it against a real database — not a theoretical hardening pass.
   - **Session guards** come from the dialect (`QueryExecutionProvider.connectionGuardSql`
     / `statementGuardSql`). The pool sets `lock_wait_timeout=5, innodb_lock_wait_timeout=5`
     (Postgres: `lock_timeout='5s'`) via Hikari `connectionInitSql`, so background jobs get
-    it too. The executor **re-applies** them, plus `sql_safe_updates=1` and
-    `max_execution_time`, *after* the user's SET preambles — otherwise a preamble could
-    loosen them, and on a pooled connection that loosening leaks to the next borrower.
-    It fails closed: no guards, no statement.
+    it too. The executor applies the stricter per-run set (`sql_safe_updates=1`,
+    `max_execution_time`) **before** the preambles (a read-only batch may put a heavy
+    SELECT first), **again after** them (a preamble could loosen them), and **resets** to
+    the pool baseline in a `finally` (`statementGuardResetSql`): session variables outlive
+    the borrow, and without the reset a 5s Editor timeout or `sql_safe_updates` reached
+    background jobs on the same pool. Fails closed on apply; the reset is best effort,
+    since what it leaves behind is stricter, not looser. Preambles carry the actor tag too.
+  - **The MySQL provider also serves `mariadb`**, which has no `max_execution_time` — a
+    fail-closed SET of it refused every query on the connection. The guard takes the
+    server version (`DatabaseMetaData`) and omits it there.
+  - **Postgres `CREATE INDEX CONCURRENTLY` takes `lock_timeout = 0`** for its own run
+    (Index Advisor apply): its waits for older transactions honour `lock_timeout`, and
+    hitting 5s midway leaves an INVALID index. Its locks block neither reads nor writes.
+  - **The 10k cap is `setMaxRows` only.** `LIMIT` text is still appended only when the
+    client asked for a limit; appending it to every SELECT broke `FETCH FIRST`,
+    `FOR UPDATE` and `LOCK IN SHARE MODE`.
   - **`max_execution_time` keys off `@@global.read_only`**: reads get the client timeout
     on a replica but at most 30s on a writable server. No per-connection setting to drift.
   - **MySQL ALTER runs online or not at all.** `onlineDdlAttempts` appends
@@ -884,6 +896,9 @@ it against a real database — not a theoretical hardening pass.
     `COPY`, `DEFAULT`, `SHARED`, `EXCLUSIVE` are refused *before* the confirmation prompt.
     The clause is appended on a **new line**: on the same line a trailing `-- comment`
     swallows it and the ALTER silently runs with the default (possibly blocking) algorithm.
+    Servers that predate INSTANT (MySQL 5.7, Aurora MySQL 2) reject it as `1064 … near
+    'INSTANT'`, which also triggers the fallback. A partition ALTER with no explicit
+    clause is refused: partition options must come last, so an appended clause is invalid.
   - **`EXECUTE_DDL` is separate from DML** and ADMIN-only by default (grant DBAs via an
     override/custom role). Confirmed DML is routine; DDL is not.
     DDL is a leading DDL verb **or any mutation that is not row-only DML**. Row-only needs
