@@ -305,29 +305,14 @@ public class AccessControlService {
      * DBA must not receive MANAGE_USERS or other admin-only product controls.
      */
     public boolean currentUserMayMutateSql() {
-        if (ImpersonationContext.isActive()) {
-            return ImpersonationContext.current()
-                .map(state -> {
-                    if (state.target() == null) {
-                        return false;
-                    }
-                    Role role = state.target().getRoleEnum();
-                    return role == Role.ADMIN || role == Role.DBA;
-                })
-                .orElse(false);
-        }
-        if (!authEnabled) {
+        // EXECUTE_WRITES (default: ADMIN, DBA), so a custom role can be granted writes —
+        // and with EXECUTE_DDL, schema changes. Every authentication path carries the
+        // effective permissions as authorities: JWT and MCP-token requests load them per
+        // request, and View-as swaps in the target's, so this reads the target's grant.
+        if (!ImpersonationContext.isActive() && !authEnabled) {
             return true;
         }
-        Authentication authentication = currentAuthentication();
-        if (authentication == null || !authentication.isAuthenticated()) {
-            return false;
-        }
-        return authentication.getAuthorities().stream()
-            .anyMatch(authority -> {
-                String value = authority.getAuthority();
-                return "ROLE_ADMIN".equals(value) || "ROLE_DBA".equals(value);
-            });
+        return hasPermission(Permission.EXECUTE_WRITES);
     }
 
     private Authentication currentAuthentication() {

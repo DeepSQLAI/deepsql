@@ -296,18 +296,50 @@ class AccessControlServiceTest {
     }
 
 
+    // Authorities as production builds them (CustomUserDetailsService): ROLE_<code> plus the
+    // role's effective permission names. Writes follow EXECUTE_WRITES, not the role name.
     @Test
     void dbaMayMutateSqlButIsNotAdmin() {
         SecurityContextHolder.getContext().setAuthentication(
             new UsernamePasswordAuthenticationToken(
                 "dba-user",
                 null,
-                List.of(new SimpleGrantedAuthority("ROLE_DBA"))
+                List.of(new SimpleGrantedAuthority("ROLE_DBA"), new SimpleGrantedAuthority("EXECUTE_WRITES"))
             )
         );
 
         assertTrue(accessControlService.currentUserMayMutateSql());
         assertFalse(accessControlService.isCurrentUserAdmin());
+    }
+
+    @Test
+    void aCustomRoleGrantedWritesMayMutateSql() {
+        // Was impossible: the gate accepted only built-in ADMIN/DBA, so a custom
+        // "DBA + schema changes" role lost writes entirely.
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(
+                "custom-user",
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_DBA_SCHEMA"),
+                    new SimpleGrantedAuthority("EXECUTE_WRITES"), new SimpleGrantedAuthority("EXECUTE_DDL"))
+            )
+        );
+
+        assertTrue(accessControlService.currentUserMayMutateSql());
+    }
+
+    @Test
+    void theRoleNameAloneGrantsNoWrites() {
+        // A DBA whose EXECUTE_WRITES was revoked by an override must not keep writing.
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(
+                "dba-revoked",
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_DBA"))
+            )
+        );
+
+        assertFalse(accessControlService.currentUserMayMutateSql());
     }
 
     @Test
@@ -351,8 +383,10 @@ class AccessControlServiceTest {
         com.dbaagent.security.ImpersonationContext.enter(
             new com.dbaagent.security.ImpersonationContext.State(impersonator, target)
         );
+        // ImpersonationService swaps in the target's authorities (role + permissions).
         SecurityContextHolder.getContext().setAuthentication(
-            new UsernamePasswordAuthenticationToken("dba-target", null, List.of())
+            new UsernamePasswordAuthenticationToken("dba-target", null,
+                List.of(new SimpleGrantedAuthority("ROLE_DBA"), new SimpleGrantedAuthority("EXECUTE_WRITES")))
         );
 
         assertTrue(accessControlService.currentUserMayMutateSql());
