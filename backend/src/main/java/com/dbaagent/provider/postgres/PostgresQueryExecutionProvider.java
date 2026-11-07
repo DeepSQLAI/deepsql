@@ -132,4 +132,43 @@ public class PostgresQueryExecutionProvider implements QueryExecutionProvider {
     public String getSessionPidQuery() {
         return "SELECT pg_backend_pid()";
     }
+
+    /**
+     * An ALTER waiting for ACCESS EXCLUSIVE queues every later reader and writer behind
+     * it, same as a MySQL metadata lock. Give up after 5s instead of holding the line.
+     * The statement time limit stays with the JDBC timeout.
+     */
+    @Override
+    public String connectionGuardSql() {
+        return "SET lock_timeout = '5s'";
+    }
+
+    /**
+     * RESET ALL first: a user's preamble (or a read like {@code SELECT set_config(...)}) can
+     * change any session setting, and the pooled connection carries it to the next borrower.
+     * Startup parameters survive RESET ALL; the lock guard is then re-applied.
+     */
+    @Override
+    public String statementGuardResetSql(String serverVersion) {
+        return "RESET ALL; " + connectionGuardSql();
+    }
+
+    private static final java.util.regex.Pattern CONCURRENTLY =
+        java.util.regex.Pattern.compile("\\bCONCURRENTLY\\b", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    @Override
+    public String ddlSessionSql(String sql) {
+        return sql != null && CONCURRENTLY.matcher(sql).find() ? "SET lock_timeout = 0" : null;
+    }
+
+    @Override
+    public String guardrailMessage(java.sql.SQLException e) {
+        // 55P03 lock_not_available: raised when lock_timeout expires.
+        if ("55P03".equals(e.getSQLState())) {
+            return "Gave up after waiting 5 seconds for a lock: another session is using this table or these rows. "
+                + "DeepSQL does not queue behind locks, because a waiting statement makes every later query on the "
+                + "table wait too. Try again when it is quieter.";
+        }
+        return null;
+    }
 }

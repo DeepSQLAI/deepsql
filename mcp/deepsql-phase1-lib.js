@@ -41,6 +41,7 @@ const DANGEROUS_SQL_FUNCTIONS = [
   "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_stat_file",
   "lo_import", "lo_export",
   "load_file",
+  "pg_terminate_backend", "pg_cancel_backend",
 ];
 
 // The function being *called* — name, optional whitespace, open paren. Matching the bare name

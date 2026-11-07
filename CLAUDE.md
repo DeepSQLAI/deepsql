@@ -864,6 +864,115 @@ it against a real database — not a theoretical hardening pass.
   their mutation handling (covered by `anUnparseableWriteIsStillTreatedAsAMutation` and
   `aMalformedDataModifyingCteIsStillBlockedAsAWrite`). The MCP guard already reported this
   case honestly ("Only read-only SQL is allowed …") and was left alone.
+- **Production guardrails (production ALTER incident).** An Editor
+  `ALTER TABLE … MODIFY … NOT NULL` queued every write on the table for exactly
+  240s — the Editor's client timeout was the only thing that stopped it, because
+  MySQL's default `lock_wait_timeout` is one year. `security_event` named who ran
+  it; the DB-side login could not. What now applies to **every role, admins included**:
+  - **Session guards** come from the dialect (`QueryExecutionProvider.connectionGuardSql`
+    / `statementGuardSql`). The pool sets `lock_wait_timeout=5, innodb_lock_wait_timeout=5`
+    (Postgres: `lock_timeout='5s'`) via Hikari `connectionInitSql`, so background jobs get
+    it too. The executor applies the stricter per-run set (`sql_safe_updates=1`,
+    `max_execution_time`) **before** the preambles (a read-only batch may put a heavy
+    SELECT first), **again after** them (a preamble could loosen them), and **resets** to
+    the pool baseline in a `finally` (`statementGuardResetSql`): session variables outlive
+    the borrow, and without the reset a 5s Editor timeout or `sql_safe_updates` reached
+    background jobs on the same pool. Fails closed on apply; the reset is best effort,
+    since what it leaves behind is stricter, not looser. Preambles carry the actor tag too.
+  - **The MySQL provider also serves `mariadb`**, which has no `max_execution_time` — a
+    fail-closed SET of it refused every query on the connection. The guard takes the
+    server version (`DatabaseMetaData`) and omits it there.
+  - **Postgres `CREATE INDEX CONCURRENTLY` takes `lock_timeout = 0`** for its own run, on
+    every path (Editor, MCP, Index Advisor), via `QueryExecutionProvider.ddlSessionSql`:
+    its waits for older transactions honour `lock_timeout`, and hitting 5s midway leaves an
+    INVALID index. Its locks block neither reads nor writes.
+  - **The reset is broad, not just the guard variables.** Postgres: `RESET ALL` (a read like
+    `SELECT set_config('lock_timeout','0',false)` changes the session too — which is why the
+    reset runs after *every* user/agent run, even a lone SELECT). MySQL: the guards plus
+    `sql_mode`, `foreign_key_checks`, `unique_checks`, `time_zone` — an explicit list, since
+    MySQL has no SQL form of COM_RESET_CONNECTION. Other MySQL session variables still carry
+    over, as they always did. INTERNAL/SCHEDULED runs keep the pool baseline only.
+    **Restore with `= @@global.x`, never `= DEFAULT`:** measured on MySQL 8.4,
+    `SET SESSION foreign_key_checks = DEFAULT` (and `unique_checks`) leaves the session at 0
+    while the global is 1 — the reset silently failed for exactly the integrity switches.
+  - **HikariCP evicts on SQLState `0A000`, and MySQL's "ALGORITHM=INSTANT is not supported"
+    (1845) is `0A000`.** Hikari 7.1 hardcodes that state as connection-fatal, so the pool threw
+    away a healthy connection mid-run and the INPLACE fallback died on "No operations allowed
+    after statement closed" — the fallback never worked once through the real pool.
+    `ConnectionService.applyGuardrails` sets a `SQLExceptionOverride` that asks the dialect
+    (`isOnlineDdlUnsupported`) instead. Plain JDBC does not reproduce it; mocked tests cannot.
+  - **Replicas are `@@global.read_only OR @@global.innodb_read_only`** — Aurora readers report
+    `read_only=0`.
+  - **`MySQLGuardrailLiveTest` runs all of this against a real server** through the real
+    executor, policy and pool config (skipped unless `DEEPSQL_MYSQL_TEST_URL` is set). Both bugs
+    above were found by it, not by the mocked suites. Point it only at a disposable server — it
+    creates/drops a schema and toggles `@@global.read_only`. A throwaway instance without
+    Docker: `mysqld --no-defaults --initialize-insecure --datadir=<dir>`, then start it with
+    `--port=33084 --bind-address=127.0.0.1 --socket=/tmp/x.sock` (macOS caps socket paths at
+    103 chars), and run with
+    `DEEPSQL_MYSQL_TEST_URL='jdbc:mysql://127.0.0.1:33084/?user=root&allowPublicKeyRetrieval=true&useSSL=false'`.
+  - **Row cap: 10k by default, an explicit request up to 100k** (the Editor's CSV export asks
+    for `EXPORT_ROW_LIMIT = 100000`; a flat 10k ceiling silently truncated exports). Enforced by
+    `setMaxRows` only; `LIMIT` text is appended only when the client asked for a limit —
+    appending it to every SELECT broke `FETCH FIRST`, `FOR UPDATE` and `LOCK IN SHARE MODE`.
+  - **`max_execution_time` keys off `@@global.read_only`**: reads get the client timeout
+    on a replica but at most 30s on a writable server. No per-connection setting to drift.
+  - **MySQL ALTER runs online or not at all.** `onlineDdlAttempts` appends
+    `ALGORITHM=INSTANT`, falling back to `INPLACE, LOCK=NONE` only on an
+    algorithm-unsupported error (1845/1846/"Try ALGORITHM="), never on a lock timeout.
+    `COPY`, `DEFAULT`, `SHARED`, `EXCLUSIVE` are refused *before* the confirmation prompt.
+    The clause is appended on a **new line**: on the same line a trailing `-- comment`
+    swallows it and the ALTER silently runs with the default (possibly blocking) algorithm.
+    Servers that predate INSTANT (MySQL 5.7, Aurora MySQL 2) reject it as `1064 … near
+    'INSTANT'`, which also triggers the fallback. A partition ALTER with no explicit
+    clause is refused: partition options must come last, so an appended clause is invalid.
+  - **`EXECUTE_DDL` is separate from DML** and ADMIN-only by default (grant DBAs via an
+    override/custom role). Confirmed DML is routine; DDL is not.
+    DDL is a leading DDL verb **or any mutation that is not row-only DML**. Row-only needs
+    both a row-only `queryType` (INSERT/UPDATE/DELETE/MERGE/UPSERT/REPLACE) **and** a
+    matching real leading verb (or `WITH`): the keyword-fallback `queryType` sanitizes a
+    prefix before matching, so it alone can disagree with what the database runs. A verb
+    check alone missed `CALL`, `DO`, Postgres `SELECT … INTO new_table` and
+    `EXPLAIN ANALYZE CREATE TABLE … AS` (Postgres executes it); the keyword fallback also
+    reports `RENAME` as `OTHER`. Executable comments include MariaDB's `/*M! … */`. Index Advisor `APPLY` runs real `CREATE INDEX`
+    outside the policy, so it checks the same permission; without that it is decorative.
+  - **MySQL executable comments and optimizer hints are refused** (`/*! … */`, `/*+ … */`).
+    MySQL runs the body of `/*!50000 GRANT … */`, while every check here strips it as a
+    comment and `isReadOnlyQuery` then calls the empty remainder read-only — so it skipped
+    every guard, the confirmation prompt included. Hints (`MAX_EXECUTION_TIME`, `SET_VAR`)
+    override the session guards for one statement.
+  - **Role and identity switches are admin statements**: `SET [SESSION|LOCAL] ROLE`,
+    `SET SESSION AUTHORIZATION`, and the GUC spellings `SET role = …` /
+    `session_replication_role`. A switch left on a pooled connection is inherited by the
+    next borrower. (`SET @role = 1` is a user variable and stays allowed.)
+  - **The dangerous-function denylist now runs on every surface.** It lived only in
+    `McpSqlGuardService` (MCP, dashboards), so the Editor ran `SELECT dblink_exec(…)` and
+    `SELECT pg_terminate_backend(pid)` as plain reads. The policy calls
+    `McpSqlGuardService.dangerousFunctionIn` on its own linear scrub; the list (now with
+    `pg_terminate_backend`, `pg_cancel_backend`) still mirrors `mcp/deepsql-phase1-lib.js`.
+    DeepSQL's own cancel uses direct JDBC (`ActiveQueryService`), not this path.
+  - **Comment stripping must be a linear scan, never a lazy regex.** `McpSqlGuardService`'s
+    `/\*[\s\S]*?\*/` rescanned to the end from every unterminated `/*` (`"a/*"` × 32k took
+    minutes) on MCP and the public dashboard query path; the policy has shared its linear
+    scanner since. The MySQL clause tokenizer lets every alternative close at end-of-input
+    with possessive repetition for the same reason. `hiddenWriteScan_staysLinearOnAdversarialInput`
+    is the canary — it caught this the moment the guard reached the Editor path.
+  - **The SET scope check reads raw text, not literal-stripped text.** Stripping literals is
+    a second tokenizer that can disagree with MySQL's: `SET @a = "'", GLOBAL x = 1, @b = "'"`
+    defeated a two-pass regex, and a `NO_BACKSLASH_ESCAPES` preamble changes MySQL's own
+    tokenizing, so no scanner here can be trusted to match. `SET @x = 'global'` is refused
+    as a result — fail closed, on purpose.
+  - **Admin statements are blocked before classification** (`ADMIN_STATEMENT_BLOCKED`):
+    GRANT/REVOKE, CREATE/ALTER/DROP USER|ROLE, KILL, LOCK TABLES, FLUSH, SHUTDOWN,
+    replication/binlog control, and any SET reaching GLOBAL/PERSIST scope or `sql_log_bin`
+    — anywhere in the assignment list. SET used to be a "session preamble", so
+    `SET GLOBAL …; SELECT 1` ran for *read-only* roles.
+  - TRUNCATE is blocked in the Editor (it was MCP-only). User-facing origins get a
+    server-side row cap (10k default, 100k ceiling; `INTERNAL`/`SCHEDULED` keep theirs).
+  - Every executed statement carries `/* deepsql origin=… user=… */`, so slow log,
+    processlist and Performance Insights attribute load to a person despite one shared
+    login. The username is reduced to `[A-Za-z0-9._@-]` so it can never close the comment.
+  - `security.audit.retention-days` is 90 (was 30).
 - **Keep the client timeout under the proxy's.** `docker/nginx/default.conf` gives
   up at `proxy_read_timeout 300s`; the Editor used to ask for 600s, so a 6-minute
   query returned an opaque 504 while still running. `QUERY_TIMEOUT_SECONDS = 240`

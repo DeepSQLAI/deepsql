@@ -1,9 +1,11 @@
 package com.dbaagent.service;
 
+import com.dbaagent.model.Permission;
 import com.dbaagent.model.QueryExecutionOrigin;
 import com.dbaagent.model.QueryRequest;
 import com.dbaagent.provider.DatabaseProviderRegistry;
 import com.dbaagent.provider.api.QueryExecutionProvider;
+import com.dbaagent.service.security.AccessControlService;
 import com.dbaagent.util.QueryNormalizer;
 import com.dbaagent.util.SqlStatementSplitter;
 import lombok.RequiredArgsConstructor;
@@ -82,7 +84,61 @@ public class QueryExecutionPolicyService {
         Pattern.CASE_INSENSITIVE
     );
 
+    // Server administration. Blocked on every surface for every role, confirmed or
+    // not: none of it is data work, and each one can take a production database down
+    // or widen access (users/grants, KILL, LOCK TABLES, FLUSH ... READ LOCK,
+    // replication and binlog control). Matched on the leading verb only, after
+    // comments and literals are stripped, so a `grant_id` column is fine.
+    private static final Pattern ADMIN_STATEMENT_PATTERN = Pattern.compile(
+        "^(?:GRANT|REVOKE|KILL|SHUTDOWN|FLUSH|INSTALL|UNINSTALL|PURGE|REASSIGN"
+            + "|LOCK\\s+(?:TABLES?|INSTANCE)|UNLOCK\\s+INSTANCE"
+            + "|(?:CREATE|ALTER|DROP|RENAME)\\s+(?:USER|ROLE)|ALTER\\s+SYSTEM"
+            + "|RESET\\s+(?:MASTER|REPLICA|SLAVE|BINARY|PERSIST)"
+            + "|CHANGE\\s+(?:MASTER|REPLICATION)|(?:START|STOP)\\s+(?:SLAVE|REPLICA|GROUP_REPLICATION)"
+            // Postgres also takes SESSION/LOCAL before ROLE, and SESSION AUTHORIZATION:
+            // a role switch left on a pooled connection is inherited by the next borrower.
+            + "|SET\\s+(?:(?:SESSION|LOCAL)\\s+)?(?:PASSWORD|ROLE|DEFAULT\\s+ROLE|AUTHORIZATION|SESSION\\s+AUTHORIZATION))\\b",
+        Pattern.CASE_INSENSITIVE
+    );
+    // Any SET that reaches global or persisted scope, anywhere in its assignment list
+    // (`SET @x = 1, GLOBAL max_connections = 10` is valid MySQL), or that turns off
+    // binary logging for the session — replicas would silently diverge.
+    private static final Pattern SET_PREFIX_PATTERN = Pattern.compile("^SET\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SET_BEYOND_SESSION_PATTERN = Pattern.compile(
+        "\\b(?:GLOBAL|PERSIST|PERSIST_ONLY)\\b|@@(?:GLOBAL|PERSIST|PERSIST_ONLY)\\.|\\bsql_log_bin\\b"
+            // The GUC spellings of a role/identity switch (`SET role = x`, `SET LOCAL role TO x`)
+            // and Postgres trigger/FK suppression. Not preceded by @ — `SET @role = 1` is a variable.
+            + "|(?<![@\\w$.])(?:role|session_authorization|session_replication_role)\\s*(?:=|\\bTO\\b)",
+        Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern DDL_VERB_PATTERN = Pattern.compile(
+        "^(?:CREATE|ALTER|DROP|RENAME|TRUNCATE)\\b", Pattern.CASE_INSENSITIVE);
+    // MySQL executes the body of /*! ... */ (and /*!50000 ... */), while every check in
+    // this class strips it as a comment and then sees an empty statement that
+    // isReadOnlyQuery calls read-only — so `/*!50000 GRANT ... */` skipped every guard.
+    // /*+ ... */ optimizer hints (MAX_EXECUTION_TIME, SET_VAR) override the session
+    // guards for one statement. Matched on the raw text: a literal containing "/*!" is
+    // refused too, which is the right side to be wrong on.
+    // MariaDB's /*M! ... */ is executable there and inert on MySQL; a "mysql" connection
+    // can point at either. \s* over-blocks `/* !`, which is harmless.
+    private static final Pattern EXECUTABLE_COMMENT_PATTERN =
+        Pattern.compile("/\\*\\s*(?:M?!|\\+)", Pattern.CASE_INSENSITIVE);
+    // Mutations that only change rows. Anything else that mutates — DDL, CALL/DO (a
+    // procedure can run DDL), SELECT ... INTO a new table — needs EXECUTE_DDL. An
+    // allowlist, so a statement shape nobody anticipated lands on the stricter side.
+    // "WRITE" is the text backstop's label for a CTE matching AS ( INSERT|UPDATE|DELETE|MERGE,
+    // which is always a row write; the leading-verb check below still has to agree.
+    private static final java.util.Set<String> ROW_ONLY_MUTATIONS =
+        java.util.Set.of("INSERT", "UPDATE", "DELETE", "MERGE", "UPSERT", "REPLACE", "WRITE");
+    // The statement's real leading verb must agree. queryType alone can come from the
+    // keyword fallback, which sanitizes a prefix before matching, so it can disagree with
+    // what the database executes. WITH covers data-modifying CTEs. EXPLAIN is absent on
+    // purpose: Postgres runs `EXPLAIN ANALYZE CREATE TABLE ... AS` for real.
+    private static final Pattern ROW_ONLY_LEADING_VERB = Pattern.compile(
+        "^(?:INSERT|UPDATE|DELETE|MERGE|UPSERT|REPLACE|WITH)\\b", Pattern.CASE_INSENSITIVE);
+
     private final DatabaseProviderRegistry providerRegistry;
+    private final AccessControlService accessControlService;
 
     public PolicyDecision enforce(
         QueryRequest request,
@@ -99,6 +155,36 @@ public class QueryExecutionPolicyService {
         List<String> statements = SqlStatementSplitter.split(sql, hashIsComment);
         if (statements.isEmpty()) {
             statements = List.of(sql == null ? "" : sql);
+        }
+
+        // Before classification: SET used to be waved through as a session preamble,
+        // which let SET GLOBAL run for any role, read-only ones included.
+        for (String statement : statements) {
+            if (statement != null && EXECUTABLE_COMMENT_PATTERN.matcher(statement).find()) {
+                throw QueryExecutionPolicyException.unsafeMutation(
+                    "DeepSQL does not run MySQL executable comments (/*! ... */) or optimizer hints (/*+ ... */): "
+                        + "the database runs what is inside them, but DeepSQL's safety checks cannot see it. "
+                        + "Write the statement without them.",
+                    "UNKNOWN"
+                );
+            }
+            if (isAdministrativeStatement(statement)) {
+                throw QueryExecutionPolicyException.adminStatementBlocked();
+            }
+            // The dangerous-function denylist used to run only for MCP and dashboards, so the
+            // Editor ran `SELECT dblink_exec(...)` (escapes the read-only session) and
+            // `SELECT pg_terminate_backend(pid)` (disconnects production) as plain reads.
+            // Scrubbed with the same linear passes as detectHiddenWrite: the MCP guard's old
+            // regex comment strip was quadratic on an unterminated /*.
+            String dangerousFunction = McpSqlGuardService.dangerousFunctionIn(
+                stripComments(stripQuotedLiterals(statement == null ? "" : statement)));
+            if (dangerousFunction != null) {
+                throw QueryExecutionPolicyException.unsafeMutation(
+                    "DeepSQL does not run " + dangerousFunction + "(): it reaches outside the query "
+                        + "(other sessions, other connections, or the server's files). Use your database admin tooling.",
+                    "UNKNOWN"
+                );
+            }
         }
 
         List<StatementClassification> classifications = new ArrayList<>();
@@ -178,6 +264,36 @@ public class QueryExecutionPolicyService {
             );
         }
 
+        if (origin == QueryExecutionOrigin.EDITOR && isTruncate(mutation.queryType(), statements.getFirst())) {
+            throw QueryExecutionPolicyException.unsafeMutation(
+                "TRUNCATE is not allowed from the SQL Editor: it empties the whole table and cannot be rolled back. "
+                    + "Use DELETE with a WHERE clause, or your database admin tooling.",
+                mutation.queryType()
+            );
+        }
+
+        List<String> confirmationNotes = new ArrayList<>();
+        boolean ddl = isDdlStatement(statements.getFirst(), mutation.queryType());
+        if (ddl && (origin == QueryExecutionOrigin.EDITOR || origin == QueryExecutionOrigin.MCP)) {
+            if (!accessControlService.hasPermission(Permission.EXECUTE_DDL)) {
+                throw QueryExecutionPolicyException.ddlPermissionRequired(mutation.queryType());
+            }
+            // Refuse a blocking ALTER here, ahead of the confirmation prompt, rather than
+            // let someone confirm a statement the executor will then reject.
+            List<String> attempts;
+            try {
+                attempts = executionProvider.onlineDdlAttempts(statements.getFirst());
+            } catch (IllegalArgumentException blocking) {
+                throw QueryExecutionPolicyException.unsafeMutation(blocking.getMessage(), mutation.queryType());
+            }
+            if (!attempts.equals(List.of(statements.getFirst()))) {
+                confirmationNotes.add("DeepSQL will run this in a mode that does not block writes to the table. "
+                    + "If the database cannot make this change that way, DeepSQL stops and changes nothing.");
+            }
+            confirmationNotes.add("If the table is busy, DeepSQL gives up after waiting 5 seconds for its lock "
+                + "instead of queueing every other write to the table behind this change.");
+        }
+
         if (mutation.requiresWhereClause && !mutation.hasWhereClause) {
             throw QueryExecutionPolicyException.unsafeMutation(
                 "UPDATE or DELETE without a WHERE clause is blocked in the SQL Editor. Add a WHERE clause to limit the affected rows.",
@@ -186,10 +302,47 @@ public class QueryExecutionPolicyService {
         }
 
         if (!effectiveContext.mutationConfirmed()) {
-            throw QueryExecutionPolicyException.confirmationRequired(mutation.queryType(), buildWarnings(mutation));
+            List<String> warnings = new ArrayList<>(buildWarnings(mutation));
+            warnings.addAll(confirmationNotes);
+            throw QueryExecutionPolicyException.confirmationRequired(mutation.queryType(), warnings);
         }
 
         return new PolicyDecision(classifications, true, mutation.queryType());
+    }
+
+    /**
+     * Deliberately reads the raw text, without stripping string literals. Stripping is a
+     * second tokenizer that can disagree with MySQL's — `SET @a = "'", GLOBAL x = 1, @b = "'"`
+     * fooled a two-pass regex, and a NO_BACKSLASH_ESCAPES preamble changes MySQL's own
+     * tokenizing — so the check fails closed: `SET @x = 'global'` is refused too.
+     */
+    private boolean isAdministrativeStatement(String statement) {
+        String head = stripLeadingComments(statement).trim();
+        if (ADMIN_STATEMENT_PATTERN.matcher(head).find()) {
+            return true;
+        }
+        return SET_PREFIX_PATTERN.matcher(head).find() && SET_BEYOND_SESSION_PATTERN.matcher(head).find();
+    }
+
+    /**
+     * A leading DDL verb, or any mutation that is not row-only DML. The verb check alone
+     * missed CALL (a procedure can run DDL) and Postgres SELECT ... INTO, which creates a
+     * table; the keyword fallback also reports RENAME as "OTHER".
+     */
+    private boolean isDdlStatement(String statement, String queryType) {
+        String head = stripLeadingComments(statement);
+        if (DDL_VERB_PATTERN.matcher(head).find()) {
+            return true;
+        }
+        // Data-modifying CTEs are labelled "DELETE (in CTE)" etc.; compare the verb.
+        String verb = queryType == null ? "" : queryType.trim().split("[\\s(]", 2)[0].toUpperCase(Locale.ROOT);
+        boolean rowOnlyType = ROW_ONLY_MUTATIONS.contains(verb);
+        return !(rowOnlyType && ROW_ONLY_LEADING_VERB.matcher(head).find());
+    }
+
+    private boolean isTruncate(String queryType, String statement) {
+        return (queryType != null && queryType.toUpperCase(Locale.ROOT).startsWith("TRUNCATE"))
+            || stripLeadingComments(statement).toUpperCase(Locale.ROOT).startsWith("TRUNCATE");
     }
 
     private List<String> buildWarnings(StatementClassification mutation) {
@@ -447,28 +600,9 @@ public class QueryExecutionPolicyService {
     // matched a lazy wildcard between block-comment delimiters and backtracked
     // quadratically on an unterminated block comment: 96KB of input cost ~14s
     // of CPU.
+    /** Linear; one implementation shared with the MCP / dashboard guard. */
     private String stripComments(String sql) {
-        StringBuilder out = new StringBuilder(sql.length());
-        int i = 0;
-        int len = sql.length();
-        while (i < len) {
-            char c = sql.charAt(i);
-            if (c == '/' && i + 1 < len && sql.charAt(i + 1) == '*') {
-                int end = sql.indexOf("*/", i + 2);
-                i = end < 0 ? len : end + 2;
-                out.append(' ');
-                continue;
-            }
-            if (c == '-' && i + 1 < len && sql.charAt(i + 1) == '-') {
-                int nl = sql.indexOf('\n', i + 2);
-                i = nl < 0 ? len : nl;
-                out.append(' ');
-                continue;
-            }
-            out.append(c);
-            i++;
-        }
-        return out.toString();
+        return McpSqlGuardService.stripSqlComments(sql);
     }
 
     private boolean isUseStatement(String sql) {

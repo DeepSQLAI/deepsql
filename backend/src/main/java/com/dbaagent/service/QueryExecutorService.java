@@ -3,6 +3,7 @@ package com.dbaagent.service;
 import com.dbaagent.model.*;
 import com.dbaagent.provider.DatabaseProviderRegistry;
 import com.dbaagent.provider.api.IntrospectionProvider;
+import com.dbaagent.provider.api.QueryExecutionProvider;
 import com.dbaagent.repository.KeyColumnAnalysisRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -660,6 +661,27 @@ public class QueryExecutorService {
             runningQueryRegistry.register(
                 queryRequest.getExecutionId(), connectionId, sessionPid, executionContext.actorUsername());
 
+            // Session guardrails wrap the whole run: applied before the preambles (a
+            // read-only batch may put a heavy SELECT first), re-applied after them (so a
+            // `SET SESSION lock_wait_timeout = ...` cannot loosen them), and reset to the
+            // pool baseline in the finally below, because session variables outlive the
+            // borrow and would otherwise reach the next borrower, background jobs included.
+            // Fails closed: nothing runs without them.
+            //
+            // DeepSQL's own INTERNAL/SCHEDULED SQL keeps only the pool baseline (lock
+            // guards from connectionInitSql): it is trusted code with its own timeouts.
+            // A guard identical to the baseline is not re-sent — the reset below restores
+            // the baseline after every run, so it is already in place.
+            QueryExecutionProvider executionProvider = providerRegistry.getDialect(connRequest.getDbType()).queryExecution();
+            String serverVersion = serverVersion(connection);
+            boolean trustedOrigin = isTrustedOrigin(executionContext);
+            String guardSql = trustedOrigin ? null : executionProvider.statementGuardSql(effectiveTimeout, serverVersion);
+            String tag = actorTag(executionContext);
+            if (guardSql != null && !guardSql.equals(executionProvider.connectionGuardSql())) {
+                applyGuard(connection, guardSql);
+            }
+            try {
+
             // Execute all preamble statements (SET @var, USE db, etc.) on the same connection
             // so that session variables are in scope for the final SELECT.
             for (int si = 0; si < statements.size() - 1; si++) {
@@ -667,8 +689,11 @@ public class QueryExecutorService {
                 if (preamble == null || preamble.isBlank()) continue;
                 try (Statement preambleStmt = connection.createStatement()) {
                     if (effectiveTimeout > 0) preambleStmt.setQueryTimeout(effectiveTimeout);
-                    preambleStmt.execute(preamble);
+                    preambleStmt.execute(tag + preamble);
                 }
+            }
+            if (statements.size() > 1) {
+                applyGuard(connection, guardSql);
             }
 
             // The last (or only) statement is the query whose results we return
@@ -687,8 +712,8 @@ public class QueryExecutorService {
             // Appending " LIMIT n" is kept as an optimization for simple SELECTs
             // (it lets the database stop early rather than stream rows we drop),
             // but correctness no longer depends on that textual check.
-            boolean limitRequested = queryRequest.getLimit() != null && queryRequest.getLimit() > 0;
-            int rowLimit = limitRequested ? queryRequest.getLimit() : 0;
+            int rowLimit = effectiveRowLimit(queryRequest.getLimit(), executionContext);
+            boolean limitRequested = rowLimit > 0;
             boolean limitApplied = false;
             String baseQuery = null; // original query without limit, for COUNT
             if (limitRequested) {
@@ -698,7 +723,11 @@ public class QueryExecutorService {
                 String queryLower = queryTrimmed.toLowerCase();
                 boolean isSelect = queryLower.startsWith("select");
                 boolean alreadyHasLimit = queryLower.matches("(?s).*\\blimit\\s+\\d+.*");
-                if (isSelect && !alreadyHasLimit) {
+                // Text append only when the client asked for a limit, as before. The
+                // server-side cap is enforced by setMaxRows alone: appending to every
+                // SELECT broke FETCH FIRST, FOR UPDATE and LOCK IN SHARE MODE.
+                boolean clientAskedForLimit = queryRequest.getLimit() != null && queryRequest.getLimit() > 0;
+                if (isSelect && !alreadyHasLimit && clientAskedForLimit) {
                     baseQuery = queryTrimmed;
                     if (baseQuery.endsWith(";")) {
                         baseQuery = baseQuery.substring(0, baseQuery.length() - 1);
@@ -712,17 +741,48 @@ public class QueryExecutorService {
             }
 
             // Execute query
-                boolean hasResultSet;
+                // DDL runs as online-only variants (MySQL: INSTANT, then INPLACE with
+                // LOCK=NONE). Everything else is a single attempt of itself.
+                List<String> attempts;
                 try {
-                    hasResultSet = stmt.execute(finalQuery);
-                } catch (SQLException executionError) {
-                    if (policyDecision.mutating() && looksLikeWritePrivilegeDenied(executionError)) {
-                        throw QueryExecutionPolicyException.dbWritePrivilegeDenied(
-                            executionError.getMessage(),
-                            policyDecision.primaryQueryType()
-                        );
+                    attempts = policyDecision.mutating()
+                        ? executionProvider.onlineDdlAttempts(finalQuery)
+                        : List.of(finalQuery);
+                } catch (IllegalArgumentException blocking) {
+                    throw QueryExecutionPolicyException.unsafeMutation(
+                        blocking.getMessage(), policyDecision.primaryQueryType());
+                }
+                String ddlSession = policyDecision.mutating() ? executionProvider.ddlSessionSql(finalQuery) : null;
+                if (ddlSession != null) {
+                    applyGuard(connection, ddlSession);
+                }
+                boolean hasResultSet = false;
+                for (int attempt = 0; attempt < attempts.size(); attempt++) {
+                    try {
+                        hasResultSet = stmt.execute(tag + attempts.get(attempt));
+                        break;
+                    } catch (SQLException executionError) {
+                        boolean anotherAttemptLeft = attempt < attempts.size() - 1;
+                        if (anotherAttemptLeft && executionProvider.isOnlineDdlUnsupported(executionError)) {
+                            log.info("Online DDL variant {} unsupported, trying next: {}",
+                                attempt + 1, executionError.getMessage());
+                            continue;
+                        }
+                        if (policyDecision.mutating() && looksLikeWritePrivilegeDenied(executionError)) {
+                            throw QueryExecutionPolicyException.dbWritePrivilegeDenied(
+                                executionError.getMessage(),
+                                policyDecision.primaryQueryType()
+                            );
+                        }
+                        String guardrail = executionProvider.guardrailMessage(executionError);
+                        if (guardrail != null) {
+                            log.warn("Database guardrail tripped for {} on {}: {}",
+                                executionContext.actorUsername(), connectionId, executionError.getMessage());
+                            throw QueryExecutionPolicyException.guardrailTripped(
+                                guardrail, policyDecision.primaryQueryType());
+                        }
+                        throw executionError;
                     }
-                    throw executionError;
                 }
 
                 if (hasResultSet) {
@@ -788,6 +848,14 @@ public class QueryExecutorService {
                     result.setRows(Arrays.asList(Arrays.asList(updateCount)));
                 }
             }
+            } finally {
+                // Always for user and agent SQL, even a lone SELECT: Postgres
+                // `SELECT set_config('lock_timeout', '0', false)` is a read that changes
+                // the session. Trusted origins only when they sent preambles.
+                if (!trustedOrigin || statements.size() > 1) {
+                    resetGuard(connection, executionProvider.statementGuardResetSql(serverVersion), connectionId);
+                }
+            }
         } finally {
             runningQueryRegistry.unregister(queryRequest.getExecutionId());
         }
@@ -800,6 +868,83 @@ public class QueryExecutorService {
             log.debug("Failed to record SQL Runner lineage: {}", e.getMessage());
         }
         return userDataAccessPolicyService.redactResult(connectionId, result, executionContext);
+    }
+
+    private static void applyGuard(Connection connection, String guardSql) throws SQLException {
+        if (guardSql == null) {
+            return;
+        }
+        try (Statement guardStmt = connection.createStatement()) {
+            guardStmt.execute(guardSql);
+        } catch (SQLException e) {
+            throw new SQLException("Could not apply DeepSQL's database safety settings, so the query was not run: "
+                + e.getMessage(), e.getSQLState(), e.getErrorCode(), e);
+        }
+    }
+
+    /**
+     * Best effort: a failed reset leaves the per-statement settings in place, which are
+     * stricter than the pool baseline, not looser — so it is logged, not thrown, rather
+     * than masking the query's own result or error.
+     */
+    private void resetGuard(Connection connection, String resetSql, String connectionId) {
+        if (resetSql == null) {
+            return;
+        }
+        try (Statement resetStmt = connection.createStatement()) {
+            resetStmt.execute(resetSql);
+        } catch (SQLException | RuntimeException e) {
+            log.warn("Could not reset session guardrails on connection {}: {}", connectionId, e.getMessage());
+        }
+    }
+
+    private static String serverVersion(Connection connection) {
+        try {
+            return connection.getMetaData().getDatabaseProductVersion();
+        } catch (SQLException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** Rows returned to a person or agent that asked for no limit. */
+    static final int DEFAULT_RESULT_ROWS = 10_000;
+    /** Ceiling on an explicit request; matches the Editor's CSV export (EXPORT_ROW_LIMIT). */
+    static final int MAX_RESULT_ROWS = 100_000;
+
+    /**
+     * The row cap was client-controlled: a request without {@code limit} streamed the
+     * whole table into memory. People and agents now get {@link #DEFAULT_RESULT_ROWS} unless
+     * they ask, and never more than {@link #MAX_RESULT_ROWS}. DeepSQL's own background jobs
+     * keep what they ask for.
+     */
+    static int effectiveRowLimit(Integer requested, QueryExecutionContext context) {
+        int asked = requested != null && requested > 0 ? requested : 0;
+        if (isTrustedOrigin(context)) {
+            return asked;
+        }
+        return asked > 0 ? Math.min(asked, MAX_RESULT_ROWS) : DEFAULT_RESULT_ROWS;
+    }
+
+    /** DeepSQL's own jobs, not a person or an agent. */
+    private static boolean isTrustedOrigin(QueryExecutionContext context) {
+        QueryExecutionOrigin origin = context == null ? null : context.origin();
+        return origin == null || origin == QueryExecutionOrigin.INTERNAL || origin == QueryExecutionOrigin.SCHEDULED;
+    }
+
+    /**
+     * A leading comment naming who ran the statement. Every DeepSQL query reaches the
+     * database as one shared login, so without this the slow log, processlist and
+     * Performance Insights cannot say which person (or agent) caused the load.
+     * The username is reduced to a safe charset so it can never close the comment.
+     */
+    static String actorTag(QueryExecutionContext context) {
+        String origin = context == null || context.origin() == null
+            ? "internal"
+            : context.origin().name().toLowerCase(Locale.ROOT);
+        String user = context == null || context.actorUsername() == null
+            ? ""
+            : " user=" + context.actorUsername().replaceAll("[^A-Za-z0-9._@-]", "_");
+        return "/* deepsql origin=" + origin + user + " */ ";
     }
 
     /**

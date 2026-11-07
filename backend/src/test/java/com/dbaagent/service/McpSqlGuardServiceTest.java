@@ -213,4 +213,24 @@ class McpSqlGuardServiceTest {
         assertTrue(service.validateReadOnlySql(
             "SELECT count(*), sum(o.total) FROM public.orders o WHERE o.created_at >= '2026-01-01'", true).ok());
     }
+
+    @Test
+    void commentStrippingStaysLinearOnAnUnterminatedBlockComment() {
+        // The regex strip /\*[\s\S]*?\*/ rescanned to the end from every "/*": this input took
+        // minutes of CPU on a request thread, reachable from MCP and the public dashboard
+        // query endpoint.
+        String hostile = "SELECT 1 /*" + "a/*".repeat(32_000);
+        long startedAt = System.currentTimeMillis();
+        service.validateReadOnlySql(hostile, true);
+        assertTrue(System.currentTimeMillis() - startedAt < 5_000L, "comment stripping must not backtrack");
+    }
+
+    @Test
+    void terminatesAndKillsAreDangerousFunctions() {
+        assertEquals("pg_terminate_backend",
+            service.containsDangerousFunction("SELECT pg_terminate_backend(pid) FROM pg_stat_activity"));
+        assertEquals("pg_cancel_backend", service.containsDangerousFunction("select PG_CANCEL_BACKEND (42)"));
+        // A column that merely starts with the name is not a call.
+        assertNull(service.containsDangerousFunction("SELECT pg_terminate_backend_count FROM audit"));
+    }
 }

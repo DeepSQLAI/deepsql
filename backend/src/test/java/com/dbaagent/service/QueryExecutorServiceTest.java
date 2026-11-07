@@ -40,6 +40,7 @@ class QueryExecutorServiceTest {
     @Mock private KeyColumnAnalysisRepository keyColumnAnalysisRepository;
     @Mock private Connection connection;
     @Mock private Statement statement;
+    @Mock private com.dbaagent.provider.api.DatabaseDialect dialect;
 
     private QueryExecutorService queryExecutorService;
 
@@ -115,9 +116,14 @@ class QueryExecutorServiceTest {
         when(providerRegistry.getCanonicalName("mysql")).thenReturn("mysql");
         when(queryExecutionPolicyService.enforce(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("mysql")))
             .thenReturn(new QueryExecutionPolicyService.PolicyDecision(List.of(), true, "UPDATE"));
+        when(providerRegistry.getDialect("mysql")).thenReturn(dialect);
+        when(dialect.queryExecution()).thenReturn(new com.dbaagent.provider.mysql.MySQLQueryExecutionProvider());
         when(connectionService.getConnection("conn-1", request)).thenReturn(connection);
         when(connection.createStatement()).thenReturn(statement);
-        when(statement.execute("UPDATE customers SET property_status = 'ACTIVE' WHERE customer_id = 9"))
+        when(statement.executeQuery("SELECT CONNECTION_ID()")).thenThrow(new SQLException("no pid"));
+        // Every statement now carries an actor tag; see QueryExecutorGuardrailTest.
+        org.mockito.Mockito.lenient().when(statement.execute("/* deepsql origin=editor user=admin */ "
+            + "UPDATE customers SET property_status = 'ACTIVE' WHERE customer_id = 9"))
             .thenThrow(new SQLException("UPDATE command denied to user", "42000"));
 
         QueryExecutionPolicyException exception = assertThrows(

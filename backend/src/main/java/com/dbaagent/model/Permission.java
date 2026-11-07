@@ -40,6 +40,10 @@ public enum Permission {
     RUN_ANALYSIS("Run analysis tasks (Key Columns, Schema, Anti-patterns)", Role.ADMIN, Role.DBA),
     RUN_INGESTION("Run slow query log ingestion", Role.ADMIN, Role.DBA),
     EXECUTE_PLAYBOOKS("Execute playbooks and automation", Role.ADMIN, Role.DBA),
+    // Separate from DML on purpose: confirmed writes are routine,
+    // schema changes are not, and one ALTER can queue every write on a table.
+    // ADMIN-only by default; grant it to a DBA via an override or a custom role.
+    EXECUTE_DDL("Run schema changes (CREATE, ALTER, DROP, RENAME, index apply) on connected databases", Role.ADMIN),
     USE_INDEX_ADVISOR("Apply Index Advisor recommendations", Role.ADMIN, Role.DBA),
     MANAGE_ALERTS("Acknowledge and manage alerts", Role.ADMIN, Role.DBA),
 

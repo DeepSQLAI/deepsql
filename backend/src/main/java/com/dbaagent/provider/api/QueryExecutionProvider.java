@@ -4,6 +4,7 @@ import com.dbaagent.model.QueryResult;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.List;
 
 /**
  * Provider interface for query execution operations.
@@ -61,6 +62,74 @@ public interface QueryExecutionProvider {
      *         session identifier we can act on
      */
     default String getSessionPidQuery() {
+        return null;
+    }
+
+    /**
+     * Session settings applied once to every pooled connection when it opens, so every
+     * path (Editor, agent, dashboards, background jobs) fails fast instead of queueing
+     * behind a table lock. Null when the dialect needs none.
+     */
+    default String connectionGuardSql() {
+        return null;
+    }
+
+    /**
+     * Session settings applied before each user or agent run, and again after any SET
+     * preambles the user sent, so a preamble cannot loosen them. A superset of
+     * {@link #connectionGuardSql()}.
+     *
+     * @param timeoutSeconds the client-side timeout for this statement; 0 when unset
+     * @param serverVersion  {@code DatabaseMetaData.getDatabaseProductVersion()}, or null
+     *                       when unknown — a dialect alias can point at a different
+     *                       server (MySQL's covers MariaDB) with different variables
+     */
+    default String statementGuardSql(int timeoutSeconds, String serverVersion) {
+        return connectionGuardSql();
+    }
+
+    /**
+     * Restores the pooled connection to its {@link #connectionGuardSql()} baseline after a
+     * run. Session variables outlive the borrow: without this, a per-statement limit or a
+     * user's own SET would carry over to the next borrower, background jobs included.
+     */
+    default String statementGuardResetSql(String serverVersion) {
+        return connectionGuardSql();
+    }
+
+    /**
+     * Variants of a DDL statement to try in order so it cannot block writes while it
+     * runs. The executor moves to the next variant only when
+     * {@link #isOnlineDdlUnsupported} says the previous one was refused for its
+     * algorithm.
+     *
+     * @throws IllegalArgumentException when the statement explicitly asks for a
+     *         blocking algorithm or lock mode
+     */
+    default List<String> onlineDdlAttempts(String sql) {
+        return List.of(sql);
+    }
+
+    /**
+     * A session setting a specific DDL statement needs for its own run, or null. The
+     * executor's reset restores the baseline afterwards. Postgres CREATE/DROP INDEX
+     * CONCURRENTLY waits for every older transaction under lock_timeout; cut off midway it
+     * leaves an INVALID index, while its locks block neither reads nor writes.
+     */
+    default String ddlSessionSql(String sql) {
+        return null;
+    }
+
+    /** True when a DDL attempt failed only because the requested online algorithm is unsupported. */
+    default boolean isOnlineDdlUnsupported(SQLException e) {
+        return false;
+    }
+
+    /**
+     * A plain-language explanation when the database refused a statement because one of
+     * the guards above tripped, or null for any other error.
+     */
+    default String guardrailMessage(SQLException e) {
         return null;
     }
 }

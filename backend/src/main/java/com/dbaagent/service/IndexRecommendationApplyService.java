@@ -194,7 +194,23 @@ public class IndexRecommendationApplyService {
             } else {
                 try (Statement s = c.createStatement()) {
                     log.info("Applying recommendation {} on {}: {}", rec.getId(), rec.getConnectionId(), ddl);
-                    s.execute(ddl);
+                    // Some DDL needs its own session setting (Postgres CONCURRENTLY must not
+                    // be cut off by the pool's lock timeout, or it leaves an INVALID index).
+                    // The dialect decides; restore the pool baseline afterwards.
+                    com.dbaagent.provider.api.QueryExecutionProvider dialect =
+                        providerRegistry.getDialect(req.getDbType()).queryExecution();
+                    String ddlSession = dialect.ddlSessionSql(ddl);
+                    if (ddlSession != null) {
+                        s.execute(ddlSession);
+                    }
+                    try {
+                        s.execute(ddl);
+                    } finally {
+                        String baseline = ddlSession != null ? dialect.connectionGuardSql() : null;
+                        if (baseline != null) {
+                            s.execute(baseline);
+                        }
+                    }
                 }
             }
 

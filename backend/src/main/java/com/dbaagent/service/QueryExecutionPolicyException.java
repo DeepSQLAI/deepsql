@@ -13,6 +13,9 @@ public class QueryExecutionPolicyException extends RuntimeException {
     public static final String DB_WRITE_PRIVILEGE_DENIED = "DB_WRITE_PRIVILEGE_DENIED";
     public static final String MULTI_STATEMENT_MISSING_SEMICOLONS = "MULTI_STATEMENT_MISSING_SEMICOLONS";
     public static final String STATEMENT_NOT_PARSEABLE = "STATEMENT_NOT_PARSEABLE";
+    public static final String ADMIN_STATEMENT_BLOCKED = "ADMIN_STATEMENT_BLOCKED";
+    public static final String DDL_PERMISSION_REQUIRED = "DDL_PERMISSION_REQUIRED";
+    public static final String DB_GUARDRAIL_TRIPPED = "DB_GUARDRAIL_TRIPPED";
 
     private final String errorCode;
     private final HttpStatus httpStatus;
@@ -100,6 +103,42 @@ public class QueryExecutionPolicyException extends RuntimeException {
         return new QueryExecutionPolicyException(
             UNSAFE_MUTATION_BLOCKED,
             HttpStatus.BAD_REQUEST,
+            message,
+            false,
+            queryType,
+            List.of()
+        );
+    }
+
+    public static QueryExecutionPolicyException adminStatementBlocked() {
+        return new QueryExecutionPolicyException(
+            ADMIN_STATEMENT_BLOCKED,
+            HttpStatus.FORBIDDEN,
+            "DeepSQL never runs server-administration statements (users and grants, global settings, "
+                + "KILL, LOCK TABLES, FLUSH, replication and binlog control). Use your database admin tooling.",
+            false,
+            "ADMIN",
+            List.of()
+        );
+    }
+
+    public static QueryExecutionPolicyException ddlPermissionRequired(String queryType) {
+        return new QueryExecutionPolicyException(
+            DDL_PERMISSION_REQUIRED,
+            HttpStatus.FORBIDDEN,
+            "Schema changes (CREATE, ALTER, DROP, RENAME) need the \"Run schema changes\" permission. "
+                + "Ask an admin to grant it, or have someone who holds it run this change.",
+            false,
+            queryType,
+            List.of()
+        );
+    }
+
+    /** The database refused the statement because one of DeepSQL's session guardrails tripped. */
+    public static QueryExecutionPolicyException guardrailTripped(String message, String queryType) {
+        return new QueryExecutionPolicyException(
+            DB_GUARDRAIL_TRIPPED,
+            HttpStatus.CONFLICT,
             message,
             false,
             queryType,

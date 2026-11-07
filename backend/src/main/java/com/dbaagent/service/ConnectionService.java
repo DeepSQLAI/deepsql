@@ -6,6 +6,7 @@ import com.dbaagent.provider.DatabaseProviderRegistry;
 import com.dbaagent.provider.api.ConnectionProvider;
 import com.dbaagent.provider.api.DatabaseDialect;
 import com.dbaagent.provider.api.PrivilegeCheckProvider;
+import com.dbaagent.provider.api.QueryExecutionProvider;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import lombok.RequiredArgsConstructor;
@@ -295,6 +296,8 @@ public class ConnectionService {
         config.setKeepaliveTime(300_000);  // 5 min
         config.setLeakDetectionThreshold(60000);
 
+        applyGuardrails(config, dialect.queryExecution());
+
         // Connection properties from provider with full SSL config
         Map<String, Object> connectionProperties = connectionProvider.getConnectionPropertiesWithSsl(
             tunnelPort,
@@ -309,6 +312,34 @@ public class ConnectionService {
         }
 
         return new HikariDataSource(config);
+    }
+
+    /**
+     * Pool-level guardrails, shared with the live MySQL test so it exercises the real config.
+     *
+     * <ul>
+     *   <li>Every connection gives up on a table lock after a few seconds instead of queueing
+     *       behind it — background jobs included. A statement waiting for a metadata lock
+     *       makes every later write to that table wait too.</li>
+     *   <li>HikariCP hardcodes SQLState {@code 0A000} as connection-fatal (verified in 7.1.0),
+     *       and MySQL raises "ALGORITHM=INSTANT is not supported" (1845) with exactly that
+     *       state. Without the override the pool evicted a healthy connection mid-run and the
+     *       INPLACE fallback failed on a closed statement — found only against a real server.
+     *       The dialect decides which errors are statement-level, not the pool.</li>
+     * </ul>
+     */
+    public static void applyGuardrails(HikariConfig config, QueryExecutionProvider queryExecution) {
+        String guardSql = queryExecution.connectionGuardSql();
+        if (guardSql != null) {
+            config.setConnectionInitSql(guardSql);
+        }
+        config.setExceptionOverride(new com.zaxxer.hikari.SQLExceptionOverride() {
+            // Fully qualified: inside this type, `Override` names its nested enum.
+            @java.lang.Override
+            public Override adjudicate(java.sql.SQLException e) {
+                return queryExecution.isOnlineDdlUnsupported(e) ? Override.DO_NOT_EVICT : Override.CONTINUE_EVICT;
+            }
+        });
     }
 
     /**
