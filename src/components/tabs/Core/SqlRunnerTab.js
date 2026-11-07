@@ -2378,7 +2378,7 @@ export default function SqlRunnerTab({ connectionId }) {
                       }
                     >
                       <span className={styles.executionPolicyNote}>
-                        {mayMutateSql ? (isAdmin ? "Admin mode" : "DBA mode") : "Read-only mode"}
+                        {mayMutateSql ? (isAdmin ? "Admin mode" : "Write mode") : "Read-only mode"}
                       </span>
                     </HelpTooltip>
                     {!connectionId && (

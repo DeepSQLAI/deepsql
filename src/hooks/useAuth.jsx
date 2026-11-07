@@ -11,7 +11,7 @@ import { useDashboardStore } from '@/lib/stores/useDashboardStore'
 import { useNavStore } from '@/lib/stores/useNavStore'
 
 export { PERMISSIONS, ROLES, ROLE_LABELS, normalizeRole, roleLabel, isAdminRole, mayMutateSqlRole, isBuiltInRole } from '@/lib/permissions'
-import { PERMISSIONS, ROLES, ROLE_BASELINE_PERMISSIONS, normalizeRole, isAdminRole, mayMutateSqlRole, roleLabel } from '@/lib/permissions'
+import { PERMISSIONS, ROLES, ROLE_BASELINE_PERMISSIONS, normalizeRole, isAdminRole, roleLabel } from '@/lib/permissions'
 
 const AuthContext = createContext(null)
 
@@ -291,7 +291,12 @@ export function AuthProvider({ children }) {
   }, [role, permissions])
 
   const isAdmin = useMemo(() => isAdminRole(role), [role])
-  const mayMutateSql = useMemo(() => mayMutateSqlRole(role), [role])
+  // The permission, not the role name: a custom role granted EXECUTE_WRITES must get the
+  // Editor's write/confirm flow (the backend gate is the same permission).
+  const mayMutateSql = useMemo(
+    () => isAdminRole(role) || permissions.has(PERMISSIONS.EXECUTE_WRITES),
+    [role, permissions]
+  )
   const isDeveloper = useMemo(() => normalizeRole(role) === ROLES.DEVELOPER, [role])
   const roleDisplayName = useMemo(() => roleLabel(role, user?.roleName), [role, user?.roleName])
   const impersonating = Boolean(user?.impersonating)

@@ -44,6 +44,9 @@ public enum Permission {
     // schema changes are not, and one ALTER can queue every write on a table.
     // ADMIN-only by default; grant it to a DBA via an override or a custom role.
     EXECUTE_DDL("Run schema changes (CREATE, ALTER, DROP, RENAME, index apply) on connected databases", Role.ADMIN),
+    // Was a hard-coded "built-in ADMIN or DBA" check, so a custom role could never write at
+    // all — and so could not be given EXECUTE_DDL either. Same default holders as before.
+    EXECUTE_WRITES("Run data changes (INSERT, UPDATE, DELETE) on connected databases", Role.ADMIN, Role.DBA),
     USE_INDEX_ADVISOR("Apply Index Advisor recommendations", Role.ADMIN, Role.DBA),
     MANAGE_ALERTS("Acknowledge and manage alerts", Role.ADMIN, Role.DBA),
 
