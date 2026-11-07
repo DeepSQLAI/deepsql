@@ -3,6 +3,7 @@ package com.dbaagent.service;
 import com.dbaagent.model.*;
 import com.dbaagent.provider.DatabaseProviderRegistry;
 import com.dbaagent.provider.api.IntrospectionProvider;
+import com.dbaagent.provider.api.QueryExecutionProvider;
 import com.dbaagent.repository.KeyColumnAnalysisRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -671,6 +672,21 @@ public class QueryExecutorService {
                 }
             }
 
+            // Re-assert the session guardrails after the user's preambles, so a
+            // `SET SESSION lock_wait_timeout = ...` in front of the query cannot loosen
+            // them, and so a value one caller changed never leaks to the next borrower
+            // of this pooled connection. Fails closed: a statement does not run without them.
+            QueryExecutionProvider executionProvider = providerRegistry.getDialect(connRequest.getDbType()).queryExecution();
+            String guardSql = executionProvider.statementGuardSql(effectiveTimeout);
+            if (guardSql != null) {
+                try (Statement guardStmt = connection.createStatement()) {
+                    guardStmt.execute(guardSql);
+                } catch (SQLException e) {
+                    throw new SQLException("Could not apply DeepSQL's database safety settings, so the query was not run: "
+                        + e.getMessage(), e.getSQLState(), e.getErrorCode(), e);
+                }
+            }
+
             // The last (or only) statement is the query whose results we return
             String finalQuery = statements.get(statements.size() - 1);
 
@@ -687,8 +703,8 @@ public class QueryExecutorService {
             // Appending " LIMIT n" is kept as an optimization for simple SELECTs
             // (it lets the database stop early rather than stream rows we drop),
             // but correctness no longer depends on that textual check.
-            boolean limitRequested = queryRequest.getLimit() != null && queryRequest.getLimit() > 0;
-            int rowLimit = limitRequested ? queryRequest.getLimit() : 0;
+            int rowLimit = effectiveRowLimit(queryRequest.getLimit(), executionContext);
+            boolean limitRequested = rowLimit > 0;
             boolean limitApplied = false;
             String baseQuery = null; // original query without limit, for COUNT
             if (limitRequested) {
@@ -712,17 +728,45 @@ public class QueryExecutorService {
             }
 
             // Execute query
-                boolean hasResultSet;
+                // DDL runs as online-only variants (MySQL: INSTANT, then INPLACE with
+                // LOCK=NONE). Everything else is a single attempt of itself.
+                List<String> attempts;
                 try {
-                    hasResultSet = stmt.execute(finalQuery);
-                } catch (SQLException executionError) {
-                    if (policyDecision.mutating() && looksLikeWritePrivilegeDenied(executionError)) {
-                        throw QueryExecutionPolicyException.dbWritePrivilegeDenied(
-                            executionError.getMessage(),
-                            policyDecision.primaryQueryType()
-                        );
+                    attempts = policyDecision.mutating()
+                        ? executionProvider.onlineDdlAttempts(finalQuery)
+                        : List.of(finalQuery);
+                } catch (IllegalArgumentException blocking) {
+                    throw QueryExecutionPolicyException.unsafeMutation(
+                        blocking.getMessage(), policyDecision.primaryQueryType());
+                }
+                String tag = actorTag(executionContext);
+                boolean hasResultSet = false;
+                for (int attempt = 0; attempt < attempts.size(); attempt++) {
+                    try {
+                        hasResultSet = stmt.execute(tag + attempts.get(attempt));
+                        break;
+                    } catch (SQLException executionError) {
+                        boolean anotherAttemptLeft = attempt < attempts.size() - 1;
+                        if (anotherAttemptLeft && executionProvider.isOnlineDdlUnsupported(executionError)) {
+                            log.info("Online DDL variant {} unsupported, trying next: {}",
+                                attempt + 1, executionError.getMessage());
+                            continue;
+                        }
+                        if (policyDecision.mutating() && looksLikeWritePrivilegeDenied(executionError)) {
+                            throw QueryExecutionPolicyException.dbWritePrivilegeDenied(
+                                executionError.getMessage(),
+                                policyDecision.primaryQueryType()
+                            );
+                        }
+                        String guardrail = executionProvider.guardrailMessage(executionError);
+                        if (guardrail != null) {
+                            log.warn("Database guardrail tripped for {} on {}: {}",
+                                executionContext.actorUsername(), connectionId, executionError.getMessage());
+                            throw QueryExecutionPolicyException.guardrailTripped(
+                                guardrail, policyDecision.primaryQueryType());
+                        }
+                        throw executionError;
                     }
-                    throw executionError;
                 }
 
                 if (hasResultSet) {
@@ -800,6 +844,39 @@ public class QueryExecutorService {
             log.debug("Failed to record SQL Runner lineage: {}", e.getMessage());
         }
         return userDataAccessPolicyService.redactResult(connectionId, result, executionContext);
+    }
+
+    /** Hard ceiling on rows returned to a person or agent, whatever the request asks for. */
+    static final int MAX_RESULT_ROWS = 10_000;
+
+    /**
+     * The row cap was client-controlled: a request without {@code limit} streamed the
+     * whole table into memory. People and agents now get at most {@link #MAX_RESULT_ROWS};
+     * DeepSQL's own background jobs keep what they ask for.
+     */
+    static int effectiveRowLimit(Integer requested, QueryExecutionContext context) {
+        int asked = requested != null && requested > 0 ? requested : 0;
+        QueryExecutionOrigin origin = context == null ? null : context.origin();
+        if (origin == QueryExecutionOrigin.INTERNAL || origin == QueryExecutionOrigin.SCHEDULED || origin == null) {
+            return asked;
+        }
+        return asked > 0 ? Math.min(asked, MAX_RESULT_ROWS) : MAX_RESULT_ROWS;
+    }
+
+    /**
+     * A leading comment naming who ran the statement. Every DeepSQL query reaches the
+     * database as one shared login, so without this the slow log, processlist and
+     * Performance Insights cannot say which person (or agent) caused the load.
+     * The username is reduced to a safe charset so it can never close the comment.
+     */
+    static String actorTag(QueryExecutionContext context) {
+        String origin = context == null || context.origin() == null
+            ? "internal"
+            : context.origin().name().toLowerCase(Locale.ROOT);
+        String user = context == null || context.actorUsername() == null
+            ? ""
+            : " user=" + context.actorUsername().replaceAll("[^A-Za-z0-9._@-]", "_");
+        return "/* deepsql origin=" + origin + user + " */ ";
     }
 
     /**

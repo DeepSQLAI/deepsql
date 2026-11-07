@@ -295,6 +295,15 @@ public class ConnectionService {
         config.setKeepaliveTime(300_000);  // 5 min
         config.setLeakDetectionThreshold(60000);
 
+        // Every connection in the pool gives up on a table lock after a few seconds
+        // instead of queueing behind it — background jobs included, not only the
+        // Editor. A statement waiting for a metadata lock makes every later write to
+        // that table wait too.
+        String guardSql = dialect.queryExecution().connectionGuardSql();
+        if (guardSql != null) {
+            config.setConnectionInitSql(guardSql);
+        }
+
         // Connection properties from provider with full SSL config
         Map<String, Object> connectionProperties = connectionProvider.getConnectionPropertiesWithSsl(
             tunnelPort,

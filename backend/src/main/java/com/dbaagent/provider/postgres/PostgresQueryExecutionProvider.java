@@ -132,4 +132,25 @@ public class PostgresQueryExecutionProvider implements QueryExecutionProvider {
     public String getSessionPidQuery() {
         return "SELECT pg_backend_pid()";
     }
+
+    /**
+     * An ALTER waiting for ACCESS EXCLUSIVE queues every later reader and writer behind
+     * it, same as a MySQL metadata lock. Give up after 5s instead of holding the line.
+     * The statement time limit stays with the JDBC timeout.
+     */
+    @Override
+    public String connectionGuardSql() {
+        return "SET lock_timeout = '5s'";
+    }
+
+    @Override
+    public String guardrailMessage(java.sql.SQLException e) {
+        // 55P03 lock_not_available: raised when lock_timeout expires.
+        if ("55P03".equals(e.getSQLState())) {
+            return "Gave up after waiting 5 seconds for a lock: another session is using this table or these rows. "
+                + "DeepSQL does not queue behind locks, because a waiting statement makes every later query on the "
+                + "table wait too. Try again when it is quieter.";
+        }
+        return null;
+    }
 }

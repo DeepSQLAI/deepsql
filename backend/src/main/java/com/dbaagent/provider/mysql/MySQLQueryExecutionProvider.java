@@ -5,6 +5,8 @@ import org.springframework.stereotype.Component;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.sql.SQLException;
+import java.util.List;
 import java.util.regex.Pattern;
 
 /**
@@ -127,5 +129,118 @@ public class MySQLQueryExecutionProvider implements QueryExecutionProvider {
     @Override
     public String getSessionPidQuery() {
         return "SELECT CONNECTION_ID()";
+    }
+
+    // ---- production guardrails -------------------------------------------------
+    //
+    // Added after a production incident: an ALTER TABLE ... MODIFY
+    // ... NOT NULL from the Editor queued every write on the table for four minutes.
+    // MySQL's default lock_wait_timeout is one year, so nothing on the server side
+    // stopped it; the Editor's 240s client timeout did.
+
+    /** Seconds any statement may wait for a metadata or row lock before giving up. */
+    private static final int LOCK_WAIT_SECONDS = 5;
+    /** Read time limit on a writable server (the primary). Replicas get the client timeout. */
+    private static final int PRIMARY_READ_LIMIT_MS = 30_000;
+
+    private static final String LOCK_GUARD =
+        "lock_wait_timeout = " + LOCK_WAIT_SECONDS + ", innodb_lock_wait_timeout = " + LOCK_WAIT_SECONDS;
+
+    private static final Pattern ALTER_TABLE = Pattern.compile(
+        "^ALTER\\s+(?:ONLINE\\s+|IGNORE\\s+)?TABLE\\b", Pattern.CASE_INSENSITIVE);
+    // Value-anchored so a column named `algorithm` or `lock` does not read as a clause.
+    private static final Pattern ALGORITHM_CLAUSE = Pattern.compile(
+        "\\bALGORITHM\\s*=?\\s*(DEFAULT|INSTANT|INPLACE|COPY)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern LOCK_CLAUSE = Pattern.compile(
+        "\\bLOCK\\s*=?\\s*(DEFAULT|NONE|SHARED|EXCLUSIVE)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern QUOTED = Pattern.compile(
+        "'(?:[^'\\\\]|\\\\.|'')*'|\"(?:[^\"\\\\]|\\\\.)*\"|`[^`]*`");
+
+    private static final int ER_LOCK_WAIT_TIMEOUT = 1205;
+    private static final int ER_UPDATE_WITHOUT_KEY_IN_SAFE_MODE = 1175;
+    private static final int ER_QUERY_TIMEOUT = 3024;
+    private static final int ER_ALTER_OPERATION_NOT_SUPPORTED = 1845;
+    private static final int ER_ALTER_OPERATION_NOT_SUPPORTED_REASON = 1846;
+
+    @Override
+    public String connectionGuardSql() {
+        return "SET SESSION " + LOCK_GUARD;
+    }
+
+    /**
+     * Reads get the client timeout on a replica but at most 30s on a writable server, so
+     * heavy exploration lands on the replica instead of the primary bookings write to.
+     * {@code @@global.read_only} decides which one this is, so no per-connection setting
+     * can drift out of date. {@code max_execution_time} applies to SELECT only; writes
+     * and DDL are bounded by the lock waits and the JDBC timeout.
+     */
+    @Override
+    public String statementGuardSql(int timeoutSeconds) {
+        int clientMs = timeoutSeconds > 0 ? timeoutSeconds * 1000 : PRIMARY_READ_LIMIT_MS;
+        return "SET SESSION " + LOCK_GUARD + ", sql_safe_updates = 1, max_execution_time = IF(@@global.read_only, "
+            + clientMs + ", LEAST(" + clientMs + ", " + PRIMARY_READ_LIMIT_MS + "))";
+    }
+
+    @Override
+    public List<String> onlineDdlAttempts(String sql) {
+        if (sql == null || !ALTER_TABLE.matcher(stripLeadingComments(sql)).find()) {
+            return List.of(sql);
+        }
+        String base = sql.strip();
+        while (base.endsWith(";")) {
+            base = base.substring(0, base.length() - 1).strip();
+        }
+        String clauses = QUOTED.matcher(base).replaceAll("''");
+        String algorithm = clauseValue(ALGORITHM_CLAUSE, clauses);
+        String lock = clauseValue(LOCK_CLAUSE, clauses);
+
+        if ("COPY".equals(algorithm) || "DEFAULT".equals(algorithm)
+            || "SHARED".equals(lock) || "EXCLUSIVE".equals(lock) || "DEFAULT".equals(lock)) {
+            throw new IllegalArgumentException(
+                "DeepSQL only runs schema changes online (ALGORITHM=INSTANT, or INPLACE with LOCK=NONE). "
+                    + "This one asks for a mode that blocks writes to the table while it runs. "
+                    + "Make large rebuilds off-peak with gh-ost or pt-online-schema-change instead.");
+        }
+        // The appended clause starts on a new line: a trailing "-- comment" would
+        // otherwise swallow it, and the ALTER would run with MySQL's default algorithm.
+        if (algorithm == null && lock == null) {
+            return List.of(base + "\n, ALGORITHM=INSTANT", base + "\n, ALGORITHM=INPLACE, LOCK=NONE");
+        }
+        if ("INPLACE".equals(algorithm) && lock == null) {
+            return List.of(base + "\n, LOCK=NONE");
+        }
+        return List.of(sql);
+    }
+
+    private static String clauseValue(Pattern clause, String sql) {
+        java.util.regex.Matcher m = clause.matcher(sql);
+        return m.find() ? m.group(1).toUpperCase(java.util.Locale.ROOT) : null;
+    }
+
+    @Override
+    public boolean isOnlineDdlUnsupported(SQLException e) {
+        int code = e.getErrorCode();
+        return code == ER_ALTER_OPERATION_NOT_SUPPORTED
+            || code == ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+            // Later InnoDB limits (row versions, max row size) word it the same way.
+            || (e.getMessage() != null && e.getMessage().contains("Try ALGORITHM="));
+    }
+
+    @Override
+    public String guardrailMessage(SQLException e) {
+        if (isOnlineDdlUnsupported(e)) {
+            return "MySQL cannot make this change without blocking writes to the table (" + e.getMessage() + "). "
+                + "Run it off-peak with gh-ost or pt-online-schema-change.";
+        }
+        return switch (e.getErrorCode()) {
+            case ER_LOCK_WAIT_TIMEOUT -> "Gave up after waiting " + LOCK_WAIT_SECONDS + " seconds for a lock: another "
+                + "session is using this table or these rows. DeepSQL does not queue behind locks, because a "
+                + "waiting statement makes every later write to the table wait too. Try again when it is quieter.";
+            case ER_UPDATE_WITHOUT_KEY_IN_SAFE_MODE -> "MySQL safe-updates mode refused this: the WHERE clause must "
+                + "filter on an indexed (key) column, or the statement must have a LIMIT.";
+            case ER_QUERY_TIMEOUT -> "Stopped at the " + PRIMARY_READ_LIMIT_MS / 1000 + "-second limit for reads on a "
+                + "primary database. Run heavy queries on the replica connection instead.";
+            default -> null;
+        };
     }
 }

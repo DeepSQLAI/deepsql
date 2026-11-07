@@ -4,6 +4,7 @@ import com.dbaagent.model.QueryResult;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.List;
 
 /**
  * Provider interface for query execution operations.
@@ -61,6 +62,52 @@ public interface QueryExecutionProvider {
      *         session identifier we can act on
      */
     default String getSessionPidQuery() {
+        return null;
+    }
+
+    /**
+     * Session settings applied once to every pooled connection when it opens, so every
+     * path (Editor, agent, dashboards, background jobs) fails fast instead of queueing
+     * behind a table lock. Null when the dialect needs none.
+     */
+    default String connectionGuardSql() {
+        return null;
+    }
+
+    /**
+     * Session settings re-applied immediately before each user or agent statement,
+     * after any SET preambles the user sent, so a preamble cannot loosen them. A
+     * superset of {@link #connectionGuardSql()}.
+     *
+     * @param timeoutSeconds the client-side timeout for this statement; 0 when unset
+     */
+    default String statementGuardSql(int timeoutSeconds) {
+        return connectionGuardSql();
+    }
+
+    /**
+     * Variants of a DDL statement to try in order so it cannot block writes while it
+     * runs. The executor moves to the next variant only when
+     * {@link #isOnlineDdlUnsupported} says the previous one was refused for its
+     * algorithm.
+     *
+     * @throws IllegalArgumentException when the statement explicitly asks for a
+     *         blocking algorithm or lock mode
+     */
+    default List<String> onlineDdlAttempts(String sql) {
+        return List.of(sql);
+    }
+
+    /** True when a DDL attempt failed only because the requested online algorithm is unsupported. */
+    default boolean isOnlineDdlUnsupported(SQLException e) {
+        return false;
+    }
+
+    /**
+     * A plain-language explanation when the database refused a statement because one of
+     * the guards above tripped, or null for any other error.
+     */
+    default String guardrailMessage(SQLException e) {
         return null;
     }
 }

@@ -2,6 +2,7 @@ package com.dbaagent.controller;
 
 import com.dbaagent.model.IndexRecommendationEntity;
 import com.dbaagent.model.IndexRecommendationEvidence;
+import com.dbaagent.model.Permission;
 import com.dbaagent.service.IndexRecommendationApplyService;
 import com.dbaagent.service.IndexRecommendationService;
 import com.dbaagent.service.security.AccessControlService;
@@ -189,6 +190,13 @@ public class IndexRecommendationController {
             return ResponseEntity.notFound().build();
         }
         accessControlService.assertCanManageConnectionContent(existing.getConnectionId());
+        // APPLY runs real CREATE INDEX on the target, outside the SQL Editor's policy,
+        // so it needs the same permission an Editor schema change does. DRY_RUN only
+        // installs HypoPG hypothetical indexes and stays open.
+        if (m != IndexRecommendationApplyService.Mode.DRY_RUN) {
+            accessControlService.assertHasPermission(Permission.EXECUTE_DDL,
+                "Applying an index is a schema change and needs the \"Run schema changes\" permission.");
+        }
         IndexRecommendationApplyService.ApplyOptions opts = new IndexRecommendationApplyService.ApplyOptions(concurrent);
         IndexRecommendationApplyService.ApplyResult result = applyService.apply(id, m, confirm, opts);
         return ResponseEntity.ok(result);

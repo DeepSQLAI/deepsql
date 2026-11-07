@@ -864,6 +864,54 @@ it against a real database — not a theoretical hardening pass.
   their mutation handling (covered by `anUnparseableWriteIsStillTreatedAsAMutation` and
   `aMalformedDataModifyingCteIsStillBlockedAsAWrite`). The MCP guard already reported this
   case honestly ("Only read-only SQL is allowed …") and was left alone.
+- **Production guardrails (production ALTER incident).** An Editor
+  `ALTER TABLE … MODIFY … NOT NULL` queued every write on the table for exactly
+  240s — the Editor's client timeout was the only thing that stopped it, because
+  MySQL's default `lock_wait_timeout` is one year. `security_event` named who ran
+  it; the DB-side login could not. What now applies to **every role, admins included**:
+  - **Session guards** come from the dialect (`QueryExecutionProvider.connectionGuardSql`
+    / `statementGuardSql`). The pool sets `lock_wait_timeout=5, innodb_lock_wait_timeout=5`
+    (Postgres: `lock_timeout='5s'`) via Hikari `connectionInitSql`, so background jobs get
+    it too. The executor **re-applies** them, plus `sql_safe_updates=1` and
+    `max_execution_time`, *after* the user's SET preambles — otherwise a preamble could
+    loosen them, and on a pooled connection that loosening leaks to the next borrower.
+    It fails closed: no guards, no statement.
+  - **`max_execution_time` keys off `@@global.read_only`**: reads get the client timeout
+    on a replica but at most 30s on a writable server. No per-connection setting to drift.
+  - **MySQL ALTER runs online or not at all.** `onlineDdlAttempts` appends
+    `ALGORITHM=INSTANT`, falling back to `INPLACE, LOCK=NONE` only on an
+    algorithm-unsupported error (1845/1846/"Try ALGORITHM="), never on a lock timeout.
+    `COPY`, `DEFAULT`, `SHARED`, `EXCLUSIVE` are refused *before* the confirmation prompt.
+    The clause is appended on a **new line**: on the same line a trailing `-- comment`
+    swallows it and the ALTER silently runs with the default (possibly blocking) algorithm.
+  - **`EXECUTE_DDL` is separate from DML** and ADMIN-only by default (grant DBAs via an
+    override/custom role). Confirmed DML is routine; DDL is not.
+    DDL is a leading DDL verb **or any mutation that is not row-only DML** (an allowlist:
+    INSERT/UPDATE/DELETE/MERGE/UPSERT/REPLACE) — a verb check alone missed `CALL` (a
+    procedure can run DDL) and Postgres `SELECT … INTO new_table`, and the keyword
+    fallback reports `RENAME` as `OTHER`. Index Advisor `APPLY` runs real `CREATE INDEX`
+    outside the policy, so it checks the same permission; without that it is decorative.
+  - **MySQL executable comments and optimizer hints are refused** (`/*! … */`, `/*+ … */`).
+    MySQL runs the body of `/*!50000 GRANT … */`, while every check here strips it as a
+    comment and `isReadOnlyQuery` then calls the empty remainder read-only — so it skipped
+    every guard, the confirmation prompt included. Hints (`MAX_EXECUTION_TIME`, `SET_VAR`)
+    override the session guards for one statement.
+  - **The SET scope check reads raw text, not literal-stripped text.** Stripping literals is
+    a second tokenizer that can disagree with MySQL's: `SET @a = "'", GLOBAL x = 1, @b = "'"`
+    defeated a two-pass regex, and a `NO_BACKSLASH_ESCAPES` preamble changes MySQL's own
+    tokenizing, so no scanner here can be trusted to match. `SET @x = 'global'` is refused
+    as a result — fail closed, on purpose.
+  - **Admin statements are blocked before classification** (`ADMIN_STATEMENT_BLOCKED`):
+    GRANT/REVOKE, CREATE/ALTER/DROP USER|ROLE, KILL, LOCK TABLES, FLUSH, SHUTDOWN,
+    replication/binlog control, and any SET reaching GLOBAL/PERSIST scope or `sql_log_bin`
+    — anywhere in the assignment list. SET used to be a "session preamble", so
+    `SET GLOBAL …; SELECT 1` ran for *read-only* roles.
+  - TRUNCATE is blocked in the Editor (it was MCP-only). User-facing origins get a
+    server-side 10k row cap whatever `limit` says (`INTERNAL`/`SCHEDULED` keep theirs).
+  - Every executed statement carries `/* deepsql origin=… user=… */`, so slow log,
+    processlist and Performance Insights attribute load to a person despite one shared
+    login. The username is reduced to `[A-Za-z0-9._@-]` so it can never close the comment.
+  - `security.audit.retention-days` is 90 (was 30).
 - **Keep the client timeout under the proxy's.** `docker/nginx/default.conf` gives
   up at `proxy_read_timeout 300s`; the Editor used to ask for 600s, so a 6-minute
   query returned an opaque 504 while still running. `QUERY_TIMEOUT_SECONDS = 240`

@@ -1,6 +1,8 @@
 package com.dbaagent.service;
 
+import com.dbaagent.model.Permission;
 import com.dbaagent.model.QueryRequest;
+import com.dbaagent.service.security.AccessControlService;
 import com.dbaagent.provider.DatabaseProviderRegistry;
 import com.dbaagent.provider.api.DatabaseDialect;
 import com.dbaagent.provider.api.QueryExecutionProvider;
@@ -24,6 +26,7 @@ class QueryExecutionPolicyServiceTest {
 
     @Mock private DatabaseProviderRegistry providerRegistry;
     @Mock private DatabaseDialect databaseDialect;
+    @Mock private AccessControlService accessControlService;
 
     private QueryExecutionPolicyService service;
 
@@ -38,7 +41,10 @@ class QueryExecutionPolicyServiceTest {
         when(providerRegistry.getDialect(anyString())).thenReturn(databaseDialect);
         when(databaseDialect.queryExecution()).thenReturn(realProvider);
         lenient().when(providerRegistry.getCanonicalName(anyString())).thenReturn("mysql");
-        service = new QueryExecutionPolicyService(providerRegistry);
+        // Admins in these tests hold EXECUTE_DDL; the permission split itself is
+        // covered in QueryExecutionPolicyProdGuardTest.
+        lenient().when(accessControlService.hasPermission(Permission.EXECUTE_DDL)).thenReturn(true);
+        service = new QueryExecutionPolicyService(providerRegistry, accessControlService);
     }
 
     @Test
