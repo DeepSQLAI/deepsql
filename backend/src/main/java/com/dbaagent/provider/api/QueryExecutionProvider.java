@@ -110,6 +110,16 @@ public interface QueryExecutionProvider {
         return List.of(sql);
     }
 
+    /**
+     * A session setting a specific DDL statement needs for its own run, or null. The
+     * executor's reset restores the baseline afterwards. Postgres CREATE/DROP INDEX
+     * CONCURRENTLY waits for every older transaction under lock_timeout; cut off midway it
+     * leaves an INVALID index, while its locks block neither reads nor writes.
+     */
+    default String ddlSessionSql(String sql) {
+        return null;
+    }
+
     /** True when a DDL attempt failed only because the requested online algorithm is unsupported. */
     default boolean isOnlineDdlUnsupported(SQLException e) {
         return false;

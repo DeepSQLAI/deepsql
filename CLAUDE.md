@@ -882,12 +882,22 @@ it against a real database — not a theoretical hardening pass.
   - **The MySQL provider also serves `mariadb`**, which has no `max_execution_time` — a
     fail-closed SET of it refused every query on the connection. The guard takes the
     server version (`DatabaseMetaData`) and omits it there.
-  - **Postgres `CREATE INDEX CONCURRENTLY` takes `lock_timeout = 0`** for its own run
-    (Index Advisor apply): its waits for older transactions honour `lock_timeout`, and
-    hitting 5s midway leaves an INVALID index. Its locks block neither reads nor writes.
-  - **The 10k cap is `setMaxRows` only.** `LIMIT` text is still appended only when the
-    client asked for a limit; appending it to every SELECT broke `FETCH FIRST`,
-    `FOR UPDATE` and `LOCK IN SHARE MODE`.
+  - **Postgres `CREATE INDEX CONCURRENTLY` takes `lock_timeout = 0`** for its own run, on
+    every path (Editor, MCP, Index Advisor), via `QueryExecutionProvider.ddlSessionSql`:
+    its waits for older transactions honour `lock_timeout`, and hitting 5s midway leaves an
+    INVALID index. Its locks block neither reads nor writes.
+  - **The reset is broad, not just the guard variables.** Postgres: `RESET ALL` (a read like
+    `SELECT set_config('lock_timeout','0',false)` changes the session too — which is why the
+    reset runs after *every* user/agent run, even a lone SELECT). MySQL: the guards plus
+    `sql_mode`, `foreign_key_checks`, `unique_checks`, `time_zone` — an explicit list, since
+    MySQL has no SQL form of COM_RESET_CONNECTION. Other MySQL session variables still carry
+    over, as they always did. INTERNAL/SCHEDULED runs keep the pool baseline only.
+  - **Replicas are `@@global.read_only OR @@global.innodb_read_only`** — Aurora readers report
+    `read_only=0`.
+  - **Row cap: 10k by default, an explicit request up to 100k** (the Editor's CSV export asks
+    for `EXPORT_ROW_LIMIT = 100000`; a flat 10k ceiling silently truncated exports). Enforced by
+    `setMaxRows` only; `LIMIT` text is appended only when the client asked for a limit —
+    appending it to every SELECT broke `FETCH FIRST`, `FOR UPDATE` and `LOCK IN SHARE MODE`.
   - **`max_execution_time` keys off `@@global.read_only`**: reads get the client timeout
     on a replica but at most 30s on a writable server. No per-connection setting to drift.
   - **MySQL ALTER runs online or not at all.** `onlineDdlAttempts` appends
@@ -914,6 +924,22 @@ it against a real database — not a theoretical hardening pass.
     comment and `isReadOnlyQuery` then calls the empty remainder read-only — so it skipped
     every guard, the confirmation prompt included. Hints (`MAX_EXECUTION_TIME`, `SET_VAR`)
     override the session guards for one statement.
+  - **Role and identity switches are admin statements**: `SET [SESSION|LOCAL] ROLE`,
+    `SET SESSION AUTHORIZATION`, and the GUC spellings `SET role = …` /
+    `session_replication_role`. A switch left on a pooled connection is inherited by the
+    next borrower. (`SET @role = 1` is a user variable and stays allowed.)
+  - **The dangerous-function denylist now runs on every surface.** It lived only in
+    `McpSqlGuardService` (MCP, dashboards), so the Editor ran `SELECT dblink_exec(…)` and
+    `SELECT pg_terminate_backend(pid)` as plain reads. The policy calls
+    `McpSqlGuardService.dangerousFunctionIn` on its own linear scrub; the list (now with
+    `pg_terminate_backend`, `pg_cancel_backend`) still mirrors `mcp/deepsql-phase1-lib.js`.
+    DeepSQL's own cancel uses direct JDBC (`ActiveQueryService`), not this path.
+  - **Comment stripping must be a linear scan, never a lazy regex.** `McpSqlGuardService`'s
+    `/\*[\s\S]*?\*/` rescanned to the end from every unterminated `/*` (`"a/*"` × 32k took
+    minutes) on MCP and the public dashboard query path; the policy has shared its linear
+    scanner since. The MySQL clause tokenizer lets every alternative close at end-of-input
+    with possessive repetition for the same reason. `hiddenWriteScan_staysLinearOnAdversarialInput`
+    is the canary — it caught this the moment the guard reached the Editor path.
   - **The SET scope check reads raw text, not literal-stripped text.** Stripping literals is
     a second tokenizer that can disagree with MySQL's: `SET @a = "'", GLOBAL x = 1, @b = "'"`
     defeated a two-pass regex, and a `NO_BACKSLASH_ESCAPES` preamble changes MySQL's own
@@ -925,7 +951,7 @@ it against a real database — not a theoretical hardening pass.
     — anywhere in the assignment list. SET used to be a "session preamble", so
     `SET GLOBAL …; SELECT 1` ran for *read-only* roles.
   - TRUNCATE is blocked in the Editor (it was MCP-only). User-facing origins get a
-    server-side 10k row cap whatever `limit` says (`INTERNAL`/`SCHEDULED` keep theirs).
+    server-side row cap (10k default, 100k ceiling; `INTERNAL`/`SCHEDULED` keep theirs).
   - Every executed statement carries `/* deepsql origin=… user=… */`, so slow log,
     processlist and Performance Insights attribute load to a person despite one shared
     login. The username is reduced to `[A-Za-z0-9._@-]` so it can never close the comment.

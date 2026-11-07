@@ -105,10 +105,36 @@ class MySQLQueryExecutionProviderGuardTest {
 
     @Test
     void perStatementGuardCapsReadsAtThirtySecondsOnlyOnAWritableServer() {
+        // innodb_read_only too: Aurora readers report read_only=0.
         assertThat(provider.statementGuardSql(240, "8.0.36")).isEqualTo(
             "SET SESSION lock_wait_timeout = 5, innodb_lock_wait_timeout = 5, sql_safe_updates = 1, "
-                + "max_execution_time = IF(@@global.read_only, 240000, LEAST(240000, 30000))");
-        assertThat(provider.statementGuardSql(0, null)).contains("IF(@@global.read_only, 30000, LEAST(30000, 30000))");
+                + "max_execution_time = IF(@@global.read_only OR @@global.innodb_read_only, 240000, LEAST(240000, 30000))");
+        assertThat(provider.statementGuardSql(0, null))
+            .contains("IF(@@global.read_only OR @@global.innodb_read_only, 30000, LEAST(30000, 30000))");
+    }
+
+    @Test
+    void clauseDetectionStaysLinearOnUnterminatedCommentsAndQuotes() {
+        // A lazy /\*.*?\*/ rescans to the end from every unterminated opener.
+        for (String tail : List.of("/*" + "a/*".repeat(32_000), "'" + "a\\'".repeat(32_000), "`" + "a".repeat(64_000))) {
+            long startedAt = System.currentTimeMillis();
+            provider.onlineDdlAttempts("ALTER TABLE t ADD COLUMN x INT " + tail);
+            assertThat(System.currentTimeMillis() - startedAt).as("must not backtrack").isLessThan(5_000L);
+        }
+    }
+
+    @Test
+    void aClauseInsideACommentIsNotAClause() {
+        // Read as real, this ran the MODIFY with MySQL's default (COPY) algorithm, unguarded.
+        assertThat(provider.onlineDdlAttempts(
+            "ALTER TABLE bookings MODIFY status VARCHAR(20) NOT NULL -- , ALGORITHM=INPLACE, LOCK=NONE"))
+            .hasSize(2);
+        assertThat(provider.onlineDdlAttempts("ALTER TABLE t ADD COLUMN x INT /* LOCK=SHARED */")).hasSize(2);
+        assertThat(provider.onlineDdlAttempts("ALTER TABLE t ADD COLUMN x INT # ALGORITHM=COPY")).hasSize(2);
+        // A quote inside a comment must not desynchronise literal stripping: the real
+        // COPY clause on the next line is still seen, and refused.
+        assertThrows(IllegalArgumentException.class,
+            () -> provider.onlineDdlAttempts("ALTER TABLE t ADD COLUMN x INT -- don't\n, ALGORITHM=COPY"));
     }
 
     @Test
@@ -122,9 +148,11 @@ class MySQLQueryExecutionProviderGuardTest {
 
     @Test
     void theResetRestoresThePoolBaselineSoNothingLeaksToTheNextBorrower() {
+        // Also the settings a preamble could use to weaken the next borrower's writes.
         assertThat(provider.statementGuardResetSql("8.0.36")).isEqualTo(
-            "SET SESSION lock_wait_timeout = 5, innodb_lock_wait_timeout = 5, "
-                + "sql_safe_updates = DEFAULT, max_execution_time = DEFAULT");
+            "SET SESSION lock_wait_timeout = 5, innodb_lock_wait_timeout = 5, sql_safe_updates = DEFAULT, "
+                + "sql_mode = DEFAULT, foreign_key_checks = DEFAULT, unique_checks = DEFAULT, time_zone = DEFAULT, "
+                + "max_execution_time = DEFAULT");
     }
 
     @Test

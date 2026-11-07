@@ -72,6 +72,13 @@ class QueryExecutionPolicyProdGuardTest {
             "SHUTDOWN",
             "RESET MASTER",
             "PURGE BINARY LOGS BEFORE NOW()",
+            // Postgres role/identity switches: left on a pooled connection, inherited by the next borrower.
+            "SET SESSION ROLE app_owner",
+            "SET LOCAL ROLE app_owner",
+            "SET SESSION AUTHORIZATION app_owner",
+            "SET role = app_owner",
+            "SET LOCAL role TO app_owner",
+            "SET session_replication_role = replica",
             "  /* sneaky */ GRANT ALL ON *.* TO 'x'@'%'")) {
             assertThat(blocked(sql, confirmedAdminEditor()).getErrorCode())
                 .as(sql).isEqualTo(QueryExecutionPolicyException.ADMIN_STATEMENT_BLOCKED);
@@ -136,6 +143,24 @@ class QueryExecutionPolicyProdGuardTest {
         assertThat(blocked("SET GLOBAL max_connections = 10; SELECT 1",
             QueryExecutionContext.editor("analyst", false, false)).getErrorCode())
             .isEqualTo(QueryExecutionPolicyException.ADMIN_STATEMENT_BLOCKED);
+    }
+
+    @Test
+    void functionsThatReachOutsideTheQueryAreRefusedInTheEditorToo() {
+        // The denylist used to run only for MCP and dashboards; in the Editor these were plain reads.
+        for (String sql : List.of(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'app'",
+            "SELECT pg_cancel_backend(12345)",
+            "SELECT dblink_exec('dbname=app', 'DELETE FROM orders')")) {
+            assertThat(blocked(sql, QueryExecutionContext.editor("analyst", false, false)).getErrorCode())
+                .as(sql).isEqualTo(QueryExecutionPolicyException.UNSAFE_MUTATION_BLOCKED);
+        }
+    }
+
+    @Test
+    void aUserVariableNamedRoleIsNotARoleSwitch() {
+        service.enforce(new QueryRequest("SET @role = 1; SELECT @role", null, null),
+            QueryExecutionContext.editor("analyst", false, false), "mysql");
     }
 
     @Test
@@ -252,6 +277,7 @@ class QueryExecutionPolicyProdGuardTest {
             "ALTER TABLE customers MODIFY email varchar(512) NOT NULL",
             QueryExecutionContext.editor("admin", true, false));
         assertThat(e.getErrorCode()).isEqualTo(QueryExecutionPolicyException.EDITOR_MUTATION_CONFIRMATION_REQUIRED);
-        assertThat(String.join(" ", e.getWarnings())).contains("LOCK=NONE").contains("5 seconds");
+        // Dialect-neutral wording: the policy no longer names MySQL algorithms.
+        assertThat(String.join(" ", e.getWarnings())).contains("does not block writes").contains("5 seconds");
     }
 }

@@ -194,22 +194,21 @@ public class IndexRecommendationApplyService {
             } else {
                 try (Statement s = c.createStatement()) {
                     log.info("Applying recommendation {} on {}: {}", rec.getId(), rec.getConnectionId(), ddl);
-                    // CREATE/DROP INDEX CONCURRENTLY waits for every older transaction,
-                    // and those waits honour the pool's 5s lock_timeout: hitting it midway
-                    // leaves an INVALID index behind. Its locks do not block reads or
-                    // writes, so waiting is safe here; restore the pool guard afterwards.
-                    boolean concurrently = ddl.toUpperCase(java.util.Locale.ROOT).contains(" CONCURRENTLY ");
-                    if (concurrently) {
-                        s.execute("SET lock_timeout = 0");
+                    // Some DDL needs its own session setting (Postgres CONCURRENTLY must not
+                    // be cut off by the pool's lock timeout, or it leaves an INVALID index).
+                    // The dialect decides; restore the pool baseline afterwards.
+                    com.dbaagent.provider.api.QueryExecutionProvider dialect =
+                        providerRegistry.getDialect(req.getDbType()).queryExecution();
+                    String ddlSession = dialect.ddlSessionSql(ddl);
+                    if (ddlSession != null) {
+                        s.execute(ddlSession);
                     }
                     try {
                         s.execute(ddl);
                     } finally {
-                        String guard = concurrently
-                            ? providerRegistry.getDialect(req.getDbType()).queryExecution().connectionGuardSql()
-                            : null;
-                        if (guard != null) {
-                            s.execute(guard);
+                        String baseline = ddlSession != null ? dialect.connectionGuardSql() : null;
+                        if (baseline != null) {
+                            s.execute(baseline);
                         }
                     }
                 }

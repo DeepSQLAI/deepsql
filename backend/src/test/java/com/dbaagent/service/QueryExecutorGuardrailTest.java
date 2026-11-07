@@ -130,6 +130,20 @@ class QueryExecutorGuardrailTest {
     }
 
     @Test
+    void deepsqlsOwnJobsKeepThePoolBaselineOnly() throws Exception {
+        // INTERNAL/SCHEDULED SQL is trusted code with its own timeouts: no 30s primary cap,
+        // no sql_safe_updates, and no reset round trip when it sent no preambles.
+        policyReturns(false, "SELECT");
+
+        executor.executeQuery("conn-1", new QueryRequest("SELECT COUNT(*) FROM customers", null, 240),
+            QueryExecutionContext.internal());
+
+        verify(statement, never()).execute(GUARD);
+        verify(statement, never()).execute(RESET);
+        verify(statement).execute("/* deepsql origin=internal */ SELECT COUNT(*) FROM customers");
+    }
+
+    @Test
     void theSessionIsResetEvenWhenTheStatementFails() throws Exception {
         // Session variables outlive the borrow: without the reset, this run's
         // sql_safe_updates and max_execution_time would reach the next borrower,
@@ -199,11 +213,17 @@ class QueryExecutorGuardrailTest {
     }
 
     @Test
-    void peopleAndAgentsGetAtMostTenThousandRowsWhateverTheyAskFor() {
+    void peopleAndAgentsGetTenThousandRowsUnlessTheyAskAndNeverMoreThanTheExportCeiling() {
         assertThat(QueryExecutorService.effectiveRowLimit(null, QueryExecutionContext.editor("a", true, false)))
             .isEqualTo(10_000);
+        // The Editor's CSV export asks for 100k (EXPORT_ROW_LIMIT); a 10k ceiling silently
+        // truncated exports that worked before.
+        assertThat(QueryExecutorService.effectiveRowLimit(100_000, QueryExecutionContext.editor("a", true, false)))
+            .isEqualTo(100_000);
         assertThat(QueryExecutorService.effectiveRowLimit(50_000, QueryExecutionContext.mcp("a")))
-            .isEqualTo(10_000);
+            .isEqualTo(50_000);
+        assertThat(QueryExecutorService.effectiveRowLimit(5_000_000, QueryExecutionContext.mcp("a")))
+            .isEqualTo(100_000);
         assertThat(QueryExecutorService.effectiveRowLimit(1_000, QueryExecutionContext.editor("a", false, false)))
             .isEqualTo(1_000);
         assertThat(QueryExecutorService.effectiveRowLimit(null, QueryExecutionContext.api("a")))

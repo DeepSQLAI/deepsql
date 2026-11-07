@@ -143,6 +143,24 @@ public class PostgresQueryExecutionProvider implements QueryExecutionProvider {
         return "SET lock_timeout = '5s'";
     }
 
+    /**
+     * RESET ALL first: a user's preamble (or a read like {@code SELECT set_config(...)}) can
+     * change any session setting, and the pooled connection carries it to the next borrower.
+     * Startup parameters survive RESET ALL; the lock guard is then re-applied.
+     */
+    @Override
+    public String statementGuardResetSql(String serverVersion) {
+        return "RESET ALL; " + connectionGuardSql();
+    }
+
+    private static final java.util.regex.Pattern CONCURRENTLY =
+        java.util.regex.Pattern.compile("\\bCONCURRENTLY\\b", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    @Override
+    public String ddlSessionSql(String sql) {
+        return sql != null && CONCURRENTLY.matcher(sql).find() ? "SET lock_timeout = 0" : null;
+    }
+
     @Override
     public String guardrailMessage(java.sql.SQLException e) {
         // 55P03 lock_not_available: raised when lock_timeout expires.

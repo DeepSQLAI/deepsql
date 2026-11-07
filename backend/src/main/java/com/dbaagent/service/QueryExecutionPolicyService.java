@@ -95,7 +95,9 @@ public class QueryExecutionPolicyService {
             + "|(?:CREATE|ALTER|DROP|RENAME)\\s+(?:USER|ROLE)|ALTER\\s+SYSTEM"
             + "|RESET\\s+(?:MASTER|REPLICA|SLAVE|BINARY|PERSIST)"
             + "|CHANGE\\s+(?:MASTER|REPLICATION)|(?:START|STOP)\\s+(?:SLAVE|REPLICA|GROUP_REPLICATION)"
-            + "|SET\\s+(?:PASSWORD|ROLE|DEFAULT\\s+ROLE))\\b",
+            // Postgres also takes SESSION/LOCAL before ROLE, and SESSION AUTHORIZATION:
+            // a role switch left on a pooled connection is inherited by the next borrower.
+            + "|SET\\s+(?:(?:SESSION|LOCAL)\\s+)?(?:PASSWORD|ROLE|DEFAULT\\s+ROLE|AUTHORIZATION|SESSION\\s+AUTHORIZATION))\\b",
         Pattern.CASE_INSENSITIVE
     );
     // Any SET that reaches global or persisted scope, anywhere in its assignment list
@@ -103,7 +105,10 @@ public class QueryExecutionPolicyService {
     // binary logging for the session — replicas would silently diverge.
     private static final Pattern SET_PREFIX_PATTERN = Pattern.compile("^SET\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern SET_BEYOND_SESSION_PATTERN = Pattern.compile(
-        "\\b(?:GLOBAL|PERSIST|PERSIST_ONLY)\\b|@@(?:GLOBAL|PERSIST|PERSIST_ONLY)\\.|\\bsql_log_bin\\b",
+        "\\b(?:GLOBAL|PERSIST|PERSIST_ONLY)\\b|@@(?:GLOBAL|PERSIST|PERSIST_ONLY)\\.|\\bsql_log_bin\\b"
+            // The GUC spellings of a role/identity switch (`SET role = x`, `SET LOCAL role TO x`)
+            // and Postgres trigger/FK suppression. Not preceded by @ — `SET @role = 1` is a variable.
+            + "|(?<![@\\w$.])(?:role|session_authorization|session_replication_role)\\s*(?:=|\\bTO\\b)",
         Pattern.CASE_INSENSITIVE
     );
     private static final Pattern DDL_VERB_PATTERN = Pattern.compile(
@@ -165,6 +170,20 @@ public class QueryExecutionPolicyService {
             }
             if (isAdministrativeStatement(statement)) {
                 throw QueryExecutionPolicyException.adminStatementBlocked();
+            }
+            // The dangerous-function denylist used to run only for MCP and dashboards, so the
+            // Editor ran `SELECT dblink_exec(...)` (escapes the read-only session) and
+            // `SELECT pg_terminate_backend(pid)` (disconnects production) as plain reads.
+            // Scrubbed with the same linear passes as detectHiddenWrite: the MCP guard's old
+            // regex comment strip was quadratic on an unterminated /*.
+            String dangerousFunction = McpSqlGuardService.dangerousFunctionIn(
+                stripComments(stripQuotedLiterals(statement == null ? "" : statement)));
+            if (dangerousFunction != null) {
+                throw QueryExecutionPolicyException.unsafeMutation(
+                    "DeepSQL does not run " + dangerousFunction + "(): it reaches outside the query "
+                        + "(other sessions, other connections, or the server's files). Use your database admin tooling.",
+                    "UNKNOWN"
+                );
             }
         }
 
@@ -268,8 +287,8 @@ public class QueryExecutionPolicyService {
                 throw QueryExecutionPolicyException.unsafeMutation(blocking.getMessage(), mutation.queryType());
             }
             if (!attempts.equals(List.of(statements.getFirst()))) {
-                confirmationNotes.add("DeepSQL will run this online: ALGORITHM=INSTANT first, then ALGORITHM=INPLACE "
-                    + "with LOCK=NONE. If neither can run without blocking writes, it stops and changes nothing.");
+                confirmationNotes.add("DeepSQL will run this in a mode that does not block writes to the table. "
+                    + "If the database cannot make this change that way, DeepSQL stops and changes nothing.");
             }
             confirmationNotes.add("If the table is busy, DeepSQL gives up after waiting 5 seconds for its lock "
                 + "instead of queueing every other write to the table behind this change.");
@@ -581,28 +600,9 @@ public class QueryExecutionPolicyService {
     // matched a lazy wildcard between block-comment delimiters and backtracked
     // quadratically on an unterminated block comment: 96KB of input cost ~14s
     // of CPU.
+    /** Linear; one implementation shared with the MCP / dashboard guard. */
     private String stripComments(String sql) {
-        StringBuilder out = new StringBuilder(sql.length());
-        int i = 0;
-        int len = sql.length();
-        while (i < len) {
-            char c = sql.charAt(i);
-            if (c == '/' && i + 1 < len && sql.charAt(i + 1) == '*') {
-                int end = sql.indexOf("*/", i + 2);
-                i = end < 0 ? len : end + 2;
-                out.append(' ');
-                continue;
-            }
-            if (c == '-' && i + 1 < len && sql.charAt(i + 1) == '-') {
-                int nl = sql.indexOf('\n', i + 2);
-                i = nl < 0 ? len : nl;
-                out.append(' ');
-                continue;
-            }
-            out.append(c);
-            i++;
-        }
-        return out.toString();
+        return McpSqlGuardService.stripSqlComments(sql);
     }
 
     private boolean isUseStatement(String sql) {

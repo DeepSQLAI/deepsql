@@ -667,11 +667,19 @@ public class QueryExecutorService {
             // pool baseline in the finally below, because session variables outlive the
             // borrow and would otherwise reach the next borrower, background jobs included.
             // Fails closed: nothing runs without them.
+            //
+            // DeepSQL's own INTERNAL/SCHEDULED SQL keeps only the pool baseline (lock
+            // guards from connectionInitSql): it is trusted code with its own timeouts.
+            // A guard identical to the baseline is not re-sent — the reset below restores
+            // the baseline after every run, so it is already in place.
             QueryExecutionProvider executionProvider = providerRegistry.getDialect(connRequest.getDbType()).queryExecution();
             String serverVersion = serverVersion(connection);
-            String guardSql = executionProvider.statementGuardSql(effectiveTimeout, serverVersion);
+            boolean trustedOrigin = isTrustedOrigin(executionContext);
+            String guardSql = trustedOrigin ? null : executionProvider.statementGuardSql(effectiveTimeout, serverVersion);
             String tag = actorTag(executionContext);
-            applyGuard(connection, guardSql);
+            if (guardSql != null && !guardSql.equals(executionProvider.connectionGuardSql())) {
+                applyGuard(connection, guardSql);
+            }
             try {
 
             // Execute all preamble statements (SET @var, USE db, etc.) on the same connection
@@ -743,6 +751,10 @@ public class QueryExecutorService {
                 } catch (IllegalArgumentException blocking) {
                     throw QueryExecutionPolicyException.unsafeMutation(
                         blocking.getMessage(), policyDecision.primaryQueryType());
+                }
+                String ddlSession = policyDecision.mutating() ? executionProvider.ddlSessionSql(finalQuery) : null;
+                if (ddlSession != null) {
+                    applyGuard(connection, ddlSession);
                 }
                 boolean hasResultSet = false;
                 for (int attempt = 0; attempt < attempts.size(); attempt++) {
@@ -837,7 +849,12 @@ public class QueryExecutorService {
                 }
             }
             } finally {
-                resetGuard(connection, executionProvider.statementGuardResetSql(serverVersion), connectionId);
+                // Always for user and agent SQL, even a lone SELECT: Postgres
+                // `SELECT set_config('lock_timeout', '0', false)` is a read that changes
+                // the session. Trusted origins only when they sent preambles.
+                if (!trustedOrigin || statements.size() > 1) {
+                    resetGuard(connection, executionProvider.statementGuardResetSql(serverVersion), connectionId);
+                }
             }
         } finally {
             runningQueryRegistry.unregister(queryRequest.getExecutionId());
@@ -889,21 +906,29 @@ public class QueryExecutorService {
         }
     }
 
-    /** Hard ceiling on rows returned to a person or agent, whatever the request asks for. */
-    static final int MAX_RESULT_ROWS = 10_000;
+    /** Rows returned to a person or agent that asked for no limit. */
+    static final int DEFAULT_RESULT_ROWS = 10_000;
+    /** Ceiling on an explicit request; matches the Editor's CSV export (EXPORT_ROW_LIMIT). */
+    static final int MAX_RESULT_ROWS = 100_000;
 
     /**
      * The row cap was client-controlled: a request without {@code limit} streamed the
-     * whole table into memory. People and agents now get at most {@link #MAX_RESULT_ROWS};
-     * DeepSQL's own background jobs keep what they ask for.
+     * whole table into memory. People and agents now get {@link #DEFAULT_RESULT_ROWS} unless
+     * they ask, and never more than {@link #MAX_RESULT_ROWS}. DeepSQL's own background jobs
+     * keep what they ask for.
      */
     static int effectiveRowLimit(Integer requested, QueryExecutionContext context) {
         int asked = requested != null && requested > 0 ? requested : 0;
-        QueryExecutionOrigin origin = context == null ? null : context.origin();
-        if (origin == QueryExecutionOrigin.INTERNAL || origin == QueryExecutionOrigin.SCHEDULED || origin == null) {
+        if (isTrustedOrigin(context)) {
             return asked;
         }
-        return asked > 0 ? Math.min(asked, MAX_RESULT_ROWS) : MAX_RESULT_ROWS;
+        return asked > 0 ? Math.min(asked, MAX_RESULT_ROWS) : DEFAULT_RESULT_ROWS;
+    }
+
+    /** DeepSQL's own jobs, not a person or an agent. */
+    private static boolean isTrustedOrigin(QueryExecutionContext context) {
+        QueryExecutionOrigin origin = context == null ? null : context.origin();
+        return origin == null || origin == QueryExecutionOrigin.INTERNAL || origin == QueryExecutionOrigin.SCHEDULED;
     }
 
     /**

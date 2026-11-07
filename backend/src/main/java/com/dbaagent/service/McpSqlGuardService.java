@@ -12,8 +12,6 @@ public class McpSqlGuardService {
 
     private static final Pattern FIRST_KEYWORD_PATTERN = Pattern.compile("^([A-Za-z]+)");
     private static final Pattern EXPLAIN_ANALYZE_PATTERN = Pattern.compile("\\bANALYZ[EA]\\b", Pattern.CASE_INSENSITIVE);
-    private static final Pattern BLOCK_COMMENT_PATTERN = Pattern.compile("/\\*[\\s\\S]*?\\*/");
-    private static final Pattern LINE_COMMENT_PATTERN = Pattern.compile("(?m)--.*$");
     private static final Pattern SINGLE_QUOTE_STRING_PATTERN = Pattern.compile("'(?:''|[^'])*'");
     private static final Pattern DOUBLE_QUOTE_STRING_PATTERN = Pattern.compile("\"(?:[\"\"]|[^\"])*\"");
     private static final Pattern BACKTICK_STRING_PATTERN = Pattern.compile("`(?:``|[^`])*`");
@@ -72,7 +70,9 @@ public class McpSqlGuardService {
         "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_stat_file",
         "lo_import", "lo_export",
         // MySQL equivalents
-        "load_file"
+        "load_file",
+        // reach into other sessions: a "read" that disconnects or cancels production work
+        "pg_terminate_backend", "pg_cancel_backend"
     );
 
     private static final String DANGEROUS_FUNCTION_ALTERNATION =
@@ -166,7 +166,16 @@ public class McpSqlGuardService {
      * hide or falsely trigger a match.
      */
     String containsDangerousFunction(String statement) {
-        var matcher = DANGEROUS_FUNCTION_CALL.matcher(normalizeSqlForInspection(statement));
+        return dangerousFunctionIn(normalizeSqlForInspection(statement));
+    }
+
+    /**
+     * The first dangerous function call in SQL whose comments and literals the caller has
+     * already stripped, or null. Shared with {@link QueryExecutionPolicyService} so the
+     * denylist has one definition across the Editor, MCP and dashboard surfaces.
+     */
+    static String dangerousFunctionIn(String scrubbedSql) {
+        var matcher = DANGEROUS_FUNCTION_CALL.matcher(String.valueOf(scrubbedSql));
         return matcher.find() ? matcher.group(1).toLowerCase(Locale.ROOT) : null;
     }
 
@@ -368,9 +377,35 @@ public class McpSqlGuardService {
             .toList();
     }
 
-    private String stripSqlComments(String sql) {
+    /**
+     * Linear scan, not a regex. {@code /\*[\s\S]*?\*}{@code /} rescans to the end of input
+     * from every unterminated {@code /*}: {@code "a/*"} repeated 32k times took minutes of
+     * CPU on a request thread — reachable from MCP and the public dashboard query endpoint.
+     * An unterminated block comment runs to the end, as the database would treat it.
+     */
+    static String stripSqlComments(String sql) {
         String input = String.valueOf(sql);
-        return LINE_COMMENT_PATTERN.matcher(BLOCK_COMMENT_PATTERN.matcher(input).replaceAll(" ")).replaceAll(" ");
+        StringBuilder out = new StringBuilder(input.length());
+        int i = 0;
+        int len = input.length();
+        while (i < len) {
+            char c = input.charAt(i);
+            if (c == '/' && i + 1 < len && input.charAt(i + 1) == '*') {
+                int end = input.indexOf("*/", i + 2);
+                i = end < 0 ? len : end + 2;
+                out.append(' ');
+                continue;
+            }
+            if (c == '-' && i + 1 < len && input.charAt(i + 1) == '-') {
+                int nl = input.indexOf('\n', i + 2);
+                i = nl < 0 ? len : nl;
+                out.append(' ');
+                continue;
+            }
+            out.append(c);
+            i++;
+        }
+        return out.toString();
     }
 
     private String stripSqlStringLiterals(String sql) {

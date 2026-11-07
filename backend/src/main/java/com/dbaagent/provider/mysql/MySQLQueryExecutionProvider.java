@@ -154,8 +154,21 @@ public class MySQLQueryExecutionProvider implements QueryExecutionProvider {
     private static final Pattern LOCK_CLAUSE = Pattern.compile(
         "\\bLOCK\\s*=?\\s*(DEFAULT|NONE|SHARED|EXCLUSIVE)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern PARTITION_CLAUSE = Pattern.compile("\\bPARTITION(?:S|ING)?\\b", Pattern.CASE_INSENSITIVE);
+    // One left-to-right pass over literals, identifiers and comments: at each position the
+    // first alternative that starts there wins, so a quote inside a comment, or a comment
+    // marker inside a string, cannot desynchronise the two. A clause inside a comment is not
+    // a clause — `-- , ALGORITHM=INPLACE, LOCK=NONE` used to read as a real one. MySQL's
+    // `--` comment needs whitespace after it (`--1` is arithmetic).
+    // Every alternative also accepts end-of-input as its close, with possessive repetition:
+    // an unterminated quote or comment is consumed once, to the end, instead of being
+    // rescanned from every opening marker (a lazy /\*.*?\*/ is quadratic on "a/*" x 32k).
     private static final Pattern QUOTED = Pattern.compile(
-        "'(?:[^'\\\\]|\\\\.|'')*'|\"(?:[^\"\\\\]|\\\\.)*\"|`[^`]*`");
+        "'(?:[^'\\\\]|\\\\.|'')*+(?:'|$)"
+            + "|\"(?:[^\"\\\\]|\\\\.)*+(?:\"|$)"
+            + "|`[^`]*+(?:`|$)"
+            + "|/\\*(?:[^*]|\\*(?!/))*+(?:\\*/|$)"
+            + "|--(?=\\s|$)[^\\n]*+"
+            + "|#[^\\n]*+");
 
     private static final int ER_LOCK_WAIT_TIMEOUT = 1205;
     private static final int ER_UPDATE_WITHOUT_KEY_IN_SAFE_MODE = 1175;
@@ -186,13 +199,21 @@ public class MySQLQueryExecutionProvider implements QueryExecutionProvider {
             return guard;
         }
         int clientMs = timeoutSeconds > 0 ? timeoutSeconds * 1000 : PRIMARY_READ_LIMIT_MS;
-        return guard + ", max_execution_time = IF(@@global.read_only, "
+        // Aurora readers report read_only=0 but innodb_read_only=1; either marks a replica.
+        return guard + ", max_execution_time = IF(@@global.read_only OR @@global.innodb_read_only, "
             + clientMs + ", LEAST(" + clientMs + ", " + PRIMARY_READ_LIMIT_MS + "))";
     }
 
+    /**
+     * Restores the guard variables plus the session settings a user's preamble can use to
+     * weaken the next borrower's writes (FK checks, strict mode). ponytail: an explicit list,
+     * not COM_RESET_CONNECTION — MySQL has no SQL form of it, and the driver-level reset
+     * re-authenticates on every run. Other session variables still carry over, as before.
+     */
     @Override
     public String statementGuardResetSql(String serverVersion) {
         return "SET SESSION " + LOCK_GUARD + ", sql_safe_updates = DEFAULT"
+            + ", sql_mode = DEFAULT, foreign_key_checks = DEFAULT, unique_checks = DEFAULT, time_zone = DEFAULT"
             + (isMariaDb(serverVersion) ? "" : ", max_execution_time = DEFAULT");
     }
 
@@ -209,7 +230,7 @@ public class MySQLQueryExecutionProvider implements QueryExecutionProvider {
         while (base.endsWith(";")) {
             base = base.substring(0, base.length() - 1).strip();
         }
-        String clauses = QUOTED.matcher(base).replaceAll("''");
+        String clauses = QUOTED.matcher(base).replaceAll(" ");
         String algorithm = clauseValue(ALGORITHM_CLAUSE, clauses);
         String lock = clauseValue(LOCK_CLAUSE, clauses);
 
