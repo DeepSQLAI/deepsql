@@ -33,11 +33,18 @@ API_KEY="${DEEPSQL_CHAT_API_KEY:-${AZURE_OPENAI_KEY:-}}"
 ENDPOINT="${DEEPSQL_CHAT_ENDPOINT:-${AZURE_OPENAI_ENDPOINT:-}}"
 MODEL="${DEEPSQL_CHAT_MODEL:-gpt-5.4}"
 
+# Keyless start: allow the agent to start without an LLM key. It will serve
+# health endpoints but agent operations will fail with a clear message.
+KEYLESS_MODE=0
 if [[ -z "$API_KEY" ]]; then
-  log "ERROR: DEEPSQL_CHAT_API_KEY (or AZURE_OPENAI_KEY) must be set."
-  exit 1
+  log "WARNING: No LLM key configured. Agent will start in degraded mode."
+  log "         Configure DEEPSQL_LLM_API_KEY and restart to enable AI features."
+  KEYLESS_MODE=1
+  # Use placeholder values so the runtime doesn't crash on startup.
+  API_KEY="not-configured"
+  ENDPOINT="${ENDPOINT:-https://api.openai.com/v1}"
 fi
-if [[ -z "$ENDPOINT" ]]; then
+if [[ -z "$ENDPOINT" && "$KEYLESS_MODE" -eq 0 ]]; then
   log "ERROR: DEEPSQL_CHAT_ENDPOINT (or AZURE_OPENAI_ENDPOINT) must be set."
   exit 1
 fi
@@ -45,6 +52,8 @@ if [[ -z "${AGENT_PROVISION_SECRET:-}" ]]; then
   log "ERROR: AGENT_PROVISION_SECRET must be set (shared with the backend)."
   exit 1
 fi
+
+export DEEPSQL_KEYLESS_MODE="$KEYLESS_MODE"
 
 if [[ ! -x "$VENV_PY" ]]; then
   log "ERROR: agent runtime venv missing at $VENV_PY"

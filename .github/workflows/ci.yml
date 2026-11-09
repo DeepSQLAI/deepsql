@@ -64,6 +64,43 @@ jobs:
       - name: Syntax-check MCP sources
         run: find mcp -name '*.js' -not -path '*/node_modules/*' -print0 | xargs -0 -n1 node --check
 
+  shellcheck:
+    name: shellcheck (installer scripts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Lint installer scripts
+        run: |
+          shellcheck --severity=warning \
+            scripts/self-host/install.sh \
+            scripts/self-host/remote-install.sh \
+            scripts/self-host/bootstrap-server.sh \
+            scripts/self-host/uninstall.sh \
+            scripts/self-host/status.sh \
+            scripts/self-host/smoke-test.sh
+
+  installer-args:
+    name: installer args smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: install.sh --help exits 0
+        run: ./scripts/self-host/install.sh --help
+      - name: install.sh --version exits 0
+        run: ./scripts/self-host/install.sh --version
+      - name: remote-install.sh --help exits 0
+        run: ./scripts/self-host/remote-install.sh --help
+      - name: remote-install.sh --version exits 0
+        run: ./scripts/self-host/remote-install.sh --version
+      - name: Unknown arg exits non-zero
+        run: |
+          if ./scripts/self-host/install.sh --unknown-arg 2>/dev/null; then
+            echo "Expected non-zero exit for unknown arg"
+            exit 1
+          fi
+
   compose-build:
     name: docker compose build
     runs-on: ubuntu-latest
