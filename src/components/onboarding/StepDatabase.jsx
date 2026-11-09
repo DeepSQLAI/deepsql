@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Database, CheckCircle, XCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Database, CheckCircle, XCircle, Loader2, ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
 import { connectionAPI } from '@/lib/api/client'
 
 const DB_TYPES = [
@@ -8,6 +8,19 @@ const DB_TYPES = [
 ]
 
 const DEFAULT_PORTS = { postgres: '5432', mysql: '3306' }
+
+// Check if demo_shop connection already exists
+async function checkDemoExists() {
+  try {
+    const connections = await connectionAPI.getConnections()
+    return connections.some(c => 
+      c.name?.toLowerCase().includes('demo') || 
+      c.database?.toLowerCase() === 'demo_shop'
+    )
+  } catch {
+    return false
+  }
+}
 
 export default function StepDatabase({ data, onUpdate }) {
   const [form, setForm] = useState({
@@ -22,6 +35,52 @@ export default function StepDatabase({ data, onUpdate }) {
   const [testState, setTestState]   = useState('idle') // idle | testing | ok | error
   const [testError, setTestError]   = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [demoExists, setDemoExists] = useState(false)
+  const [loadingDemo, setLoadingDemo] = useState(false)
+
+  // Check on mount if demo connection already exists
+  useEffect(() => {
+    checkDemoExists().then(setDemoExists)
+  }, [])
+
+  // Use the bundled demo database (connects to demo_shop with read-only role)
+  async function useDemo() {
+    setLoadingDemo(true)
+    setTestState('testing')
+    setTestError('')
+    
+    const demoForm = {
+      dbType: 'postgres',
+      host: 'localhost',
+      port: '5432',
+      database: 'demo_shop',
+      username: 'deepsql_demo',
+      password: 'deepsql_demo_password',
+      sslMode: 'prefer',
+    }
+    
+    setForm(demoForm)
+    
+    try {
+      await connectionAPI.testConnection({
+        dbType: demoForm.dbType,
+        host: demoForm.host,
+        port: parseInt(demoForm.port),
+        database: demoForm.database,
+        username: demoForm.username,
+        password: demoForm.password,
+        sslMode: demoForm.sslMode,
+      })
+      setTestState('ok')
+      onUpdate({ ...demoForm, tested: true, isDemo: true })
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || 'Demo database not available'
+      setTestError(msg)
+      setTestState('error')
+    } finally {
+      setLoadingDemo(false)
+    }
+  }
 
   function update(field, value) {
     const next = { ...form, [field]: value }
@@ -63,6 +122,61 @@ export default function StepDatabase({ data, onUpdate }) {
         <p className="mt-2 text-sm text-gray-500">
           DeepSQL reads metadata only — it never modifies your data.
         </p>
+      </div>
+
+      {/* Demo Database Option - shown first as the recommended quick start */}
+      {!demoExists && (
+        <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <div className="flex-shrink-0 w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
+              <Sparkles size={20} className="text-emerald-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-sm font-semibold text-gray-900">Try the Demo Database</h3>
+              <p className="mt-1 text-xs text-gray-600">
+                Get started instantly with our pre-configured e-commerce demo (5,000+ orders, 
+                slow queries, sample dashboards). No setup required.
+              </p>
+              <button
+                type="button"
+                onClick={useDemo}
+                disabled={loadingDemo}
+                className="mt-3 flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium 
+                  bg-emerald-600 text-white hover:bg-emerald-700 transition-all disabled:opacity-50"
+              >
+                {loadingDemo ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Connecting...
+                  </>
+                ) : (
+                  <>
+                    <Database size={14} />
+                    Use Demo Database
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {demoExists && (
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <CheckCircle size={16} className="text-green-500" />
+            <span>Demo database already connected. Add your own database below.</span>
+          </div>
+        </div>
+      )}
+
+      <div className="relative">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t border-gray-200" />
+        </div>
+        <div className="relative flex justify-center text-xs uppercase">
+          <span className="bg-white px-3 text-gray-400">Or connect your own</span>
+        </div>
       </div>
 
       {/* DB type */}

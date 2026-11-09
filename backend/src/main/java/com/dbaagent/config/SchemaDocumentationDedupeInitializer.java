@@ -47,15 +47,21 @@ public class SchemaDocumentationDedupeInitializer {
         // One transaction: a half-applied dedupe (rows deleted, index missing)
         // would silently re-accumulate duplicates until the next boot.
         new TransactionTemplate(txManager).executeWithoutResult(status -> {
-            int repointed = jdbc.update("""
-                UPDATE code_knowledge_suggestion s
-                SET applied_doc_id = l.keep_id
-                FROM (%s) l
-                WHERE s.applied_doc_id = l.id
-                """.formatted(LOSERS));
+            int repointed = 0;
+            if (tableExists(jdbc, "code_knowledge_suggestion")) {
+                repointed = jdbc.update("""
+                    UPDATE code_knowledge_suggestion s
+                    SET applied_doc_id = l.keep_id
+                    FROM (%s) l
+                    WHERE s.applied_doc_id = l.id
+                    """.formatted(LOSERS));
+            }
 
-            int embeddings = jdbc.update(
-                "DELETE FROM rag_documents WHERE id IN (SELECT id FROM (%s) l)".formatted(LOSERS));
+            int embeddings = 0;
+            if (tableExists(jdbc, "rag_documents")) {
+                embeddings = jdbc.update(
+                    "DELETE FROM rag_documents WHERE id IN (SELECT id FROM (%s) l)".formatted(LOSERS));
+            }
 
             int removed = jdbc.update(
                 "DELETE FROM schema_documentation WHERE id IN (SELECT id FROM (%s) l)".formatted(LOSERS));
